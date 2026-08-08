@@ -1,8 +1,3 @@
-*
-!.gitignore
-!AGENTS.md
-!config.toml
-!instructions/
-!instructions/**
-!rules/
-!rules/**
+.DS_Store
+/bin/
+*.tmp
