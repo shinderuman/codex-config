@@ -61,3 +61,35 @@ codex-config/
 └── .githooks/
     └── post-merge
 ```
+
+
+## Z.ai 5時間上限からの再開
+
+次のZ.ai実エラーを5時間上限として判定する。
+
+```text
+API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour. Your limit will reset at YYYY-MM-DD HH:MM:SS][...]
+```
+
+genericな429だけでは5時間上限と判定しない。
+
+停止時:
+
+```text
+STATUS: RATE_LIMITED
+LIMIT: ZAI_GLM_CODING_PLAN_5H
+PHASE: ...
+RESET_AT_CST: YYYY-MM-DD HH:MM:SS
+RESET_TIMEZONE: CST (China Standard Time, UTC+8)
+RESET_AT_RFC3339: YYYY-MM-DDTHH:MM:SS+08:00
+RESUME_AVAILABLE: true
+RESUME_COMMAND: glm-worker --resume
+```
+
+枠回復後:
+
+```sh
+glm-worker --resume
+```
+
+同じworker/reviewer sessionと保存済みphaseから再開する。

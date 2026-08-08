@@ -117,6 +117,18 @@ func printStatus(state *stateStore) error {
 	} else {
 		fmt.Println("PENDING_DECISION: no")
 	}
+
+	checkpoint, err := state.LoadResumeCheckpoint()
+	if err == nil && checkpoint.RateLimited {
+		fmt.Println("RATE_LIMITED: yes")
+		fmt.Printf("RATE_LIMIT_PHASE: %s\n", checkpoint.Phase)
+		fmt.Printf("RESET_AT_CST: %s\n", checkpoint.ResetAtCST)
+		fmt.Println("RESET_TIMEZONE: CST (China Standard Time, UTC+8)")
+		fmt.Println("RESUME_AVAILABLE: yes")
+	} else {
+		fmt.Println("RATE_LIMITED: no")
+		fmt.Println("RESUME_AVAILABLE: no")
+	}
 	return nil
 }
 
@@ -133,6 +145,7 @@ func resetState(state *stateStore) error {
 		"baseline-status",
 		"baseline-worktree.patch",
 		"baseline-index.patch",
+		resumeStateFile,
 	}
 	if err := state.Remove(names...); err != nil {
 		return err

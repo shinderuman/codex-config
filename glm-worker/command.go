@@ -11,6 +11,7 @@ const (
 	modeNewTask commandMode = iota
 	modeDecision
 	modeFix
+	modeResume
 	modeStatus
 	modeReset
 )
@@ -22,7 +23,7 @@ type command struct {
 
 func parseCommand(args []string) (command, error) {
 	if len(args) == 0 {
-		return command{}, fmt.Errorf("usage: glm-worker <instruction> | --decision <decision> | --fix <instruction> | --status | --reset")
+		return command{}, fmt.Errorf("usage: glm-worker <instruction> | --decision <decision> | --fix <instruction> | --resume | --status | --reset")
 	}
 
 	switch args[0] {
@@ -30,6 +31,11 @@ func parseCommand(args []string) (command, error) {
 		return payloadCommand(modeDecision, args, "usage: glm-worker --decision <decision>")
 	case "--fix":
 		return payloadCommand(modeFix, args, "usage: glm-worker --fix <instruction>")
+	case "--resume":
+		if len(args) != 1 {
+			return command{}, fmt.Errorf("usage: glm-worker --resume")
+		}
+		return command{Mode: modeResume}, nil
 	case "--status":
 		if len(args) != 1 {
 			return command{}, fmt.Errorf("usage: glm-worker --status")

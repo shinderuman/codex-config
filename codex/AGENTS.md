@@ -111,12 +111,21 @@ Sol Highは原則として行わない:
 - 時間が経過したこと自体は進展ではない。「まだ実行中です」だけを生成するためのGLM問い合わせ・端末確認を行わない。
 - ユーザーが「止まっていないか」「状態を確認して」等と明示的に求めた場合に限り、その時点で中間状態を確認してよい。
 - `glm-worker`が完了した場合はblocking waitが終了した結果として処理を再開し、ユーザーの追加入力を待たず可能な次工程を自動で進める。
-- `STATUS: NEEDS_SOL_DECISION`等でSol Highの判断が必要なら、このファイルの規則に従って判断して自動継続する。
 - ユーザーの判断・追加情報・許可が本当に必要な場合だけ、その時点で質問して停止する。Sol HighまたはGLMで判断可能な事項を不要にユーザーへ確認しない。
 - 最大待機時間へ到達してもプロセスが生存している場合、再調査・代替作業・重複起動をせず、再び利用可能な最大待機時間でblocking waitする。
 - 一定時間無出力であることだけを理由に失敗扱い・再実行しない。
 - 同じ依頼の`glm-worker`を重複起動しない。
 - GLM処理中にCodex自身が同じ調査・実装を代行しない。
+
+### `STATUS: RATE_LIMITED`
+
+- `STATUS: RATE_LIMITED`はZ.ai GLM Coding Planの5時間利用上限による正常な一時停止として扱い、`WORKER_ERROR`として扱わない。
+- `LIMIT: ZAI_GLM_CODING_PLAN_5H`の場合、`RESET_AT_CST`は中国標準時（CST、UTC+8）であり、日本時間として解釈しない。
+- rate limit時にworking tree、worker/reviewer session、resume stateを破棄・resetしない。
+- 新しい`glm-worker "<元依頼>"`を起動して最初からやり直さない。
+- ユーザーが「作業再開して」「続けて」「再開」等、直前のrate limit停止からの継続を指示した場合は`glm-worker --resume`を実行する。
+- `--resume`時は保存済みの同一タスク・同一phase・同一worker/reviewer sessionから継続し、元依頼をSol Highが再構成して送り直さない。
+- 利用枠がまだ回復していなければ再び`STATUS: RATE_LIMITED`になるため、その状態を保持したまま停止する。
 
 ## 8. Codex自身による編集
 

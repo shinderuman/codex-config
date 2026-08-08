@@ -21,3 +21,13 @@ func TestParseCommandNewTask(t *testing.T) {
 		t.Fatalf("unexpected command: %#v", command)
 	}
 }
+
+func TestParseCommandResume(t *testing.T) {
+	command, err := parseCommand([]string{"--resume"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command.Mode != modeResume {
+		t.Fatalf("unexpected command: %#v", command)
+	}
+}

@@ -78,9 +78,6 @@ func (r *claudeRunner) Run(role sessionRole, readOnly bool, prompt string, outpu
 	}
 
 	if runErr != nil {
-		if !ready {
-			_ = r.state.RemoveUnreadySession(role)
-		}
 		return runErr
 	}
 
