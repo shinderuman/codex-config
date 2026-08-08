@@ -1,0 +1,8 @@
+*
+!.gitignore
+!AGENTS.md
+!config.toml
+!instructions/
+!instructions/**
+!rules/
+!rules/**
