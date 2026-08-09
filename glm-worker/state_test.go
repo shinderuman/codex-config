@@ -97,21 +97,13 @@ func TestTaskStatsRecordCounters(t *testing.T) {
 	if _, err := state.StartNewTask(); err != nil {
 		t.Fatal(err)
 	}
-	if err := state.RecordModelCall(workerRole); err != nil {
-		t.Fatal(err)
-	}
-	if err := state.RecordModelCall(reviewerRole); err != nil {
-		t.Fatal(err)
-	}
-	if err := state.RecordPacketCompaction(); err != nil {
-		t.Fatal(err)
-	}
-	if err := state.RecordSolPacket(packetFromLines([]string{
+	state.RecordModelCall(workerRole)
+	state.RecordModelCall(reviewerRole)
+	state.RecordPacketCompaction()
+	state.RecordSolPacket(packetFromLines([]string{
 		"STATUS: PASS",
 		"RISK: LOW",
-	})); err != nil {
-		t.Fatal(err)
-	}
+	}))
 
 	stats, err := state.loadTaskStats()
 	if err != nil {
@@ -153,9 +145,7 @@ func TestTaskStatsLazilyInitializesLegacyTask(t *testing.T) {
 	if err := state.Write("task.id", "legacy-task"); err != nil {
 		t.Fatal(err)
 	}
-	if err := state.RecordModelCall(workerRole); err != nil {
-		t.Fatal(err)
-	}
+	state.RecordModelCall(workerRole)
 
 	stats, err := state.loadTaskStats()
 	if err != nil {

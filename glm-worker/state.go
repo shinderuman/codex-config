@@ -90,9 +90,7 @@ func (s *stateStore) Remove(names ...string) error {
 }
 
 func (s *stateStore) StartNewTask() (string, error) {
-	if err := s.ArchiveCurrentStats(); err != nil {
-		return "", err
-	}
+	s.ArchiveCurrentStats()
 	if err := s.Remove(
 		"task.id",
 		"worker.id",
@@ -111,9 +109,7 @@ func (s *stateStore) StartNewTask() (string, error) {
 	if err := s.Write("task.id", taskID); err != nil {
 		return "", err
 	}
-	if err := s.InitializeTaskStats(taskID); err != nil {
-		return "", err
-	}
+	s.InitializeTaskStats(taskID)
 	if err := s.SetTaskStatus(taskStatusActive); err != nil {
 		return "", err
 	}
@@ -152,9 +148,10 @@ func (s *stateStore) SetTaskStatus(status taskStatus) error {
 	if err := s.Write("task.status", string(status)); err != nil {
 		return err
 	}
-	return s.UpdateTaskStats(func(stats *taskStats) {
+	s.UpdateTaskStats(func(stats *taskStats) {
 		stats.Status = status
 	})
+	return nil
 }
 
 func (s *stateStore) SessionID(role sessionRole) (string, bool, error) {
@@ -211,9 +208,7 @@ func printStatus(state *stateStore) error {
 }
 
 func resetState(state *stateStore) error {
-	if err := state.ArchiveCurrentStats(); err != nil {
-		return err
-	}
+	state.ArchiveCurrentStats()
 	names := []string{
 		"task.id",
 		"task.status",

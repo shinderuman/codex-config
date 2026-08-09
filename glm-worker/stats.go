@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,6 +12,11 @@ import (
 )
 
 const currentStatsFile = "task-stats.json"
+
+// statsWarnOutはtask statsのbest-effort警告の出力先。
+// task-stats.jsonは観測用mirrorであり、task.statusが正規状態のため、
+// mirrorの失敗はworkflowを止めずこのwriterへwarningを出す。
+var statsWarnOut io.Writer = os.Stderr
 
 type taskStats struct {
 	Version                 int        `json:"version"`
@@ -33,58 +39,93 @@ type taskStats struct {
 	SolPacketBytes          int        `json:"sol_packet_bytes"`
 }
 
-func (s *stateStore) InitializeTaskStats(taskID string) error {
+func warnStatsFailure(operation string, err error) {
+	fmt.Fprintf(statsWarnOut, "WARNING: task statsの%sに失敗しました（観測用mirrorのため続行します）: %v\n", operation, err)
+}
+
+// InitializeTaskStatsは新規taskの観測用mirrorを初期化する。
+// 失敗してもtask.statusなど正規状態へ影響しないためwarningだけ出す。
+func (s *stateStore) InitializeTaskStats(taskID string) {
 	stats := taskStats{
 		Version:   1,
 		TaskID:    taskID,
 		StartedAt: time.Now().UTC(),
 		Status:    taskStatusActive,
 	}
-	return s.writeTaskStats(stats)
+	if err := s.writeTaskStats(stats); err != nil {
+		warnStatsFailure("初期化", err)
+	}
 }
 
-func (s *stateStore) UpdateTaskStats(update func(*taskStats)) error {
+// UpdateTaskStatsは観測用mirrorを読み込んで更新する。
+// task.idが無い場合は何もしない。corruptionやI/O失敗は正規状態へ影響させないため
+// warningを出し、読み込み不能ならtask.idからmirrorを再構築する。
+func (s *stateStore) UpdateTaskStats(update func(*taskStats)) {
 	stats, err := s.loadTaskStats()
-	if errors.Is(err, os.ErrNotExist) {
-		taskID, taskErr := s.Read("task.id")
-		if taskErr != nil || taskID == "" {
-			return nil
-		}
-		stats = taskStats{
-			Version:   1,
-			TaskID:    taskID,
-			StartedAt: time.Now().UTC(),
-			Status:    s.TaskStatus(),
-		}
-		err = nil
-	}
 	if err != nil {
-		return err
+		stats, err = s.recoverTaskStats(err)
+		if err != nil {
+			return
+		}
 	}
 	update(&stats)
-	return s.writeTaskStats(stats)
+	if err := s.writeTaskStats(stats); err != nil {
+		warnStatsFailure("更新", err)
+	}
 }
 
-func (s *stateStore) ArchiveCurrentStats() error {
+// recoverTaskStatsはloadTaskStatsの失敗からmirrorを復旧する。
+// ファイル不在でtask.idも無い場合は記録対象がないので何もしない。
+// corruption・I/O失敗の場合はtask.idから再構築し、内容は失われるがmirrorは継続利用できる。
+func (s *stateStore) recoverTaskStats(loadErr error) (taskStats, error) {
+	if errors.Is(loadErr, os.ErrNotExist) {
+		return s.bootstrapTaskStats()
+	}
+	warnStatsFailure("読み込み", loadErr)
+	return s.bootstrapTaskStats()
+}
+
+func (s *stateStore) bootstrapTaskStats() (taskStats, error) {
+	taskID, taskErr := s.Read("task.id")
+	if taskErr != nil || taskID == "" {
+		return taskStats{}, fmt.Errorf("task.idがありません")
+	}
+	return taskStats{
+		Version:   1,
+		TaskID:    taskID,
+		StartedAt: time.Now().UTC(),
+		Status:    s.TaskStatus(),
+	}, nil
+}
+
+// ArchiveCurrentStatsは現在taskのmirrorをstats履歴へ移動する。
+// 読み込み不能なmirrorを履歴へ持ち込まないよう、corruption時は移動をskipする。
+// すべての失敗はbest-effortでwarningだけ出し、新規task開始や--resetを止めない。
+func (s *stateStore) ArchiveCurrentStats() {
 	stats, err := s.loadTaskStats()
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return
 	}
 	if err != nil {
-		return err
+		warnStatsFailure("archive読み込み", err)
+		return
 	}
 
 	now := time.Now().UTC()
 	stats.ArchivedAt = &now
 	data, err := json.MarshalIndent(stats, "", "  ")
 	if err != nil {
-		return fmt.Errorf("task statsをJSON化できません: %w", err)
+		warnStatsFailure("archive JSON化", err)
+		return
 	}
 	historyPath := filepath.Join(s.dir, "stats", stats.TaskID+".json")
 	if err := writeFileAtomic(historyPath, append(data, '\n'), 0o600); err != nil {
-		return fmt.Errorf("task statsをarchiveできません: %w", err)
+		warnStatsFailure("archive書き込み", err)
+		return
 	}
-	return s.Remove(currentStatsFile)
+	if err := s.Remove(currentStatsFile); err != nil {
+		warnStatsFailure("archive後削除", err)
+	}
 }
 
 func (s *stateStore) loadTaskStats() (taskStats, error) {
@@ -107,8 +148,8 @@ func (s *stateStore) writeTaskStats(stats taskStats) error {
 	return writeFileAtomic(s.Path(currentStatsFile), append(data, '\n'), 0o600)
 }
 
-func (s *stateStore) RecordModelCall(role sessionRole) error {
-	return s.UpdateTaskStats(func(stats *taskStats) {
+func (s *stateStore) RecordModelCall(role sessionRole) {
+	s.UpdateTaskStats(func(stats *taskStats) {
 		stats.ModelCalls++
 		if role == reviewerRole {
 			stats.ReviewerCalls++
@@ -118,8 +159,8 @@ func (s *stateStore) RecordModelCall(role sessionRole) error {
 	})
 }
 
-func (s *stateStore) RecordCommand(mode commandMode) error {
-	return s.UpdateTaskStats(func(stats *taskStats) {
+func (s *stateStore) RecordCommand(mode commandMode) {
+	s.UpdateTaskStats(func(stats *taskStats) {
 		switch mode {
 		case modeDecision:
 			stats.DecisionCommands++
@@ -131,26 +172,26 @@ func (s *stateStore) RecordCommand(mode commandMode) error {
 	})
 }
 
-func (s *stateStore) RecordAutoFix() error {
-	return s.UpdateTaskStats(func(stats *taskStats) {
+func (s *stateStore) RecordAutoFix() {
+	s.UpdateTaskStats(func(stats *taskStats) {
 		stats.AutoFixRounds++
 	})
 }
 
-func (s *stateStore) RecordRateLimit() error {
-	return s.UpdateTaskStats(func(stats *taskStats) {
+func (s *stateStore) RecordRateLimit() {
+	s.UpdateTaskStats(func(stats *taskStats) {
 		stats.RateLimits++
 	})
 }
 
-func (s *stateStore) RecordPacketCompaction() error {
-	return s.UpdateTaskStats(func(stats *taskStats) {
+func (s *stateStore) RecordPacketCompaction() {
+	s.UpdateTaskStats(func(stats *taskStats) {
 		stats.PacketCompactions++
 	})
 }
 
-func (s *stateStore) RecordSolPacket(value packet) error {
-	return s.UpdateTaskStats(func(stats *taskStats) {
+func (s *stateStore) RecordSolPacket(value packet) {
+	s.UpdateTaskStats(func(stats *taskStats) {
 		stats.SolPacketBytes += value.ByteSize()
 		switch value.Status() {
 		case "NEEDS_SOL_DECISION":
@@ -204,6 +245,8 @@ func printStats(state *stateStore) error {
 	return nil
 }
 
+// allTaskStatsは--stats専用の集計を行う。
+// 明示操作のため、読み込み失敗はエラーとして呼び出し元へ返す。
 func (s *stateStore) allTaskStats() ([]taskStats, error) {
 	result := make([]taskStats, 0)
 	historyPaths, err := filepath.Glob(filepath.Join(s.dir, "stats", "*.json"))

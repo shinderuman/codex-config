@@ -95,9 +95,7 @@ func (w *workflow) executeDecision(decision string) error {
 	if err := w.state.SetTaskStatus(taskStatusActive); err != nil {
 		return err
 	}
-	if err := w.state.RecordCommand(modeDecision); err != nil {
-		return err
-	}
+	w.state.RecordCommand(modeDecision)
 
 	prompt := decisionPrompt(request, decision)
 	checkpoint := resumeCheckpoint{
@@ -137,9 +135,7 @@ func (w *workflow) executeExplicitFix(instruction string) error {
 	if err := w.state.SetTaskStatus(taskStatusActive); err != nil {
 		return err
 	}
-	if err := w.state.RecordCommand(modeFix); err != nil {
-		return err
-	}
+	w.state.RecordCommand(modeFix)
 	prompt := explicitFixPrompt(request, decision, review, instruction)
 	checkpoint := resumeCheckpoint{
 		Stage:          resumeStageWorker,
@@ -173,9 +169,7 @@ func (w *workflow) executeResume() error {
 	if err := w.state.SetTaskStatus(taskStatusActive); err != nil {
 		return err
 	}
-	if err := w.state.RecordCommand(modeResume); err != nil {
-		return err
-	}
+	w.state.RecordCommand(modeResume)
 	checkpoint.Prompt = resumePrompt(checkpoint)
 	checkpoint.RateLimited = false
 	checkpoint.ResetAtCST = ""
@@ -330,9 +324,7 @@ func (w *workflow) handleReviewResult(
 			ReviewNumber:   reviewNumber,
 			AutoFixes:      nextAutoFixes,
 		}
-		if err := w.state.RecordAutoFix(); err != nil {
-			return err
-		}
+		w.state.RecordAutoFix()
 
 		fixPacket, err := w.runModel(checkpoint)
 		if err != nil {
@@ -399,9 +391,7 @@ func (w *workflow) runModel(checkpoint resumeCheckpoint) (packet, error) {
 	if err := w.state.SaveResumeCheckpoint(checkpoint); err != nil {
 		return packet{}, err
 	}
-	if err := w.state.RecordModelCall(checkpoint.Role); err != nil {
-		return packet{}, err
-	}
+	w.state.RecordModelCall(checkpoint.Role)
 
 	runErr := w.runner.Run(
 		checkpoint.Role,
@@ -427,9 +417,7 @@ func (w *workflow) runModel(checkpoint resumeCheckpoint) (packet, error) {
 			if err := w.state.SetTaskStatus(taskStatusRateLimited); err != nil {
 				return packet{}, err
 			}
-			if err := w.state.RecordRateLimit(); err != nil {
-				return packet{}, err
-			}
+			w.state.RecordRateLimit()
 
 			return packet{}, zaiRateLimitError{
 				Phase: checkpoint.Phase,
@@ -453,9 +441,7 @@ func (w *workflow) runModel(checkpoint resumeCheckpoint) (packet, error) {
 	result, err := parseLastPacket(outputPath)
 	if err != nil {
 		if isPacketConstraintError(err) && !checkpoint.PacketCompacted {
-			if err := w.state.RecordPacketCompaction(); err != nil {
-				return packet{}, err
-			}
+			w.state.RecordPacketCompaction()
 			compactCheckpoint := checkpoint
 			compactCheckpoint.Phase += "-packet-compact"
 			compactCheckpoint.Prompt = packetCompressionPrompt(err.Error())
@@ -487,9 +473,7 @@ func workerError(phase string, outputPath string, runErr error) error {
 }
 
 func (w *workflow) emitPacket(value packet) error {
-	if err := w.state.RecordSolPacket(value); err != nil {
-		return err
-	}
+	w.state.RecordSolPacket(value)
 	printPacket(value)
 	return nil
 }

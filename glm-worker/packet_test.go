@@ -28,6 +28,7 @@ TEST_EVIDENCE: pass
 ISSUES: none
 RESIDUAL_RISK: review required
 TARGETS: foo.go:Run
+SOL_QUESTION: architecture direction
 PACKET_END
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -94,5 +95,27 @@ func TestParseLastPacketRejectsMissingPacket(t *testing.T) {
 
 	if _, err := parseLastPacket(path); err == nil || !isPacketConstraintError(err) {
 		t.Fatalf("packet欠落をpacket制約違反として拒否する必要があります: %v", err)
+	}
+}
+
+func TestParseLastPacketRejectsNeedsSolReviewWithoutSolQuestion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "output.txt")
+	content := `PACKET_BEGIN
+STATUS: NEEDS_SOL_REVIEW
+RISK: HIGH
+SUMMARY: review
+REQUIREMENT_COVERAGE: covered
+TEST_EVIDENCE: pass
+ISSUES: none
+RESIDUAL_RISK: review required
+TARGETS: foo.go:Run
+PACKET_END
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := parseLastPacket(path); err == nil || !isPacketConstraintError(err) {
+		t.Fatalf("NEEDS_SOL_REVIEWのSOL_QUESTION欠落をpacket制約違反として拒否する必要があります: %v", err)
 	}
 }
