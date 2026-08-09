@@ -23,6 +23,9 @@
 - worker途中、reviewer途中、auto-fix途中のどこで止まってもresume stateが残る。
 - `glm-worker --resume`で同じsession/phaseから継続する。
 - rate limit中にsession ID、working tree、baselineをresetしない。
+- rate limit出力にtask ID、repo root、2分の猶予を加えた自動再開時刻、重複防止keyを含める。
+- 自動再開automationは同じローカルCodexタスクへ紐づき、別worktreeを使わない。
+- wake時にtask IDと`rate-limited`状態を照合し、古い予約から`--resume`しない。
 
 
 ## GLM軽量化

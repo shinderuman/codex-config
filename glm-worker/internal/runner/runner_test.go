@@ -159,16 +159,44 @@ func TestEnvWithDefaultsPreservesExistingValues(t *testing.T) {
 
 func TestZaiRateLimitErrorIncludesResumeMetadata(t *testing.T) {
 	err := ZaiRateLimitError{
-		Phase: "reviewer-1",
+		Phase:     "reviewer-1",
+		TaskID:    "12345678-aaaa-bbbb-cccc-dddddddddddd",
+		RepoRoot:  "/repo",
+		RepoShort: "abcdef123456",
 		Limit: ZaiFiveHourLimit{
 			ResetAtCST:     "2026-08-09 22:35:58",
 			ResetAtRFC3339: "2026-08-09T22:35:58+08:00",
 		},
 	}.Error()
 
-	for _, value := range []string{"STATUS: RATE_LIMITED", "PHASE: reviewer-1", "RESET_AT_CST: 2026-08-09 22:35:58", "RESUME_COMMAND: glm-worker --resume"} {
+	for _, value := range []string{
+		"STATUS: RATE_LIMITED",
+		"PHASE: reviewer-1",
+		"TASK_ID: 12345678-aaaa-bbbb-cccc-dddddddddddd",
+		"REPO_ROOT: /repo",
+		"RESET_AT_CST: 2026-08-09 22:35:58",
+		"AUTO_RESUME_AVAILABLE: true",
+		"AUTO_RESUME_AT_RFC3339: 2026-08-09T22:37:58+08:00",
+		"AUTO_RESUME_KEY: glm-worker-resume-abcdef123456-12345678",
+		"RESUME_COMMAND: glm-worker --resume",
+	} {
 		if !strings.Contains(err, value) {
 			t.Fatalf("rate limit errorに%qがありません: %s", value, err)
+		}
+	}
+}
+
+func TestZaiRateLimitErrorDisablesAutoResumeWithoutResetTime(t *testing.T) {
+	err := ZaiRateLimitError{Phase: "worker-new"}.Error()
+	for _, value := range []string{
+		"TASK_ID: unknown",
+		"REPO_ROOT: unknown",
+		"AUTO_RESUME_AVAILABLE: false",
+		"AUTO_RESUME_AT_RFC3339: unknown",
+		"AUTO_RESUME_KEY: glm-worker-resume-unknown-repo-unknown-task",
+	} {
+		if !strings.Contains(err, value) {
+			t.Fatalf("rate limit fallbackに%qがありません: %s", value, err)
 		}
 	}
 }

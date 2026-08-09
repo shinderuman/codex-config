@@ -127,6 +127,8 @@ Sol Highは原則として行わない:
 - `LIMIT: ZAI_GLM_CODING_PLAN_5H`の場合、`RESET_AT_CST`は中国標準時（CST、UTC+8）であり、日本時間として解釈しない。
 - rate limit時にworking tree、worker/reviewer session、resume stateを破棄・resetしない。
 - 新しい`glm-worker "<元依頼>"`を起動して最初からやり直さない。
+- `AUTO_RESUME_AVAILABLE: true`の場合は`~/.codex/instructions/glm-auto-resume.md`を読み、現在のCodexタスクへ自動再開automationを作成または更新する。ユーザーの再開指示を待たない。
+- 自動再開automationを作成できない場合だけ、停止状態を保持して手動再開を案内する。
 - ユーザーが「作業再開して」「続けて」「再開」等、直前のrate limit停止からの継続を指示した場合は`glm-worker --resume`を実行する。
 - `--resume`時は保存済みの同一タスク・同一phase・同一worker/reviewer sessionから継続し、元依頼をSol Highが再構成して送り直さない。
 - 利用枠がまだ回復していなければ再び`STATUS: RATE_LIMITED`になるため、その状態を保持したまま停止する。
@@ -144,4 +146,5 @@ Sol Highは原則として行わない:
 - commit・Git履歴操作 → `~/.codex/instructions/git.md`
 - バックアップ・大容量一時データ → `~/.codex/instructions/backup.md`
 - AGENTS系ファイル変更 → `~/.codex/instructions/agents-management.md`
+- GLM rate limit自動再開 → `~/.codex/instructions/glm-auto-resume.md`
 - Codex自身が例外的にコードを直接編集 → `~/.codex/instructions/worker/`の該当ファイル

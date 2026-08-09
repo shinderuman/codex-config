@@ -11,6 +11,7 @@ import (
 const (
 	zaiFiveHourLimitCode = "1308"
 	zaiFiveHourMessage   = "Usage limit reached for 5 hour."
+	autoResumeGrace      = 2 * time.Minute
 )
 
 var zaiResetPattern = regexp.MustCompile(`Your limit will reset at ([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})`)
@@ -63,8 +64,11 @@ func DetectZaiFiveHourLimit(path string) (ZaiFiveHourLimit, bool) {
 
 // ZaiRateLimitErrorは5h上限到達を呼び出し元へ伝達する業務エラー。
 type ZaiRateLimitError struct {
-	Phase string
-	Limit ZaiFiveHourLimit
+	Phase     string
+	Limit     ZaiFiveHourLimit
+	TaskID    string
+	RepoRoot  string
+	RepoShort string
 }
 
 func (e ZaiRateLimitError) Error() string {
@@ -77,11 +81,45 @@ func (e ZaiRateLimitError) Error() string {
 	if resetAtRFC3339 == "" {
 		resetAtRFC3339 = "unknown"
 	}
+	autoResumeAvailable, autoResumeAt := autoResumeSchedule(e.Limit.ResetAtRFC3339)
+	autoResumeKey := autoResumeKey(e.RepoShort, e.TaskID)
 
 	return fmt.Sprintf(
-		"STATUS: RATE_LIMITED\nLIMIT: ZAI_GLM_CODING_PLAN_5H\nPHASE: %s\nRESET_AT_CST: %s\nRESET_TIMEZONE: CST (China Standard Time, UTC+8)\nRESET_AT_RFC3339: %s\nRESUME_AVAILABLE: true\nRESUME_COMMAND: glm-worker --resume",
+		"STATUS: RATE_LIMITED\nLIMIT: ZAI_GLM_CODING_PLAN_5H\nPHASE: %s\nTASK_ID: %s\nREPO_ROOT: %s\nRESET_AT_CST: %s\nRESET_TIMEZONE: CST (China Standard Time, UTC+8)\nRESET_AT_RFC3339: %s\nAUTO_RESUME_AVAILABLE: %t\nAUTO_RESUME_AT_RFC3339: %s\nAUTO_RESUME_KEY: %s\nRESUME_AVAILABLE: true\nRESUME_COMMAND: glm-worker --resume",
 		e.Phase,
+		valueOrUnknown(e.TaskID),
+		valueOrUnknown(e.RepoRoot),
 		resetAtCST,
 		resetAtRFC3339,
+		autoResumeAvailable,
+		autoResumeAt,
+		autoResumeKey,
 	)
+}
+
+func autoResumeSchedule(resetAtRFC3339 string) (bool, string) {
+	resetAt, err := time.Parse(time.RFC3339, resetAtRFC3339)
+	if err != nil {
+		return false, "unknown"
+	}
+	return true, resetAt.Add(autoResumeGrace).Format(time.RFC3339)
+}
+
+func autoResumeKey(repoShort string, taskID string) string {
+	if repoShort == "" {
+		repoShort = "unknown-repo"
+	}
+	if taskID == "" {
+		taskID = "unknown-task"
+	} else if len(taskID) > 8 {
+		taskID = taskID[:8]
+	}
+	return fmt.Sprintf("glm-worker-resume-%s-%s", repoShort, taskID)
+}
+
+func valueOrUnknown(value string) string {
+	if value == "" {
+		return "unknown"
+	}
+	return value
 }

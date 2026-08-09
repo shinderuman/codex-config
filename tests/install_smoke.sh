@@ -37,6 +37,7 @@ run_installer "$success_source" "$success_case"
 
 test -x "$success_case/bin/glm-worker"
 test -f "$success_case/codex/AGENTS.md"
+test -f "$success_case/codex/instructions/glm-auto-resume.md"
 test -f "$success_case/codex/rules/glm-worker.rules"
 test -f "$success_case/claude/settings.json"
 test -d "$success_case/glm-home/sessions"

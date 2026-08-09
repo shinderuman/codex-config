@@ -350,6 +350,8 @@ func TestRunModelSurfacesZaiFiveHourLimit(t *testing.T) {
 		runErr: errors.New("exit status 1"),
 	}}}
 	w := newWorkflowT(t, st, r)
+	w.config.RepoRoot = "/repo"
+	w.config.RepoShort = "testrepo1234"
 	w.temp = t.TempDir()
 
 	_, err := w.runModel(state.ResumeCheckpoint{
@@ -362,6 +364,17 @@ func TestRunModelSurfacesZaiFiveHourLimit(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "STATUS: RATE_LIMITED") {
 		t.Fatalf("rate limit errorを期待: %v", err)
+	}
+	for _, value := range []string{
+		"TASK_ID: " + st.TaskID(),
+		"REPO_ROOT: /repo",
+		"AUTO_RESUME_AVAILABLE: true",
+		"AUTO_RESUME_AT_RFC3339: 2026-07-22T14:08:34+08:00",
+		"AUTO_RESUME_KEY: glm-worker-resume-testrepo1234-" + st.TaskID()[:8],
+	} {
+		if !strings.Contains(err.Error(), value) {
+			t.Fatalf("rate limit errorに%qがありません: %v", value, err)
+		}
 	}
 
 	cp, cerr := st.LoadResumeCheckpoint()

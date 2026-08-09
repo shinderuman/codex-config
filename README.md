@@ -130,9 +130,14 @@ genericな429だけでは5時間上限と判定しない。
 STATUS: RATE_LIMITED
 LIMIT: ZAI_GLM_CODING_PLAN_5H
 PHASE: ...
+TASK_ID: ...
+REPO_ROOT: ...
 RESET_AT_CST: YYYY-MM-DD HH:MM:SS
 RESET_TIMEZONE: CST (China Standard Time, UTC+8)
 RESET_AT_RFC3339: YYYY-MM-DDTHH:MM:SS+08:00
+AUTO_RESUME_AVAILABLE: true
+AUTO_RESUME_AT_RFC3339: YYYY-MM-DDTHH:MM:SS+08:00
+AUTO_RESUME_KEY: glm-worker-resume-...
 RESUME_AVAILABLE: true
 RESUME_COMMAND: glm-worker --resume
 ```
@@ -144,6 +149,10 @@ glm-worker --resume
 ```
 
 同じworker/reviewer sessionと保存済みphaseから再開する。
+
+Codex appでthread heartbeat automationを利用できる場合は、reset時刻の2分後に現在のCodexタスクを自動でwakeする。
+wake時は同じローカルcheckoutでtask IDと`rate-limited`状態を照合してから`glm-worker --resume`を実行する。
+別worktree、reset済みtask、task IDが変わった状態では再開しない。再度rate limitになった場合は同じautomationを新しい時刻へ更新する。
 
 
 ## GLM実行の軽量化

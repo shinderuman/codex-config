@@ -437,8 +437,11 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 			w.state.RecordRateLimit()
 
 			return packet.Packet{}, runner.ZaiRateLimitError{
-				Phase: checkpoint.Phase,
-				Limit: limit,
+				Phase:     checkpoint.Phase,
+				Limit:     limit,
+				TaskID:    w.state.TaskID(),
+				RepoRoot:  w.config.RepoRoot,
+				RepoShort: w.config.RepoShort,
 			}
 		}
 
