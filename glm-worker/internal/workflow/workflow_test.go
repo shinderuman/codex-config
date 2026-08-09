@@ -22,16 +22,19 @@ type runnerStep struct {
 type scriptedRunner struct {
 	steps   []runnerStep
 	prompts []string
+	models  []string
 }
 
 func (r *scriptedRunner) Run(
 	_ state.SessionRole,
+	model string,
 	_ bool,
 	_ string,
 	prompt string,
 	outputPath string,
 ) error {
 	r.prompts = append(r.prompts, prompt)
+	r.models = append(r.models, model)
 	index := len(r.prompts) - 1
 	step := r.steps[index]
 	if step.output != "" {
@@ -44,6 +47,10 @@ func (r *scriptedRunner) Run(
 
 func implementedPacket(summary string) string {
 	return "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: " + summary + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nPACKET_END\n"
+}
+
+func implementedPacketWithRisk(summary string, risk string) string {
+	return "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: " + risk + "\nSUMMARY: " + summary + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nPACKET_END\n"
 }
 
 func passPacket() string {
@@ -86,7 +93,13 @@ func newStateStoreT(t *testing.T) *state.StateStore {
 
 func newWorkflowT(t *testing.T, st *state.StateStore, r *scriptedRunner) *Workflow {
 	t.Helper()
-	return NewWorkflow(config.AppConfig{RoutineEffort: "high", MaxAutoFixRounds: 2}, st, r, io.Discard)
+	return NewWorkflow(config.AppConfig{
+		WorkerModel:           "opus",
+		ReviewerModel:         "haiku",
+		HighRiskReviewerModel: "sonnet",
+		RoutineEffort:         "high",
+		MaxAutoFixRounds:      2,
+	}, st, r, io.Discard)
 }
 
 func currentStats(t *testing.T, st *state.StateStore) state.TaskStats {
@@ -118,6 +131,7 @@ func TestRunModelRecompactsInvalidPacketInSameRunner(t *testing.T) {
 		Stage:   state.ResumeStageWorker,
 		Phase:   "worker-new",
 		Role:    state.WorkerRole,
+		Model:   "opus",
 		Effort:  "high",
 		Prompt:  "original",
 		Request: "request",
@@ -151,6 +165,7 @@ func TestRunModelPreservesPacketCompressionPromptAcrossRateLimit(t *testing.T) {
 		Stage:          state.ResumeStageWorker,
 		Phase:          "worker-new",
 		Role:           state.WorkerRole,
+		Model:          "opus",
 		Effort:         "high",
 		Prompt:         "original implementation prompt",
 		OriginalPrompt: "original implementation prompt",
@@ -217,6 +232,25 @@ func TestExecuteNewTaskReachesPass(t *testing.T) {
 	}
 	if st.TaskStatus() != state.TaskStatusComplete {
 		t.Fatalf("status = %q", st.TaskStatus())
+	}
+	if strings.Join(r.models, ",") != "opus,haiku" {
+		t.Fatalf("models = %#v", r.models)
+	}
+}
+
+func TestHighRiskWorkerUsesHighRiskReviewer(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{steps: []runnerStep{
+		{output: implementedPacketWithRisk("done", "HIGH")},
+		{output: passPacket()},
+	}}
+	w := newWorkflowT(t, st, r)
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(r.models, ",") != "opus,sonnet" {
+		t.Fatalf("models = %#v", r.models)
 	}
 }
 
@@ -333,6 +367,9 @@ func TestAutoFixNonConvergence(t *testing.T) {
 	if st.TaskStatus() != state.TaskStatusWaitingSolReview {
 		t.Fatalf("status = %q", st.TaskStatus())
 	}
+	if strings.Join(r.models, ",") != "opus,haiku,opus,sonnet" {
+		t.Fatalf("models = %#v", r.models)
+	}
 }
 
 func TestAutoFixCanRequestSolDecision(t *testing.T) {
@@ -393,6 +430,7 @@ func TestRunModelSurfacesZaiFiveHourLimit(t *testing.T) {
 		Stage:   state.ResumeStageWorker,
 		Phase:   "worker-new",
 		Role:    state.WorkerRole,
+		Model:   "opus",
 		Effort:  "high",
 		Prompt:  "p",
 		Request: "req",
@@ -400,12 +438,13 @@ func TestRunModelSurfacesZaiFiveHourLimit(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "STATUS: RATE_LIMITED") {
 		t.Fatalf("rate limit errorを期待: %v", err)
 	}
+	taskID := st.TaskID()
 	for _, value := range []string{
-		"TASK_ID: " + st.TaskID(),
+		"TASK_ID: " + taskID,
 		"REPO_ROOT: /repo",
 		"AUTO_RESUME_AVAILABLE: true",
 		"AUTO_RESUME_AT_RFC3339: 2026-07-22T14:08:34+08:00",
-		"AUTO_RESUME_KEY: glm-worker-resume-testrepo1234-" + st.TaskID()[:8],
+		"AUTO_RESUME_KEY: glm-worker-resume-testrepo1234-" + taskID[:8],
 	} {
 		if !strings.Contains(err.Error(), value) {
 			t.Fatalf("rate limit errorに%qがありません: %v", value, err)
@@ -430,6 +469,7 @@ func TestExecuteResumeContinuesAfterRateLimit(t *testing.T) {
 		Stage:          state.ResumeStageWorker,
 		Phase:          "worker-new",
 		Role:           state.WorkerRole,
+		Model:          "opus",
 		Effort:         "high",
 		Prompt:         "p",
 		OriginalPrompt: "p",
@@ -464,6 +504,7 @@ func TestExecuteResumeRestoresRateLimitedStatusAfterRunnerError(t *testing.T) {
 		Stage:          state.ResumeStageWorker,
 		Phase:          "worker-new",
 		Role:           state.WorkerRole,
+		Model:          "opus",
 		Effort:         "high",
 		Prompt:         "p",
 		OriginalPrompt: "p",
@@ -506,6 +547,7 @@ func TestExecuteResumeContinuesReviewerStage(t *testing.T) {
 		Stage:          state.ResumeStageReview,
 		Phase:          "reviewer-1",
 		Role:           state.ReviewerRole,
+		Model:          "sonnet",
 		ReadOnly:       true,
 		Effort:         "high",
 		Prompt:         "review",
@@ -536,6 +578,9 @@ func TestExecuteResumeContinuesReviewerStage(t *testing.T) {
 	if st.TaskStatus() != state.TaskStatusComplete {
 		t.Fatalf("status = %q", st.TaskStatus())
 	}
+	if strings.Join(r.models, ",") != "sonnet" {
+		t.Fatalf("resume model = %#v", r.models)
+	}
 }
 
 func TestExecuteResumeContinuesAutoFixStage(t *testing.T) {
@@ -544,6 +589,7 @@ func TestExecuteResumeContinuesAutoFixStage(t *testing.T) {
 		Stage:          state.ResumeStageAutoFix,
 		Phase:          "worker-auto-fix-1",
 		Role:           state.WorkerRole,
+		Model:          "opus",
 		Effort:         "high",
 		Prompt:         "fix",
 		OriginalPrompt: "fix",
@@ -577,6 +623,7 @@ func TestExecuteResumeRejectsUnknownStage(t *testing.T) {
 		Stage:          state.ResumeStage("unknown"),
 		Phase:          "unknown",
 		Role:           state.WorkerRole,
+		Model:          "opus",
 		Prompt:         "prompt",
 		OriginalPrompt: "prompt",
 		RateLimited:    true,
@@ -620,7 +667,7 @@ func TestExecuteNewTaskRejectsPendingAndRateLimitedTasks(t *testing.T) {
 
 	t.Run("rate limited", func(t *testing.T) {
 		st := newStateStoreT(t)
-		if err := st.SaveResumeCheckpoint(state.ResumeCheckpoint{RateLimited: true}); err != nil {
+		if err := st.SaveResumeCheckpoint(state.ResumeCheckpoint{Model: "opus", RateLimited: true}); err != nil {
 			t.Fatal(err)
 		}
 		w := newWorkflowT(t, st, &scriptedRunner{})
@@ -641,6 +688,7 @@ func TestRunModelSurfacesWorkerError(t *testing.T) {
 		Stage:   state.ResumeStageWorker,
 		Phase:   "worker-new",
 		Role:    state.WorkerRole,
+		Model:   "opus",
 		Effort:  "high",
 		Prompt:  "p",
 		Request: "req",
@@ -650,6 +698,27 @@ func TestRunModelSurfacesWorkerError(t *testing.T) {
 	}
 	if _, cerr := st.LoadResumeCheckpoint(); cerr == nil {
 		t.Fatal("resume checkpointはクリアされる必要があります")
+	}
+}
+
+func TestRunModelSelectsModelForVersionOneCheckpoint(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{steps: []runnerStep{{output: passPacket()}}}
+	w := newWorkflowT(t, st, r)
+	w.temp = t.TempDir()
+
+	_, err := w.runModel(state.ResumeCheckpoint{
+		Stage:        state.ResumeStageReview,
+		Phase:        "reviewer-1",
+		Role:         state.ReviewerRole,
+		Prompt:       "p",
+		WorkerPacket: []string{"STATUS: IMPLEMENTED", "RISK: HIGH"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(r.models, ",") != "sonnet" {
+		t.Fatalf("model = %#v", r.models)
 	}
 }
 

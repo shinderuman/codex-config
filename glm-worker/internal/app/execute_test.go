@@ -22,16 +22,19 @@ type fakeStep struct {
 type fakeRunner struct {
 	steps   []fakeStep
 	prompts []string
+	models  []string
 }
 
 func (r *fakeRunner) Run(
 	_ state.SessionRole,
+	model string,
 	_ bool,
 	_ string,
 	prompt string,
 	outputPath string,
 ) error {
 	r.prompts = append(r.prompts, prompt)
+	r.models = append(r.models, model)
 	index := len(r.prompts) - 1
 	step := r.steps[index]
 	if step.output != "" {
@@ -57,14 +60,15 @@ func passPacketApp() string {
 func newAppConfig(t *testing.T) config.AppConfig {
 	t.Helper()
 	return config.AppConfig{
-		StateBase:        t.TempDir(),
-		RepoHash:         "apphash",
-		RepoRoot:         "/repo",
-		RepoShort:        "appshort1234",
-		RoutineEffort:    "high",
-		MaxAutoFixRounds: 2,
-		WorkerModel:      "opus",
-		ReviewerModel:    "haiku",
+		StateBase:             t.TempDir(),
+		RepoHash:              "apphash",
+		RepoRoot:              "/repo",
+		RepoShort:             "appshort1234",
+		RoutineEffort:         "high",
+		MaxAutoFixRounds:      2,
+		WorkerModel:           "opus",
+		ReviewerModel:         "haiku",
+		HighRiskReviewerModel: "sonnet",
 	}
 }
 

@@ -56,7 +56,7 @@ Sol Highは原則として行わない:
 リポジトリ固有の調査・設計案・実装・テスト・lint・build・自己レビューは原則`glm-worker "<依頼>"`へ委譲する。
 
 `glm-worker`はタスクごとにworker/reviewerのClaude Codeセッションを保持する。同一タスク内のSol判断・修正・5時間上限後の再開ではsessionを継続し、次の新規タスクでは新sessionへ切り替える。過去のGLM作業文脈をSol Highが再説明しない。
-通常workerはGLM-5.2 / high、独立reviewerはGLM-5-Turbo / highを使う。Sol判断後の継続とSolからの明示fixはGLM-5.2 / maxを使う。
+通常workerはGLM-5.2 / highを使う。独立reviewerは`RISK: LOW`の初回reviewではGLM-4.7 / high、`RISK: HIGH`または自動修正後のreviewではGLM-5.1 / highを使い、両方を直列実行しない。Sol判断後の継続とSolからの明示fixはGLM-5.2 / maxを使う。
 
 ### `STATUS: NEEDS_SOL_DECISION`
 - `DECISION`・`EVIDENCE`・`OPTIONS`・`RECOMMENDATION`を評価する。

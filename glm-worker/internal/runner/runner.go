@@ -27,11 +27,15 @@ func NewClaudeRunner(cfg config.AppConfig, st *state.StateStore) *ClaudeRunner {
 // 初回起動時は新規sessionを採番し、2回目以降は同一sessionへresumeする。
 func (r *ClaudeRunner) Run(
 	role state.SessionRole,
+	model string,
 	readOnly bool,
 	effort string,
 	prompt string,
 	outputPath string,
 ) error {
+	if model == "" {
+		return fmt.Errorf("modelを指定してください")
+	}
 	sessionID, ready, err := r.state.SessionID(role)
 	if err != nil {
 		return err
@@ -55,7 +59,7 @@ func (r *ClaudeRunner) Run(
 
 	args = append(
 		args,
-		"--model", r.modelForRole(role),
+		"--model", model,
 		"--effort", effort,
 		"--autocompact", "500k",
 		"--output-format", "text",
@@ -103,13 +107,6 @@ func promptFileName(role state.SessionRole) string {
 		return "REVIEWER.md"
 	}
 	return "WORKER.md"
-}
-
-func (r *ClaudeRunner) modelForRole(role state.SessionRole) string {
-	if role == state.ReviewerRole {
-		return r.config.ReviewerModel
-	}
-	return r.config.WorkerModel
 }
 
 func (r *ClaudeRunner) sessionName(role state.SessionRole) string {

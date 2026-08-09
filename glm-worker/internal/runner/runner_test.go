@@ -24,22 +24,6 @@ func newTestStateStore(t *testing.T) *state.StateStore {
 	return st
 }
 
-func TestModelForRole(t *testing.T) {
-	r := &ClaudeRunner{
-		config: config.AppConfig{
-			WorkerModel:   "opus",
-			ReviewerModel: "haiku",
-		},
-	}
-
-	if got := r.modelForRole(state.WorkerRole); got != "opus" {
-		t.Fatalf("worker model = %q", got)
-	}
-	if got := r.modelForRole(state.ReviewerRole); got != "haiku" {
-		t.Fatalf("reviewer model = %q", got)
-	}
-}
-
 func TestSessionNameIncludesTaskID(t *testing.T) {
 	st := newTestStateStore(t)
 	if err := st.Write("task.id", "12345678-aaaa-bbbb-cccc-dddddddddddd"); err != nil {
@@ -92,7 +76,7 @@ func TestClaudeRunnerRunStartsThenResumesSession(t *testing.T) {
 	}, st)
 
 	firstOutput := filepath.Join(t.TempDir(), "first.log")
-	if err := r.Run(state.WorkerRole, false, "high", "first prompt", firstOutput); err != nil {
+	if err := r.Run(state.WorkerRole, "worker-model", false, "high", "first prompt", firstOutput); err != nil {
 		t.Fatal(err)
 	}
 	firstArguments := readLines(t, argumentsPath)
@@ -107,7 +91,7 @@ func TestClaudeRunnerRunStartsThenResumesSession(t *testing.T) {
 	}
 
 	secondOutput := filepath.Join(t.TempDir(), "second.log")
-	if err := r.Run(state.WorkerRole, true, "max", "second prompt", secondOutput); err != nil {
+	if err := r.Run(state.WorkerRole, "override-model", true, "max", "second prompt", secondOutput); err != nil {
 		t.Fatal(err)
 	}
 	secondArguments := readLines(t, argumentsPath)
@@ -119,16 +103,22 @@ func TestClaudeRunnerRunStartsThenResumesSession(t *testing.T) {
 			t.Fatalf("read-only引数%qがありません: %#v", argument, secondArguments)
 		}
 	}
+	if !containsArgument(secondArguments, "override-model") {
+		t.Fatalf("model overrideがありません: %#v", secondArguments)
+	}
 }
 
 func TestClaudeRunnerRejectsMissingPrompt(t *testing.T) {
 	st := newTestStateStore(t)
+	if err := st.Write("task.id", "12345678-aaaa-bbbb-cccc-dddddddddddd"); err != nil {
+		t.Fatal(err)
+	}
 	r := NewClaudeRunner(config.AppConfig{
 		PromptDir: t.TempDir(),
 		ClaudeBin: "unused",
 	}, st)
 
-	err := r.Run(state.WorkerRole, false, "high", "prompt", filepath.Join(t.TempDir(), "output"))
+	err := r.Run(state.WorkerRole, "worker-model", false, "high", "prompt", filepath.Join(t.TempDir(), "output"))
 	if err == nil || !strings.Contains(err.Error(), "required promptがありません") {
 		t.Fatalf("missing prompt error = %v", err)
 	}

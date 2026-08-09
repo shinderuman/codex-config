@@ -16,7 +16,7 @@ import (
 // ModelRunnerはworkflowが必要とするモデル実行機能を表す。
 // interfaceは実装側ではなく利用側に置き、テストでは偽装実装へ差し替える。
 type ModelRunner interface {
-	Run(role state.SessionRole, readOnly bool, effort string, prompt string, outputPath string) error
+	Run(role state.SessionRole, model string, readOnly bool, effort string, prompt string, outputPath string) error
 }
 
 // Workflowはコマンド毎のworker/reviewer/auto-fix調停を行う。
@@ -73,6 +73,7 @@ func (w *Workflow) ExecuteNewTask(request string) error {
 			Stage:          state.ResumeStageWorker,
 			Phase:          "worker-new",
 			Role:           state.WorkerRole,
+			Model:          w.config.WorkerModel,
 			ReadOnly:       false,
 			Effort:         w.config.RoutineEffort,
 			Prompt:         prompt,
@@ -112,6 +113,7 @@ func (w *Workflow) ExecuteDecision(decision string) error {
 			Stage:          state.ResumeStageWorker,
 			Phase:          "worker-decision",
 			Role:           state.WorkerRole,
+			Model:          w.config.WorkerModel,
 			ReadOnly:       false,
 			Effort:         w.config.EscalatedEffort,
 			Prompt:         prompt,
@@ -154,6 +156,7 @@ func (w *Workflow) ExecuteExplicitFix(instruction string) error {
 			Stage:          state.ResumeStageWorker,
 			Phase:          "worker-explicit-fix",
 			Role:           state.WorkerRole,
+			Model:          w.config.WorkerModel,
 			ReadOnly:       false,
 			Effort:         w.config.EscalatedEffort,
 			Prompt:         prompt,
@@ -282,6 +285,7 @@ func (w *Workflow) reviewUntilStable(
 		Stage:          state.ResumeStageReview,
 		Phase:          fmt.Sprintf("reviewer-%d", reviewNumber),
 		Role:           state.ReviewerRole,
+		Model:          w.reviewerModel(workerPacket, autoFixes),
 		ReadOnly:       true,
 		Effort:         w.config.RoutineEffort,
 		Prompt:         prompt,
@@ -345,6 +349,7 @@ func (w *Workflow) handleReviewResult(
 			Stage:          state.ResumeStageAutoFix,
 			Phase:          fmt.Sprintf("worker-auto-fix-%d", nextAutoFixes),
 			Role:           state.WorkerRole,
+			Model:          w.config.WorkerModel,
 			ReadOnly:       false,
 			Effort:         w.config.RoutineEffort,
 			Prompt:         prompt,
@@ -371,6 +376,13 @@ func (w *Workflow) handleReviewResult(
 	default:
 		return fmt.Errorf("STATUS: WORKER_ERROR\nPHASE: reviewer-format\nERROR: reviewer did not return a valid STATUS")
 	}
+}
+
+func (w *Workflow) reviewerModel(workerPacket packet.Packet, autoFixes int) string {
+	if workerPacket.Risk() == "HIGH" || autoFixes > 0 {
+		return w.config.HighRiskReviewerModel
+	}
+	return w.config.ReviewerModel
 }
 
 func (w *Workflow) handleAutoFixResult(
@@ -414,6 +426,9 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	if checkpoint.OriginalPrompt == "" {
 		checkpoint.OriginalPrompt = checkpoint.Prompt
 	}
+	if checkpoint.Model == "" {
+		checkpoint.Model = w.checkpointModel(checkpoint)
+	}
 	if checkpoint.Effort == "" {
 		checkpoint.Effort = w.config.RoutineEffort
 	}
@@ -425,6 +440,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 
 	runErr := w.runner.Run(
 		checkpoint.Role,
+		checkpoint.Model,
 		checkpoint.ReadOnly,
 		checkpoint.Effort,
 		checkpoint.Prompt,
@@ -491,6 +507,13 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 		)
 	}
 	return result, nil
+}
+
+func (w *Workflow) checkpointModel(checkpoint state.ResumeCheckpoint) string {
+	if checkpoint.Role == state.ReviewerRole {
+		return w.reviewerModel(packet.FromLines(checkpoint.WorkerPacket), checkpoint.AutoFixes)
+	}
+	return w.config.WorkerModel
 }
 
 func workerError(phase string, outputPath string, runErr error) error {

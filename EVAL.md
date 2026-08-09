@@ -33,10 +33,12 @@
 - 新規タスク開始でworker/reviewer session IDが更新される。
 - 同一タスク内のdecision/fix/resumeではsession IDが維持される。
 - `--fix`は`NEEDS_SOL_REVIEW`状態だけで許可され、`PASS`後は拒否される。
-- workerはopus alias、reviewerはhaiku aliasを利用する。
+- workerはopus alias、通常reviewerはhaiku alias、高リスク・自動修正後reviewerはsonnet aliasを利用する。
 - 通常effortはhigh、Sol判断後/明示fixはmax。
 - auto-compact windowは500K。
-- managed model mappingはopus=glm-5.2、haiku=glm-5-turbo。
+- managed model mappingはopus=glm-5.2、haiku=glm-4.7、sonnet=glm-5.1。
+- `RISK: LOW`の初回reviewは4.7、`RISK: HIGH`または自動修正後のreviewは5.1を1回だけ選ぶ。
+- rate limit後のresumeでもcheckpointへ保存したreviewer modelを維持する。
 - packetは15行・6 KiB・1行1536 bytes以内で、STATUS別必須fieldを検証する。
 - packet契約違反時は同一sessionへ再圧縮を1回だけ依頼し、作業を再実行しない。
 

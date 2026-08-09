@@ -42,6 +42,16 @@ test -f "$success_case/codex/rules/glm-worker.rules"
 test -f "$success_case/claude/settings.json"
 test -d "$success_case/glm-home/sessions"
 test ! -d "$success_case/home/.glm-worker/sessions"
+grep -Fq '"ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.7"' "$success_case/claude/settings.json"
+grep -Fq '"ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.1"' "$success_case/claude/settings.json"
+grep -Fq '"ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2"' "$success_case/claude/settings.json"
+grep -Fq 'RISK: HIGH' "$success_case/codex/AGENTS.md"
+(
+    cd "$success_source"
+    GLM_WORKER_HOME="$success_case/glm-home" \
+        "$success_case/bin/glm-worker" --status \
+        | grep -Fq 'TASK_STATUS: none'
+)
 
 failure_source="$test_root/failure-source"
 failure_case="$test_root/failure-case"

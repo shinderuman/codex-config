@@ -12,6 +12,7 @@ func TestResumeCheckpointPersists(t *testing.T) {
 		Stage:          ResumeStageReview,
 		Phase:          "reviewer-2",
 		Role:           ReviewerRole,
+		Model:          "sonnet",
 		ReadOnly:       true,
 		Effort:         "high",
 		Prompt:         "original",
@@ -32,14 +33,14 @@ func TestResumeCheckpointPersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Phase != checkpoint.Phase || got.ResetAtRFC3339 != checkpoint.ResetAtRFC3339 || got.Effort != "high" {
+	if got.Phase != checkpoint.Phase || got.ResetAtRFC3339 != checkpoint.ResetAtRFC3339 || got.Effort != "high" || got.Model != "sonnet" {
 		t.Fatalf("unexpected checkpoint: %#v", got)
 	}
 }
 
 func TestClearResumeCheckpoint(t *testing.T) {
 	st := &StateStore{dir: t.TempDir()}
-	if err := st.SaveResumeCheckpoint(ResumeCheckpoint{Stage: ResumeStageWorker}); err != nil {
+	if err := st.SaveResumeCheckpoint(ResumeCheckpoint{Stage: ResumeStageWorker, Model: "opus"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.ClearResumeCheckpoint(); err != nil {

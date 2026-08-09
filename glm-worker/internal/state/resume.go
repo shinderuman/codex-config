@@ -24,6 +24,7 @@ type ResumeCheckpoint struct {
 	Stage           ResumeStage `json:"stage"`
 	Phase           string      `json:"phase"`
 	Role            SessionRole `json:"role"`
+	Model           string      `json:"model,omitempty"`
 	ReadOnly        bool        `json:"read_only"`
 	Effort          string      `json:"effort,omitempty"`
 	Prompt          string      `json:"prompt"`

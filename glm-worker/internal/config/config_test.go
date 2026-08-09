@@ -82,6 +82,7 @@ func TestLoadBuildsConfigFromRepositoryAndEnvironment(t *testing.T) {
 	t.Setenv("GLM_WORKER_CLAUDE_BIN", "claude-test")
 	t.Setenv("GLM_WORKER_WORKER_MODEL", "worker-test")
 	t.Setenv("GLM_WORKER_REVIEWER_MODEL", "reviewer-test")
+	t.Setenv("GLM_WORKER_HIGH_RISK_REVIEWER_MODEL", "reviewer-high-test")
 	t.Setenv("GLM_WORKER_EFFORT", "medium")
 	t.Setenv("GLM_WORKER_ESCALATED_EFFORT", "high")
 	t.Setenv("GLM_WORKER_MAX_AUTO_FIX_ROUNDS", "4")
@@ -103,7 +104,7 @@ func TestLoadBuildsConfigFromRepositoryAndEnvironment(t *testing.T) {
 	if loaded.StateBase != filepath.Join(stateHome, "sessions") || loaded.PromptDir != promptDir {
 		t.Fatalf("path config = %#v", loaded)
 	}
-	if loaded.ClaudeBin != "claude-test" || loaded.WorkerModel != "worker-test" || loaded.ReviewerModel != "reviewer-test" {
+	if loaded.ClaudeBin != "claude-test" || loaded.WorkerModel != "worker-test" || loaded.ReviewerModel != "reviewer-test" || loaded.HighRiskReviewerModel != "reviewer-high-test" {
 		t.Fatalf("runner config = %#v", loaded)
 	}
 	if loaded.RoutineEffort != "medium" || loaded.EscalatedEffort != "high" || loaded.MaxAutoFixRounds != 4 {

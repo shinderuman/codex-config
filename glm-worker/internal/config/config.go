@@ -14,17 +14,18 @@ import (
 
 // AppConfigはglm-worker全体で共有される設定。
 type AppConfig struct {
-	RepoRoot         string
-	RepoHash         string
-	RepoShort        string
-	StateBase        string
-	PromptDir        string
-	ClaudeBin        string
-	WorkerModel      string
-	ReviewerModel    string
-	RoutineEffort    string
-	EscalatedEffort  string
-	MaxAutoFixRounds int
+	RepoRoot              string
+	RepoHash              string
+	RepoShort             string
+	StateBase             string
+	PromptDir             string
+	ClaudeBin             string
+	WorkerModel           string
+	ReviewerModel         string
+	HighRiskReviewerModel string
+	RoutineEffort         string
+	EscalatedEffort       string
+	MaxAutoFixRounds      int
 }
 
 // Loadは環境変数とgitからAppConfigを構築する。
@@ -50,17 +51,18 @@ func Load() (AppConfig, error) {
 	}
 
 	return AppConfig{
-		RepoRoot:         repoRoot,
-		RepoHash:         repoHashString,
-		RepoShort:        repoHashString[:12],
-		StateBase:        filepath.Join(stateHome, "sessions"),
-		PromptDir:        promptDir,
-		ClaudeBin:        envOrDefault("GLM_WORKER_CLAUDE_BIN", "claude"),
-		WorkerModel:      envOrDefault("GLM_WORKER_WORKER_MODEL", "opus"),
-		ReviewerModel:    envOrDefault("GLM_WORKER_REVIEWER_MODEL", "haiku"),
-		RoutineEffort:    envOrDefault("GLM_WORKER_EFFORT", "high"),
-		EscalatedEffort:  envOrDefault("GLM_WORKER_ESCALATED_EFFORT", "max"),
-		MaxAutoFixRounds: rounds,
+		RepoRoot:              repoRoot,
+		RepoHash:              repoHashString,
+		RepoShort:             repoHashString[:12],
+		StateBase:             filepath.Join(stateHome, "sessions"),
+		PromptDir:             promptDir,
+		ClaudeBin:             envOrDefault("GLM_WORKER_CLAUDE_BIN", "claude"),
+		WorkerModel:           envOrDefault("GLM_WORKER_WORKER_MODEL", "opus"),
+		ReviewerModel:         envOrDefault("GLM_WORKER_REVIEWER_MODEL", "haiku"),
+		HighRiskReviewerModel: envOrDefault("GLM_WORKER_HIGH_RISK_REVIEWER_MODEL", "sonnet"),
+		RoutineEffort:         envOrDefault("GLM_WORKER_EFFORT", "high"),
+		EscalatedEffort:       envOrDefault("GLM_WORKER_ESCALATED_EFFORT", "max"),
+		MaxAutoFixRounds:      rounds,
 	}, nil
 }
 
