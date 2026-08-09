@@ -1,6 +1,6 @@
-# GLM packet処理
+# GLM結果処理
 
-`glm-worker`からpacketを受け取った場合だけ適用する。
+`glm-worker`からpacketまたは`STATUS: WORKER_ERROR`を含む結果を受け取った場合に適用する。
 
 ## `STATUS: NEEDS_SOL_DECISION`
 

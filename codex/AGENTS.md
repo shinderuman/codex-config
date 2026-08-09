@@ -40,7 +40,7 @@ Sol Highは原則として、リポジトリの一次探索、grepや呼び出�
 同一タスクのSol判断・修正・5時間上限後の再開ではworker/reviewer sessionを継続し、新規タスクだけ新sessionへ切り替える。過去のGLM文脈をSol Highが再説明しない。
 通常workerはGLM-5.2 / high。初回低リスクreviewはGLM-4.7 / high、高リスク・Sol判断後・自動修正後・明示fix後のreviewはGLM-5.1 / highを一方だけ使う。Sol判断後のworker継続と明示fixはGLM-5.2 / max。
 
-`glm-worker`を実行・待機する前に`~/.codex/instructions/glm-execution.md`を読む。packetを受け取ったら`~/.codex/instructions/glm-packets.md`を読む。
+`glm-worker`を実行・待機する前に`~/.codex/instructions/glm-execution.md`を読む。packetまたは`STATUS: WORKER_ERROR`を含む結果を受け取ったら`~/.codex/instructions/glm-packets.md`を読む。
 
 ## 5. 品質ゲート
 
@@ -66,6 +66,6 @@ USER_REQUEST・`SPECIFICATION.md`・既存`AGENTS.md`・直前のSol判断で未
 - バックアップ・大容量一時データ → `~/.codex/instructions/backup.md`
 - AGENTS系ファイル変更 → `~/.codex/instructions/agents-management.md`
 - GLM実行・待機 → `~/.codex/instructions/glm-execution.md`
-- GLM packet処理 → `~/.codex/instructions/glm-packets.md`
+- GLM packet・WORKER_ERROR処理 → `~/.codex/instructions/glm-packets.md`
 - GLM rate limit自動再開 → `~/.codex/instructions/glm-auto-resume.md`
 - Codex自身が例外的に直接編集 → `~/.codex/instructions/worker/`の該当ファイル

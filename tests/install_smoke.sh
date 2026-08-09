@@ -66,6 +66,8 @@ grep -Fq '"LOCAL_ENV": "keep"' "$success_case/claude/settings.json"
 grep -Fq 'model = "local-model"' "$success_case/codex/config.toml"
 grep -Fq 'background_terminal_max_timeout = 21600000' "$success_case/codex/config.toml"
 grep -Fq '初回低リスクreviewはGLM-4.7 / high' "$success_case/codex/AGENTS.md"
+grep -Fq 'packetまたは`STATUS: WORKER_ERROR`を含む結果' "$success_case/codex/AGENTS.md"
+grep -Fq 'packetまたは`STATUS: WORKER_ERROR`を含む結果' "$success_case/codex/instructions/glm-packets.md"
 (
     cd "$success_source"
     GLM_WORKER_HOME="$success_case/glm-home" \
