@@ -49,6 +49,16 @@ func printStats(st *state.StateStore, stdout io.Writer) error {
 		mergeIntMap(&aggregate.ModelCallsByAlias, stats.ModelCallsByAlias)
 		mergeInt64Map(&aggregate.ModelDurationMSByAlias, stats.ModelDurationMSByAlias)
 		mergeIntMap(&aggregate.RateLimitsByAlias, stats.RateLimitsByAlias)
+		mergeInt64Map(&aggregate.InputTokensByAlias, stats.InputTokensByAlias)
+		mergeInt64Map(&aggregate.CacheCreationInputTokensByAlias, stats.CacheCreationInputTokensByAlias)
+		mergeInt64Map(&aggregate.CacheReadInputTokensByAlias, stats.CacheReadInputTokensByAlias)
+		mergeInt64Map(&aggregate.OutputTokensByAlias, stats.OutputTokensByAlias)
+		mergeIntMap(&aggregate.NumTurnsByAlias, stats.NumTurnsByAlias)
+		mergeIntMap(&aggregate.ModelCallsByResolvedModel, stats.ModelCallsByResolvedModel)
+		mergeInt64Map(&aggregate.InputTokensByResolvedModel, stats.InputTokensByResolvedModel)
+		mergeInt64Map(&aggregate.CacheCreationInputTokensByResolvedModel, stats.CacheCreationInputTokensByResolvedModel)
+		mergeInt64Map(&aggregate.CacheReadInputTokensByResolvedModel, stats.CacheReadInputTokensByResolvedModel)
+		mergeInt64Map(&aggregate.OutputTokensByResolvedModel, stats.OutputTokensByResolvedModel)
 		aggregate.WorkerCalls += stats.WorkerCalls
 		aggregate.ReviewerCalls += stats.ReviewerCalls
 		aggregate.DecisionCommands += stats.DecisionCommands
@@ -67,6 +77,21 @@ func printStats(st *state.StateStore, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "MODEL_CALLS: %d\n", aggregate.ModelCalls)
 	fmt.Fprintf(stdout, "MODEL_CALLS_BY_ALIAS: %s\n", formatIntMap(aggregate.ModelCallsByAlias))
 	fmt.Fprintf(stdout, "MODEL_DURATION_MS_BY_ALIAS: %s\n", formatInt64Map(aggregate.ModelDurationMSByAlias))
+	fmt.Fprintf(stdout, "INPUT_TOKENS_BY_ALIAS: %s\n", formatInt64Map(aggregate.InputTokensByAlias))
+	fmt.Fprintf(stdout, "CACHE_CREATION_INPUT_TOKENS_BY_ALIAS: %s\n", formatInt64Map(aggregate.CacheCreationInputTokensByAlias))
+	fmt.Fprintf(stdout, "CACHE_READ_INPUT_TOKENS_BY_ALIAS: %s\n", formatInt64Map(aggregate.CacheReadInputTokensByAlias))
+	fmt.Fprintf(stdout, "TOTAL_PROMPT_TOKENS_BY_ALIAS: %s\n", formatInt64Map(sumInt64Maps(
+		aggregate.InputTokensByAlias,
+		aggregate.CacheCreationInputTokensByAlias,
+		aggregate.CacheReadInputTokensByAlias,
+	)))
+	fmt.Fprintf(stdout, "OUTPUT_TOKENS_BY_ALIAS: %s\n", formatInt64Map(aggregate.OutputTokensByAlias))
+	fmt.Fprintf(stdout, "NUM_TURNS_BY_ALIAS: %s\n", formatIntMap(aggregate.NumTurnsByAlias))
+	fmt.Fprintf(stdout, "MODEL_CALLS_BY_RESOLVED_MODEL: %s\n", formatIntMap(aggregate.ModelCallsByResolvedModel))
+	fmt.Fprintf(stdout, "INPUT_TOKENS_BY_RESOLVED_MODEL: %s\n", formatInt64Map(aggregate.InputTokensByResolvedModel))
+	fmt.Fprintf(stdout, "CACHE_CREATION_INPUT_TOKENS_BY_RESOLVED_MODEL: %s\n", formatInt64Map(aggregate.CacheCreationInputTokensByResolvedModel))
+	fmt.Fprintf(stdout, "CACHE_READ_INPUT_TOKENS_BY_RESOLVED_MODEL: %s\n", formatInt64Map(aggregate.CacheReadInputTokensByResolvedModel))
+	fmt.Fprintf(stdout, "OUTPUT_TOKENS_BY_RESOLVED_MODEL: %s\n", formatInt64Map(aggregate.OutputTokensByResolvedModel))
 	fmt.Fprintf(stdout, "WORKER_CALLS: %d\n", aggregate.WorkerCalls)
 	fmt.Fprintf(stdout, "REVIEWER_CALLS: %d\n", aggregate.ReviewerCalls)
 	fmt.Fprintf(stdout, "DECISION_COMMANDS: %d\n", aggregate.DecisionCommands)
@@ -80,6 +105,7 @@ func printStats(st *state.StateStore, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "RATE_LIMITS_BY_ALIAS: %s\n", formatIntMap(aggregate.RateLimitsByAlias))
 	fmt.Fprintf(stdout, "PACKET_COMPACTIONS: %d\n", aggregate.PacketCompactions)
 	fmt.Fprintf(stdout, "SOL_PACKET_BYTES: %d\n", aggregate.SolPacketBytes)
+	fmt.Fprintf(stdout, "TELEMETRY_DIR: %s\n", st.Path("telemetry"))
 	fmt.Fprintf(stdout, "CURRENT_TASK_ID: %s\n", st.ReadOr("task.id", "none"))
 	fmt.Fprintf(stdout, "CURRENT_TASK_STATUS: %s\n", st.TaskStatus())
 	return nil
@@ -125,6 +151,16 @@ func formatInt64Map(values map[string]int64) string {
 		return "none"
 	}
 	return strings.Join(items, ",")
+}
+
+func sumInt64Maps(values ...map[string]int64) map[string]int64 {
+	result := make(map[string]int64)
+	for _, items := range values {
+		for key, value := range items {
+			result[key] += value
+		}
+	}
+	return result
 }
 
 // resetStateは状態をクリアし完了レポートを出力する。

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shinderuman/codex-config/glm-worker/internal/config"
+	"github.com/shinderuman/codex-config/glm-worker/internal/runner"
 	"github.com/shinderuman/codex-config/glm-worker/internal/state"
 	"github.com/shinderuman/codex-config/glm-worker/internal/workflow"
 )
@@ -33,17 +34,17 @@ func (r *fakeRunner) Run(
 	_ string,
 	prompt string,
 	outputPath string,
-) error {
+) (runner.RunResult, error) {
 	r.prompts = append(r.prompts, prompt)
 	r.models = append(r.models, model)
 	index := len(r.prompts) - 1
 	step := r.steps[index]
 	if step.output != "" {
 		if err := os.WriteFile(outputPath, []byte(step.output), 0o600); err != nil {
-			return err
+			return runner.RunResult{}, err
 		}
 	}
-	return step.runErr
+	return runner.RunResult{SessionID: "test-session", Response: step.output}, step.runErr
 }
 
 func (r *fakeRunner) factory() RunnerFactory {
@@ -101,6 +102,9 @@ func TestExecuteStatsReportsEmptyState(t *testing.T) {
 	if !strings.Contains(out.String(), "MODEL_CALLS_BY_ALIAS: none") || !strings.Contains(out.String(), "RATE_LIMITS_BY_ALIAS: none") {
 		t.Fatalf("空状態のmodel別stats出力がありません: %q", out.String())
 	}
+	if !strings.Contains(out.String(), "TELEMETRY_DIR:") {
+		t.Fatalf("telemetry保存先がありません: %q", out.String())
+	}
 }
 
 func TestPrintStatsAggregatesAndSortsModelAliases(t *testing.T) {
@@ -117,6 +121,20 @@ func TestPrintStatsAggregatesAndSortsModelAliases(t *testing.T) {
 	st.RecordModelCall(state.ReviewerRole, "sonnet")
 	st.RecordModelDuration("sonnet", 2*time.Second)
 	st.RecordRateLimit("opus")
+	st.RecordModelCallLog(state.ModelCallLog{
+		TaskID:     st.ReadOr("task.id", "unknown"),
+		ModelAlias: "opus",
+		Usage: state.TokenUsage{
+			InputTokens:              10,
+			CacheCreationInputTokens: 20,
+			CacheReadInputTokens:     30,
+			OutputTokens:             40,
+		},
+		ResolvedModelUsage: map[string]state.ResolvedModelUsage{
+			"glm-5.2": {InputTokens: 10, CacheReadInputTokens: 30, OutputTokens: 40},
+		},
+		NumTurns: 2,
+	})
 
 	var out bytes.Buffer
 	if err := printStats(st, &out); err != nil {
@@ -130,6 +148,19 @@ func TestPrintStatsAggregatesAndSortsModelAliases(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "MODEL_DURATION_MS_BY_ALIAS: sonnet=2000") {
 		t.Fatalf("model別実行時間が集計されていません: %q", out.String())
+	}
+	for _, value := range []string{
+		"INPUT_TOKENS_BY_ALIAS: opus=10",
+		"CACHE_CREATION_INPUT_TOKENS_BY_ALIAS: opus=20",
+		"CACHE_READ_INPUT_TOKENS_BY_ALIAS: opus=30",
+		"TOTAL_PROMPT_TOKENS_BY_ALIAS: opus=60",
+		"OUTPUT_TOKENS_BY_ALIAS: opus=40",
+		"NUM_TURNS_BY_ALIAS: opus=2",
+		"MODEL_CALLS_BY_RESOLVED_MODEL: glm-5.2=1",
+	} {
+		if !strings.Contains(out.String(), value) {
+			t.Fatalf("token statsに%qがありません: %q", value, out.String())
+		}
 	}
 }
 

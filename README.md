@@ -109,10 +109,11 @@ glm-worker --reset
 | `GLM_WORKER_EFFORT` | `high` | 通常実行effort |
 | `GLM_WORKER_ESCALATED_EFFORT` | `max` | Sol判断後・明示fixのeffort |
 | `GLM_WORKER_MAX_AUTO_FIX_ROUNDS` | `2` | 自動修正の上限回数 |
+| `GLM_WORKER_TELEMETRY_CONTENT` | `true` | 呼出ログへsystem/dynamic promptと最終response本文を保存するか |
 
 リポジトリごとの状態は`$GLM_WORKER_HOME/sessions/<repo SHA-256>/`へ保存する。
 `task.status`を正規状態とし、`task-stats.json`は観測用mirrorとして扱う。
-statsの破損・書き込み失敗はwarningを出してworkflowを継続し、明示的な`--stats`だけは読み込みエラーを返す。
+呼出単位の詳細は`telemetry/<task ID>.jsonl`へ`0600`で保存する。stats・telemetryの破損や書き込み失敗はwarningを出してworkflowを継続し、明示的な`--stats`だけはstats読み込みエラーを返す。
 
 
 ## Z.ai 5時間上限からの再開
@@ -184,12 +185,14 @@ glm-worker --stats
 `--status`は現在のtask ID、task status、session、判断待ち、rate limit状態を表示する。
 `--stats`は通常のworker packetへ混ぜず、完了済みと現在のタスクを集計して次を表示する。
 
-- worker/reviewerとmodel alias別の呼び出し回数・実行時間
+- worker/reviewerとmodel alias別の呼び出し回数・実行時間・turn数
+- alias別およびClaude CLIが報告した実モデル別のinput、cache creation、cache read、output token
 - Sol判断・明示fix・resume・自動fixの回数
 - `NEEDS_SOL_DECISION`、`NEEDS_SOL_REVIEW`、`PASS`の件数
 - model alias別rate limit、packet再圧縮、Solへ返したpacket bytes
 
 新規タスク開始時に前タスクの統計をarchiveし、`--reset`時も現在値を破棄せずarchiveする。
+`--stats`の`TELEMETRY_DIR`配下には、各呼出しのphase、role、alias、実モデル、effort、session、prompt、最終response、usage、所要時間、結果をJSONLで保持する。promptとresponse本文を保存したくない環境では`GLM_WORKER_TELEMETRY_CONTENT=false`を指定し、byte数とSHA-256、usageだけを残す。
 
 
 ## 開発時の検証

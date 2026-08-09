@@ -26,6 +26,7 @@ type AppConfig struct {
 	RoutineEffort         string
 	EscalatedEffort       string
 	MaxAutoFixRounds      int
+	TelemetryContent      bool
 }
 
 // Loadは環境変数とgitからAppConfigを構築する。
@@ -49,6 +50,10 @@ func Load() (AppConfig, error) {
 	if err != nil {
 		return AppConfig{}, err
 	}
+	telemetryContent, err := boolEnv("GLM_WORKER_TELEMETRY_CONTENT", true)
+	if err != nil {
+		return AppConfig{}, err
+	}
 
 	return AppConfig{
 		RepoRoot:              repoRoot,
@@ -63,6 +68,7 @@ func Load() (AppConfig, error) {
 		RoutineEffort:         envOrDefault("GLM_WORKER_EFFORT", "high"),
 		EscalatedEffort:       envOrDefault("GLM_WORKER_ESCALATED_EFFORT", "max"),
 		MaxAutoFixRounds:      rounds,
+		TelemetryContent:      telemetryContent,
 	}, nil
 }
 
@@ -104,6 +110,18 @@ func intEnv(name string, defaultValue int) (int, error) {
 	value, err := strconv.Atoi(raw)
 	if err != nil || value < 0 {
 		return 0, fmt.Errorf("%sは0以上の整数で指定してください", name)
+	}
+	return value, nil
+}
+
+func boolEnv(name string, defaultValue bool) (bool, error) {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return defaultValue, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%sは真偽値で指定してください", name)
 	}
 	return value, nil
 }

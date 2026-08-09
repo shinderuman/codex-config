@@ -9,6 +9,7 @@ import (
 
 	"github.com/shinderuman/codex-config/glm-worker/internal/config"
 	"github.com/shinderuman/codex-config/glm-worker/internal/packet"
+	"github.com/shinderuman/codex-config/glm-worker/internal/runner"
 	"github.com/shinderuman/codex-config/glm-worker/internal/state"
 )
 
@@ -16,6 +17,7 @@ import (
 type runnerStep struct {
 	output string
 	runErr error
+	result runner.RunResult
 }
 
 // scriptedRunnerはmodelRunnerのテスト用偽装実装で、stepsを順に消費する。
@@ -32,17 +34,24 @@ func (r *scriptedRunner) Run(
 	_ string,
 	prompt string,
 	outputPath string,
-) error {
+) (runner.RunResult, error) {
 	r.prompts = append(r.prompts, prompt)
 	r.models = append(r.models, model)
 	index := len(r.prompts) - 1
 	step := r.steps[index]
 	if step.output != "" {
 		if err := os.WriteFile(outputPath, []byte(step.output), 0o600); err != nil {
-			return err
+			return runner.RunResult{}, err
 		}
 	}
-	return step.runErr
+	result := step.result
+	if result.SessionID == "" {
+		result.SessionID = "test-session"
+	}
+	if result.Response == "" {
+		result.Response = step.output
+	}
+	return result, step.runErr
 }
 
 func implementedPacket(summary string) string {
@@ -99,7 +108,95 @@ func newWorkflowT(t *testing.T, st *state.StateStore, r *scriptedRunner) *Workfl
 		HighRiskReviewerModel: "sonnet",
 		RoutineEffort:         "high",
 		MaxAutoFixRounds:      2,
+		TelemetryContent:      true,
 	}, st, r, io.Discard)
+}
+
+func TestRunModelRecordsPromptResponseAndUsage(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{steps: []runnerStep{{
+		output: implementedPacket("done"),
+		result: runner.RunResult{
+			SessionID: "worker-session",
+			Usage: runner.TokenUsage{
+				InputTokens:              10,
+				CacheCreationInputTokens: 20,
+				CacheReadInputTokens:     30,
+				OutputTokens:             40,
+			},
+			ModelUsage: map[string]runner.ModelUsage{
+				"glm-5.2": {InputTokens: 10, CacheReadInputTokens: 30, OutputTokens: 40},
+			},
+			DurationMS:    1200,
+			DurationAPIMS: 900,
+			NumTurns:      2,
+			SystemPrompt:  "worker system instruction",
+		},
+	}}}
+	w := newWorkflowT(t, st, r)
+	w.temp = t.TempDir()
+
+	_, err := w.runModel(state.ResumeCheckpoint{
+		Stage:  state.ResumeStageWorker,
+		Phase:  "worker-new",
+		Role:   state.WorkerRole,
+		Model:  "opus",
+		Effort: "high",
+		Prompt: "implementation instruction",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID, err := st.TaskID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs, err := st.ReadModelCallLogs(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("telemetry logs = %#v", logs)
+	}
+	got := logs[0]
+	if got.Prompt != "implementation instruction" || got.SystemPrompt != "worker system instruction" || got.Response != implementedPacket("done") {
+		t.Fatalf("telemetry content = %#v", got)
+	}
+	if got.Usage.CacheReadInputTokens != 30 || got.ResolvedModelUsage["glm-5.2"].OutputTokens != 40 {
+		t.Fatalf("telemetry usage = %#v", got)
+	}
+	stats := currentStats(t, st)
+	if stats.CacheReadInputTokensByAlias["opus"] != 30 || stats.OutputTokensByResolvedModel["glm-5.2"] != 40 {
+		t.Fatalf("token stats = %#v", stats)
+	}
+}
+
+func TestRunModelCanOmitTelemetryContent(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{steps: []runnerStep{{output: implementedPacket("done")}}}
+	w := newWorkflowT(t, st, r)
+	w.config.TelemetryContent = false
+	w.temp = t.TempDir()
+
+	_, err := w.runModel(state.ResumeCheckpoint{
+		Stage:  state.ResumeStageWorker,
+		Phase:  "worker-new",
+		Role:   state.WorkerRole,
+		Model:  "opus",
+		Effort: "high",
+		Prompt: "secret instruction",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID, _ := st.TaskID()
+	logs, err := st.ReadModelCallLogs(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logs[0].Prompt != "" || logs[0].SystemPrompt != "" || logs[0].Response != "" || logs[0].PromptSHA256 == "" || logs[0].ResponseSHA256 == "" {
+		t.Fatalf("content無効時のtelemetry = %#v", logs[0])
+	}
 }
 
 func currentStats(t *testing.T, st *state.StateStore) state.TaskStats {
@@ -152,6 +249,14 @@ func TestRunModelRecompactsInvalidPacketInSameRunner(t *testing.T) {
 	stats := currentStats(t, st)
 	if stats.ModelCalls != 2 || stats.PacketCompactions != 1 {
 		t.Fatalf("stats = %#v", stats)
+	}
+	taskID, _ := st.TaskID()
+	logs, logErr := st.ReadModelCallLogs(taskID)
+	if logErr != nil {
+		t.Fatal(logErr)
+	}
+	if len(logs) != 2 || logs[0].Outcome != "invalid_packet" || logs[1].Outcome != "success" {
+		t.Fatalf("packet compaction telemetry = %#v", logs)
 	}
 }
 
@@ -469,6 +574,13 @@ func TestRunModelSurfacesZaiFiveHourLimit(t *testing.T) {
 	}
 	if st.TaskStatus() != state.TaskStatusRateLimited {
 		t.Fatalf("status = %q", st.TaskStatus())
+	}
+	logs, logErr := st.ReadModelCallLogs(taskID)
+	if logErr != nil {
+		t.Fatal(logErr)
+	}
+	if len(logs) != 1 || logs[0].Outcome != "rate_limited" {
+		t.Fatalf("rate limit telemetry = %#v", logs)
 	}
 }
 

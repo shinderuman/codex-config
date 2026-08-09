@@ -2,6 +2,8 @@
 package workflow
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -17,7 +19,7 @@ import (
 // ModelRunnerはworkflowが必要とするモデル実行機能を表す。
 // interfaceは実装側ではなく利用側に置き、テストでは偽装実装へ差し替える。
 type ModelRunner interface {
-	Run(role state.SessionRole, model string, readOnly bool, effort string, prompt string, outputPath string) error
+	Run(role state.SessionRole, model string, readOnly bool, effort string, prompt string, outputPath string) (runner.RunResult, error)
 }
 
 // Workflowはコマンド毎のworker/reviewer/auto-fix調停を行う。
@@ -439,8 +441,8 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	}
 	w.state.RecordModelCall(checkpoint.Role, checkpoint.Model)
 
-	startedAt := time.Now()
-	runErr := w.runner.Run(
+	startedAt := time.Now().UTC()
+	runResult, runErr := w.runner.Run(
 		checkpoint.Role,
 		checkpoint.Model,
 		checkpoint.ReadOnly,
@@ -448,9 +450,11 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 		checkpoint.Prompt,
 		outputPath,
 	)
-	w.state.RecordModelDuration(checkpoint.Model, time.Since(startedAt))
+	completedAt := time.Now().UTC()
+	w.state.RecordModelDuration(checkpoint.Model, completedAt.Sub(startedAt))
 	if runErr != nil {
 		if limit, ok := runner.DetectZaiFiveHourLimit(outputPath); ok {
+			w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "rate_limited", "", runErr, outputPath)
 			// 5h上限ではsession IDを破棄しない。
 			// Claude Codeの同一sessionへ--resumeして作業途中から継続する。
 			if err := w.state.MarkReady(checkpoint.Role); err != nil {
@@ -481,6 +485,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 			}
 		}
 
+		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "error", "", runErr, outputPath)
 		_ = w.state.ClearResumeCheckpoint()
 		_ = w.state.RemoveUnreadySession(checkpoint.Role)
 		return packet.Packet{}, workerError(
@@ -491,11 +496,13 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	}
 
 	if err := w.state.ClearResumeCheckpoint(); err != nil {
+		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", err, outputPath)
 		return packet.Packet{}, err
 	}
 
 	result, err := packet.ParseLast(outputPath)
 	if err != nil {
+		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "invalid_packet", "", err, outputPath)
 		if packet.IsConstraintError(err) && !checkpoint.PacketCompacted {
 			w.state.RecordPacketCompaction()
 			compactCheckpoint := checkpoint
@@ -513,7 +520,99 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 			packet.Tail(outputPath, 20),
 		)
 	}
+	w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "success", result.Status(), nil, outputPath)
 	return result, nil
+}
+
+func (w *Workflow) recordModelCall(
+	checkpoint state.ResumeCheckpoint,
+	runResult runner.RunResult,
+	startedAt time.Time,
+	completedAt time.Time,
+	outcome string,
+	packetStatus string,
+	callErr error,
+	outputPath string,
+) {
+	response := runResult.Response
+	if response == "" {
+		response = packet.Tail(outputPath, packet.MaxDiagnosticBytes)
+	}
+	promptHash := sha256.Sum256([]byte(checkpoint.Prompt))
+	responseHash := sha256.Sum256([]byte(response))
+	resolvedUsage := make(map[string]state.ResolvedModelUsage, len(runResult.ModelUsage))
+	for model, usage := range runResult.ModelUsage {
+		resolvedUsage[model] = state.ResolvedModelUsage{
+			InputTokens:              usage.InputTokens,
+			CacheCreationInputTokens: usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     usage.CacheReadInputTokens,
+			OutputTokens:             usage.OutputTokens,
+			CostUSD:                  usage.CostUSD,
+		}
+	}
+	errorText := ""
+	if callErr != nil {
+		errorText = boundedText(callErr.Error(), packet.MaxDiagnosticBytes)
+	}
+	promptContent := checkpoint.Prompt
+	systemPromptContent := runResult.SystemPrompt
+	responseContent := response
+	if !w.config.TelemetryContent {
+		promptContent = ""
+		systemPromptContent = ""
+		responseContent = ""
+	}
+	w.state.RecordModelCallLog(state.ModelCallLog{
+		TaskID:             w.state.ReadOr("task.id", "unknown"),
+		SessionID:          modelSessionID(w.state, checkpoint.Role, runResult.SessionID),
+		StartedAt:          startedAt,
+		CompletedAt:        completedAt,
+		Phase:              checkpoint.Phase,
+		Role:               checkpoint.Role,
+		ModelAlias:         checkpoint.Model,
+		ResolvedModelUsage: resolvedUsage,
+		Effort:             checkpoint.Effort,
+		ReadOnly:           checkpoint.ReadOnly,
+		Resumed:            runResult.Resumed,
+		Outcome:            outcome,
+		PacketStatus:       packetStatus,
+		Prompt:             promptContent,
+		PromptBytes:        len([]byte(checkpoint.Prompt)),
+		PromptSHA256:       hex.EncodeToString(promptHash[:]),
+		SystemPromptBytes:  runResult.SystemPromptBytes,
+		SystemPromptSHA256: runResult.SystemPromptSHA256,
+		SystemPrompt:       systemPromptContent,
+		Response:           responseContent,
+		ResponseBytes:      len([]byte(response)),
+		ResponseSHA256:     hex.EncodeToString(responseHash[:]),
+		Error:              errorText,
+		Usage: state.TokenUsage{
+			InputTokens:              runResult.Usage.InputTokens,
+			CacheCreationInputTokens: runResult.Usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     runResult.Usage.CacheReadInputTokens,
+			OutputTokens:             runResult.Usage.OutputTokens,
+		},
+		WallDurationMS:      completedAt.Sub(startedAt).Milliseconds(),
+		ClaudeDurationMS:    runResult.DurationMS,
+		ClaudeAPIDurationMS: runResult.DurationAPIMS,
+		NumTurns:            runResult.NumTurns,
+		TotalCostUSD:        runResult.TotalCostUSD,
+	})
+}
+
+func modelSessionID(st *state.StateStore, role state.SessionRole, fromRunner string) string {
+	if fromRunner != "" {
+		return fromRunner
+	}
+	return st.ReadOr(string(role)+".id", "unknown")
+}
+
+func boundedText(value string, maxBytes int) string {
+	if len(value) <= maxBytes {
+		return value
+	}
+	prefix := "[前方を省略]\n"
+	return prefix + value[len(value)-(maxBytes-len(prefix)):]
 }
 
 func workerError(phase string, outputPath string, runErr error) error {

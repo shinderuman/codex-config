@@ -22,27 +22,37 @@ var statsWarnOut io.Writer = os.Stderr
 
 // TaskStatsは観測用のタスク統計mirror。
 type TaskStats struct {
-	Version                 int              `json:"version"`
-	TaskID                  string           `json:"task_id"`
-	StartedAt               time.Time        `json:"started_at"`
-	ArchivedAt              *time.Time       `json:"archived_at,omitempty"`
-	Status                  TaskStatus       `json:"status"`
-	ModelCalls              int              `json:"model_calls"`
-	ModelCallsByAlias       map[string]int   `json:"model_calls_by_alias,omitempty"`
-	ModelDurationMSByAlias  map[string]int64 `json:"model_duration_ms_by_alias,omitempty"`
-	RateLimitsByAlias       map[string]int   `json:"rate_limits_by_alias,omitempty"`
-	WorkerCalls             int              `json:"worker_calls"`
-	ReviewerCalls           int              `json:"reviewer_calls"`
-	DecisionCommands        int              `json:"decision_commands"`
-	FixCommands             int              `json:"fix_commands"`
-	ResumeCommands          int              `json:"resume_commands"`
-	AutoFixRounds           int              `json:"auto_fix_rounds"`
-	NeedsSolDecisionPackets int              `json:"needs_sol_decision_packets"`
-	NeedsSolReviewPackets   int              `json:"needs_sol_review_packets"`
-	PassPackets             int              `json:"pass_packets"`
-	RateLimits              int              `json:"rate_limits"`
-	PacketCompactions       int              `json:"packet_compactions"`
-	SolPacketBytes          int              `json:"sol_packet_bytes"`
+	Version                                 int              `json:"version"`
+	TaskID                                  string           `json:"task_id"`
+	StartedAt                               time.Time        `json:"started_at"`
+	ArchivedAt                              *time.Time       `json:"archived_at,omitempty"`
+	Status                                  TaskStatus       `json:"status"`
+	ModelCalls                              int              `json:"model_calls"`
+	ModelCallsByAlias                       map[string]int   `json:"model_calls_by_alias,omitempty"`
+	ModelDurationMSByAlias                  map[string]int64 `json:"model_duration_ms_by_alias,omitempty"`
+	RateLimitsByAlias                       map[string]int   `json:"rate_limits_by_alias,omitempty"`
+	InputTokensByAlias                      map[string]int64 `json:"input_tokens_by_alias,omitempty"`
+	CacheCreationInputTokensByAlias         map[string]int64 `json:"cache_creation_input_tokens_by_alias,omitempty"`
+	CacheReadInputTokensByAlias             map[string]int64 `json:"cache_read_input_tokens_by_alias,omitempty"`
+	OutputTokensByAlias                     map[string]int64 `json:"output_tokens_by_alias,omitempty"`
+	NumTurnsByAlias                         map[string]int   `json:"num_turns_by_alias,omitempty"`
+	ModelCallsByResolvedModel               map[string]int   `json:"model_calls_by_resolved_model,omitempty"`
+	InputTokensByResolvedModel              map[string]int64 `json:"input_tokens_by_resolved_model,omitempty"`
+	CacheCreationInputTokensByResolvedModel map[string]int64 `json:"cache_creation_input_tokens_by_resolved_model,omitempty"`
+	CacheReadInputTokensByResolvedModel     map[string]int64 `json:"cache_read_input_tokens_by_resolved_model,omitempty"`
+	OutputTokensByResolvedModel             map[string]int64 `json:"output_tokens_by_resolved_model,omitempty"`
+	WorkerCalls                             int              `json:"worker_calls"`
+	ReviewerCalls                           int              `json:"reviewer_calls"`
+	DecisionCommands                        int              `json:"decision_commands"`
+	FixCommands                             int              `json:"fix_commands"`
+	ResumeCommands                          int              `json:"resume_commands"`
+	AutoFixRounds                           int              `json:"auto_fix_rounds"`
+	NeedsSolDecisionPackets                 int              `json:"needs_sol_decision_packets"`
+	NeedsSolReviewPackets                   int              `json:"needs_sol_review_packets"`
+	PassPackets                             int              `json:"pass_packets"`
+	RateLimits                              int              `json:"rate_limits"`
+	PacketCompactions                       int              `json:"packet_compactions"`
+	SolPacketBytes                          int              `json:"sol_packet_bytes"`
 }
 
 func warnStatsFailure(operation string, err error) {

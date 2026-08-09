@@ -1,0 +1,173 @@
+package state
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+// TokenUsageは1回のmodel呼出し全体のtoken使用量。
+type TokenUsage struct {
+	InputTokens              int64 `json:"input_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+}
+
+// ResolvedModelUsageはClaude CLIが報告した実モデル別使用量。
+type ResolvedModelUsage struct {
+	InputTokens              int64   `json:"input_tokens"`
+	CacheCreationInputTokens int64   `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64   `json:"cache_read_input_tokens"`
+	OutputTokens             int64   `json:"output_tokens"`
+	CostUSD                  float64 `json:"cost_usd,omitempty"`
+}
+
+// ModelCallLogはCodexが後からモデル配分を評価するための呼出単位ログ。
+type ModelCallLog struct {
+	Version             int                           `json:"version"`
+	CallID              string                        `json:"call_id"`
+	TaskID              string                        `json:"task_id"`
+	SessionID           string                        `json:"session_id"`
+	StartedAt           time.Time                     `json:"started_at"`
+	CompletedAt         time.Time                     `json:"completed_at"`
+	Phase               string                        `json:"phase"`
+	Role                SessionRole                   `json:"role"`
+	ModelAlias          string                        `json:"model_alias"`
+	ResolvedModelUsage  map[string]ResolvedModelUsage `json:"resolved_model_usage,omitempty"`
+	Effort              string                        `json:"effort"`
+	ReadOnly            bool                          `json:"read_only"`
+	Resumed             bool                          `json:"resumed"`
+	Outcome             string                        `json:"outcome"`
+	PacketStatus        string                        `json:"packet_status,omitempty"`
+	Prompt              string                        `json:"prompt,omitempty"`
+	PromptBytes         int                           `json:"prompt_bytes"`
+	PromptSHA256        string                        `json:"prompt_sha256"`
+	SystemPromptBytes   int                           `json:"system_prompt_bytes"`
+	SystemPromptSHA256  string                        `json:"system_prompt_sha256"`
+	SystemPrompt        string                        `json:"system_prompt,omitempty"`
+	Response            string                        `json:"response,omitempty"`
+	ResponseBytes       int                           `json:"response_bytes"`
+	ResponseSHA256      string                        `json:"response_sha256"`
+	Error               string                        `json:"error,omitempty"`
+	Usage               TokenUsage                    `json:"usage"`
+	WallDurationMS      int64                         `json:"wall_duration_ms"`
+	ClaudeDurationMS    int64                         `json:"claude_duration_ms,omitempty"`
+	ClaudeAPIDurationMS int64                         `json:"claude_api_duration_ms,omitempty"`
+	NumTurns            int                           `json:"num_turns,omitempty"`
+	TotalCostUSD        float64                       `json:"total_cost_usd,omitempty"`
+}
+
+// RecordModelCallLogは詳細ログを追記し、token集計をmirrorへ反映する。
+// どちらかが失敗しても正規workflowを止めない。
+func (s *StateStore) RecordModelCallLog(value ModelCallLog) {
+	if value.Version == 0 {
+		value.Version = 1
+	}
+	if value.CallID == "" {
+		callID, err := newUUID()
+		if err != nil {
+			warnStatsFailure("telemetry call ID生成", err)
+		} else {
+			value.CallID = callID
+		}
+	}
+	if err := s.appendModelCallLog(value); err != nil {
+		warnStatsFailure("telemetry追記", err)
+	}
+	s.recordTokenUsage(value)
+}
+
+func (s *StateStore) appendModelCallLog(value ModelCallLog) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("telemetryをJSON化できません: %w", err)
+	}
+	path := s.ModelCallLogPath(value.TaskID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := file.Chmod(0o600); err != nil {
+		file.Close()
+		return err
+	}
+	if _, err := file.Write(append(data, '\n')); err != nil {
+		file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+func (s *StateStore) recordTokenUsage(value ModelCallLog) {
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		addInt64(&stats.InputTokensByAlias, value.ModelAlias, value.Usage.InputTokens)
+		addInt64(&stats.CacheCreationInputTokensByAlias, value.ModelAlias, value.Usage.CacheCreationInputTokens)
+		addInt64(&stats.CacheReadInputTokensByAlias, value.ModelAlias, value.Usage.CacheReadInputTokens)
+		addInt64(&stats.OutputTokensByAlias, value.ModelAlias, value.Usage.OutputTokens)
+		addInt(&stats.NumTurnsByAlias, value.ModelAlias, value.NumTurns)
+		for model, usage := range value.ResolvedModelUsage {
+			addInt(&stats.ModelCallsByResolvedModel, model, 1)
+			addInt64(&stats.InputTokensByResolvedModel, model, usage.InputTokens)
+			addInt64(&stats.CacheCreationInputTokensByResolvedModel, model, usage.CacheCreationInputTokens)
+			addInt64(&stats.CacheReadInputTokensByResolvedModel, model, usage.CacheReadInputTokens)
+			addInt64(&stats.OutputTokensByResolvedModel, model, usage.OutputTokens)
+		}
+	})
+}
+
+func addInt(values *map[string]int, key string, value int) {
+	if key == "" || value == 0 {
+		return
+	}
+	if *values == nil {
+		*values = make(map[string]int)
+	}
+	(*values)[key] += value
+}
+
+func addInt64(values *map[string]int64, key string, value int64) {
+	if key == "" || value == 0 {
+		return
+	}
+	if *values == nil {
+		*values = make(map[string]int64)
+	}
+	(*values)[key] += value
+}
+
+// ModelCallLogPathはタスク別詳細ログの保存先を返す。
+func (s *StateStore) ModelCallLogPath(taskID string) string {
+	return s.Path(filepath.Join("telemetry", taskID+".jsonl"))
+}
+
+// ReadModelCallLogsは指定タスクの詳細ログを読み込む。
+func (s *StateStore) ReadModelCallLogs(taskID string) ([]ModelCallLog, error) {
+	file, err := os.Open(s.ModelCallLogPath(taskID))
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var result []ModelCallLog
+	scanner := bufio.NewScanner(file)
+	buffer := make([]byte, 64*1024)
+	scanner.Buffer(buffer, 4*1024*1024)
+	for scanner.Scan() {
+		var value ModelCallLog
+		if err := json.Unmarshal(scanner.Bytes(), &value); err != nil {
+			return nil, fmt.Errorf("telemetryを読めません: %w", err)
+		}
+		result = append(result, value)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}

@@ -51,8 +51,10 @@
 
 - 新規タスク開始時とreset時に前タスク統計をarchiveする。
 - worker/reviewerとmodel alias別の呼び出し回数・実行時間、Sol判断、明示fix、resume、自動fix、Sol向けpacket、model alias別rate limit、packet再圧縮を記録する。
+- Claude JSON出力のinput、cache creation、cache read、output tokenと実モデル名を呼出単位で記録し、`--stats`でalias別・実モデル別に集計する。
+- タスク別JSONLへphase、role、effort、session、system/dynamic prompt、最終response、usage、結果を`0600`で保存する。本文保存は環境変数で無効化できる。
 - `glm-worker --stats`だけが統計を表示し、通常packet出力へ統計を混在させない。
-- stats mirrorが破損・書き込み不能でも通常workflowとresetを継続し、warningを出す。
+- stats mirrorまたはtelemetryが破損・書き込み不能でも通常workflowとresetを継続し、warningを出す。
 
 
 ## Go品質ゲート

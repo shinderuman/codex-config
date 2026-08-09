@@ -54,6 +54,22 @@ func TestIntEnvRejectsInvalid(t *testing.T) {
 	}
 }
 
+func TestBoolEnv(t *testing.T) {
+	got, err := boolEnv("GLM_TEST_BOOL_UNSET", true)
+	if err != nil || !got {
+		t.Fatalf("default bool = %t, err = %v", got, err)
+	}
+	t.Setenv("GLM_TEST_BOOL", "false")
+	got, err = boolEnv("GLM_TEST_BOOL", true)
+	if err != nil || got {
+		t.Fatalf("configured bool = %t, err = %v", got, err)
+	}
+	t.Setenv("GLM_TEST_BOOL_BAD", "invalid")
+	if _, err := boolEnv("GLM_TEST_BOOL_BAD", true); err == nil {
+		t.Fatal("不正な真偽値を拒否する必要があります")
+	}
+}
+
 func TestLoadBuildsConfigFromRepositoryAndEnvironment(t *testing.T) {
 	repository := filepath.Join(t.TempDir(), "repository")
 	if err := os.MkdirAll(repository, 0o700); err != nil {
@@ -86,6 +102,7 @@ func TestLoadBuildsConfigFromRepositoryAndEnvironment(t *testing.T) {
 	t.Setenv("GLM_WORKER_EFFORT", "medium")
 	t.Setenv("GLM_WORKER_ESCALATED_EFFORT", "high")
 	t.Setenv("GLM_WORKER_MAX_AUTO_FIX_ROUNDS", "4")
+	t.Setenv("GLM_WORKER_TELEMETRY_CONTENT", "false")
 
 	loaded, err := Load()
 	if err != nil {
@@ -107,7 +124,7 @@ func TestLoadBuildsConfigFromRepositoryAndEnvironment(t *testing.T) {
 	if loaded.ClaudeBin != "claude-test" || loaded.WorkerModel != "worker-test" || loaded.ReviewerModel != "reviewer-test" || loaded.HighRiskReviewerModel != "reviewer-high-test" {
 		t.Fatalf("runner config = %#v", loaded)
 	}
-	if loaded.RoutineEffort != "medium" || loaded.EscalatedEffort != "high" || loaded.MaxAutoFixRounds != 4 {
+	if loaded.RoutineEffort != "medium" || loaded.EscalatedEffort != "high" || loaded.MaxAutoFixRounds != 4 || loaded.TelemetryContent {
 		t.Fatalf("workflow config = %#v", loaded)
 	}
 }
