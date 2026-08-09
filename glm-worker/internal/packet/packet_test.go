@@ -1,4 +1,4 @@
-package main
+package packet
 
 import (
 	"os"
@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestParseLastPacketUsesLastCompletePacket(t *testing.T) {
+func TestParseLastUsesLastCompletePacket(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "output.txt")
 	content := `noise
 PACKET_BEGIN
@@ -35,24 +35,24 @@ PACKET_END
 		t.Fatal(err)
 	}
 
-	packet, err := parseLastPacket(path)
+	p, err := ParseLast(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if packet.Status() != "NEEDS_SOL_REVIEW" {
-		t.Fatalf("status = %q", packet.Status())
+	if p.Status() != "NEEDS_SOL_REVIEW" {
+		t.Fatalf("status = %q", p.Status())
 	}
-	if packet.Risk() != "HIGH" {
-		t.Fatalf("risk = %q", packet.Risk())
+	if p.Risk() != "HIGH" {
+		t.Fatalf("risk = %q", p.Risk())
 	}
 }
 
-func TestParseLastPacketRejectsOversizedPacket(t *testing.T) {
+func TestParseLastRejectsOversizedPacket(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "output.txt")
 	content := `PACKET_BEGIN
 STATUS: IMPLEMENTED
 RISK: LOW
-SUMMARY: ` + strings.Repeat("x", maxPacketLineBytes+1) + `
+SUMMARY: ` + strings.Repeat("x", MaxPacketLineBytes+1) + `
 REQUIREMENT_COVERAGE: covered
 TESTS: pass
 UNVERIFIED: none
@@ -62,13 +62,13 @@ PACKET_END
 		t.Fatal(err)
 	}
 
-	_, err := parseLastPacket(path)
-	if err == nil || !isPacketConstraintError(err) {
+	_, err := ParseLast(path)
+	if err == nil || !IsConstraintError(err) {
 		t.Fatalf("packet constraint errorを期待しました: %v", err)
 	}
 }
 
-func TestParseLastPacketRejectsMissingRequiredField(t *testing.T) {
+func TestParseLastRejectsMissingRequiredField(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "output.txt")
 	content := `PACKET_BEGIN
 STATUS: IMPLEMENTED
@@ -82,23 +82,23 @@ PACKET_END
 		t.Fatal(err)
 	}
 
-	if _, err := parseLastPacket(path); err == nil || !isPacketConstraintError(err) {
+	if _, err := ParseLast(path); err == nil || !IsConstraintError(err) {
 		t.Fatalf("必須field欠落をpacket制約違反として拒否する必要があります: %v", err)
 	}
 }
 
-func TestParseLastPacketRejectsMissingPacket(t *testing.T) {
+func TestParseLastRejectsMissingPacket(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "output.txt")
 	if err := os.WriteFile(path, []byte("STATUS: PASS\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := parseLastPacket(path); err == nil || !isPacketConstraintError(err) {
+	if _, err := ParseLast(path); err == nil || !IsConstraintError(err) {
 		t.Fatalf("packet欠落をpacket制約違反として拒否する必要があります: %v", err)
 	}
 }
 
-func TestParseLastPacketRejectsNeedsSolReviewWithoutSolQuestion(t *testing.T) {
+func TestParseLastRejectsNeedsSolReviewWithoutSolQuestion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "output.txt")
 	content := `PACKET_BEGIN
 STATUS: NEEDS_SOL_REVIEW
@@ -115,7 +115,31 @@ PACKET_END
 		t.Fatal(err)
 	}
 
-	if _, err := parseLastPacket(path); err == nil || !isPacketConstraintError(err) {
+	if _, err := ParseLast(path); err == nil || !IsConstraintError(err) {
 		t.Fatalf("NEEDS_SOL_REVIEWのSOL_QUESTION欠落をpacket制約違反として拒否する必要があります: %v", err)
+	}
+}
+
+func TestTailReturnsRequestedLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "output.txt")
+	if err := os.WriteFile(path, []byte("one\ntwo\nthree\nfour\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := Tail(path, 2); got != "three\nfour" {
+		t.Fatalf("tail = %q", got)
+	}
+	if got := Tail(path, 0); got != "" {
+		t.Fatalf("zero tail = %q", got)
+	}
+	if got := Tail(filepath.Join(t.TempDir(), "missing"), 2); got != "" {
+		t.Fatalf("missing tail = %q", got)
+	}
+}
+
+func TestConstraintErrorIncludesReason(t *testing.T) {
+	err := &constraintError{reason: "reason"}
+	if err.Error() != "reason" {
+		t.Fatalf("error = %q", err.Error())
 	}
 }

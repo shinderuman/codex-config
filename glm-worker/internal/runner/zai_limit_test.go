@@ -1,4 +1,4 @@
-package main
+package runner
 
 import (
 	"os"
@@ -13,7 +13,7 @@ func TestDetectZaiFiveHourLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	limit, ok := detectZaiFiveHourLimit(path)
+	limit, ok := DetectZaiFiveHourLimit(path)
 	if !ok {
 		t.Fatal("expected Z.ai 5h limit")
 	}
@@ -31,7 +31,7 @@ func TestDetectZaiFiveHourLimitRejectsGeneric429(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, ok := detectZaiFiveHourLimit(path); ok {
+	if _, ok := DetectZaiFiveHourLimit(path); ok {
 		t.Fatal("generic 429 must not be treated as Z.ai 5h limit")
 	}
 }
@@ -43,7 +43,7 @@ func TestDetectZaiFiveHourLimitRejectsDifferentCode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, ok := detectZaiFiveHourLimit(path); ok {
+	if _, ok := DetectZaiFiveHourLimit(path); ok {
 		t.Fatal("different Z.ai error code must not be treated as 5h limit")
 	}
 }

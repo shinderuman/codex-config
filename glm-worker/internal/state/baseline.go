@@ -1,11 +1,15 @@
-package main
+package state
 
 import (
 	"fmt"
 	"os/exec"
+
+	"github.com/shinderuman/codex-config/glm-worker/internal/config"
 )
 
-func captureGitBaseline(config appConfig, state *stateStore) error {
+// CaptureGitBaselineはタスク開始前のgit状態をstateへ保存する。
+// gitの取得失敗時はbaselineを取り下げ(削除)しエラーとはしない。
+func CaptureGitBaseline(cfg config.AppConfig, state *StateStore) error {
 	commands := []struct {
 		name string
 		args []string
@@ -17,7 +21,7 @@ func captureGitBaseline(config appConfig, state *stateStore) error {
 
 	for _, item := range commands {
 		command := exec.Command("git", item.args...)
-		command.Dir = config.RepoRoot
+		command.Dir = cfg.RepoRoot
 		output, err := command.Output()
 		if err != nil {
 			if err := state.Remove("baseline-status", "baseline-worktree.patch", "baseline-index.patch"); err != nil {
@@ -32,7 +36,8 @@ func captureGitBaseline(config appConfig, state *stateStore) error {
 	return nil
 }
 
-func (s *stateStore) BaselineDescription() string {
+// BaselineDescriptionはreviewerへ示すbaseline情報を返す。
+func (s *StateStore) BaselineDescription() string {
 	if !s.Exists("baseline-status") {
 		return "none"
 	}

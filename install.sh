@@ -5,6 +5,7 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 codex_dir="${CODEX_CONFIG_DIR:-$HOME/.codex}"
 bin_dir="${GLM_WORKER_BIN_DIR:-$HOME/.local/bin}"
 claude_settings="${CLAUDE_SETTINGS_FILE:-$HOME/.claude/settings.json}"
+glm_worker_home="${GLM_WORKER_HOME:-$HOME/.glm-worker}"
 
 require() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -183,8 +184,7 @@ build_glm_worker() {
 
     (
         cd "$repo_root/glm-worker"
-        go test ./...
-        go build -buildvcs=false -trimpath -o "$build_dir/glm-worker" .
+        go build -buildvcs=false -trimpath -o "$build_dir/glm-worker" ./cmd/glm-worker
     )
 
     mkdir -p "$bin_dir"
@@ -206,7 +206,7 @@ preflight() {
     if ! (
         cd "$repo_root/glm-worker"
         go test ./...
-        go build -buildvcs=false -trimpath -o "$build_dir/glm-worker" .
+        go build -buildvcs=false -trimpath -o "$build_dir/glm-worker" ./cmd/glm-worker
 
         cd "$repo_root/tools/merge-json"
         go test ./...
@@ -265,7 +265,7 @@ merge_codex_config
 merge_claude_settings
 install_pull_hook
 
-mkdir -p "$HOME/.glm-worker/sessions"
+mkdir -p "$glm_worker_home/sessions"
 
 printf '%s\n' 'install complete'
 printf '%s\n' 'Codexルールの再読込を保証するには、新しいCodexタスクを開始してください。'

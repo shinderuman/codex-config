@@ -1,6 +1,11 @@
-package main
+package workflow
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/shinderuman/codex-config/glm-worker/internal/packet"
+	"github.com/shinderuman/codex-config/glm-worker/internal/state"
+)
 
 func newTaskPrompt(request string) string {
 	return fmt.Sprintf(`MODE: NEW_TASK
@@ -42,7 +47,7 @@ REVIEW_FEEDBACK:
 `, request, decision, previousReview, instruction)
 }
 
-func reviewerPrompt(request string, decision string, workerPacket packet, reviewNumber int, baseline string) string {
+func reviewerPrompt(request string, decision string, workerPacket packet.Packet, reviewNumber int, baseline string) string {
 	return fmt.Sprintf(`REVIEW_MODE: INDEPENDENT_REVIEW
 
 USER_REQUEST:
@@ -65,7 +70,7 @@ PRE_TASK_BASELINEのファイルはworker開始前の状態です。既存未コ
 `, request, decision, workerPacket.String(), reviewNumber, baseline)
 }
 
-func automaticFixPrompt(request string, decision string, reviewPacket packet) string {
+func automaticFixPrompt(request string, decision string, reviewPacket packet.Packet) string {
 	return fmt.Sprintf(`MODE: APPLY_REVIEW_FIX
 
 ORIGINAL_USER_REQUEST:
@@ -91,4 +96,22 @@ func packetCompressionPrompt(reason string) string {
 違反内容:
 %s
 `, reason)
+}
+
+// resumePromptは5h上限中断タスクの同一session再開用の指示を組み立てる。
+func resumePrompt(checkpoint state.ResumeCheckpoint) string {
+	originalPrompt := checkpoint.OriginalPrompt
+	if originalPrompt == "" {
+		originalPrompt = checkpoint.Prompt
+	}
+
+	return fmt.Sprintf(`前回のClaude Code呼び出しはZ.ai GLM Coding Planの5時間利用上限で中断しました。
+
+同じタスク・同じsessionの中断箇所から作業を再開してください。
+現在のworking treeには前回の途中変更が残っている可能性があります。破棄せず、session文脈と照合して続行してください。
+最初から調査・実装をやり直さず、未完了部分だけを進めて所定のPACKETまで完了してください。
+
+前回の指示:
+%s
+`, originalPrompt)
 }

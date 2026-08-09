@@ -1,4 +1,4 @@
-package main
+package state
 
 import (
 	"encoding/json"
@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/shinderuman/codex-config/glm-worker/internal/packet"
 )
 
 const currentStatsFile = "task-stats.json"
@@ -18,12 +20,13 @@ const currentStatsFile = "task-stats.json"
 // mirrorの失敗はworkflowを止めずこのwriterへwarningを出す。
 var statsWarnOut io.Writer = os.Stderr
 
-type taskStats struct {
+// TaskStatsは観測用のタスク統計mirror。
+type TaskStats struct {
 	Version                 int        `json:"version"`
 	TaskID                  string     `json:"task_id"`
 	StartedAt               time.Time  `json:"started_at"`
 	ArchivedAt              *time.Time `json:"archived_at,omitempty"`
-	Status                  taskStatus `json:"status"`
+	Status                  TaskStatus `json:"status"`
 	ModelCalls              int        `json:"model_calls"`
 	WorkerCalls             int        `json:"worker_calls"`
 	ReviewerCalls           int        `json:"reviewer_calls"`
@@ -45,12 +48,12 @@ func warnStatsFailure(operation string, err error) {
 
 // InitializeTaskStatsは新規taskの観測用mirrorを初期化する。
 // 失敗してもtask.statusなど正規状態へ影響しないためwarningだけ出す。
-func (s *stateStore) InitializeTaskStats(taskID string) {
-	stats := taskStats{
+func (s *StateStore) InitializeTaskStats(taskID string) {
+	stats := TaskStats{
 		Version:   1,
 		TaskID:    taskID,
 		StartedAt: time.Now().UTC(),
-		Status:    taskStatusActive,
+		Status:    TaskStatusActive,
 	}
 	if err := s.writeTaskStats(stats); err != nil {
 		warnStatsFailure("初期化", err)
@@ -60,7 +63,7 @@ func (s *stateStore) InitializeTaskStats(taskID string) {
 // UpdateTaskStatsは観測用mirrorを読み込んで更新する。
 // task.idが無い場合は何もしない。corruptionやI/O失敗は正規状態へ影響させないため
 // warningを出し、読み込み不能ならtask.idからmirrorを再構築する。
-func (s *stateStore) UpdateTaskStats(update func(*taskStats)) {
+func (s *StateStore) UpdateTaskStats(update func(*TaskStats)) {
 	stats, err := s.loadTaskStats()
 	if err != nil {
 		stats, err = s.recoverTaskStats(err)
@@ -77,7 +80,7 @@ func (s *stateStore) UpdateTaskStats(update func(*taskStats)) {
 // recoverTaskStatsはloadTaskStatsの失敗からmirrorを復旧する。
 // ファイル不在でtask.idも無い場合は記録対象がないので何もしない。
 // corruption・I/O失敗の場合はtask.idから再構築し、内容は失われるがmirrorは継続利用できる。
-func (s *stateStore) recoverTaskStats(loadErr error) (taskStats, error) {
+func (s *StateStore) recoverTaskStats(loadErr error) (TaskStats, error) {
 	if errors.Is(loadErr, os.ErrNotExist) {
 		return s.bootstrapTaskStats()
 	}
@@ -85,12 +88,12 @@ func (s *stateStore) recoverTaskStats(loadErr error) (taskStats, error) {
 	return s.bootstrapTaskStats()
 }
 
-func (s *stateStore) bootstrapTaskStats() (taskStats, error) {
+func (s *StateStore) bootstrapTaskStats() (TaskStats, error) {
 	taskID, taskErr := s.Read("task.id")
 	if taskErr != nil || taskID == "" {
-		return taskStats{}, fmt.Errorf("task.idがありません")
+		return TaskStats{}, fmt.Errorf("task.idがありません")
 	}
-	return taskStats{
+	return TaskStats{
 		Version:   1,
 		TaskID:    taskID,
 		StartedAt: time.Now().UTC(),
@@ -100,8 +103,8 @@ func (s *stateStore) bootstrapTaskStats() (taskStats, error) {
 
 // ArchiveCurrentStatsは現在taskのmirrorをstats履歴へ移動する。
 // 読み込み不能なmirrorを履歴へ持ち込まないよう、corruption時は移動をskipする。
-// すべての失敗はbest-effortでwarningだけ出し、新規task開始や--resetを止めない。
-func (s *stateStore) ArchiveCurrentStats() {
+// すべての失敗はbest-effortでwarningだけ出し、新規task開始やresetを止めない。
+func (s *StateStore) ArchiveCurrentStats() {
 	stats, err := s.loadTaskStats()
 	if errors.Is(err, os.ErrNotExist) {
 		return
@@ -128,19 +131,19 @@ func (s *stateStore) ArchiveCurrentStats() {
 	}
 }
 
-func (s *stateStore) loadTaskStats() (taskStats, error) {
+func (s *StateStore) loadTaskStats() (TaskStats, error) {
 	data, err := os.ReadFile(s.Path(currentStatsFile))
 	if err != nil {
-		return taskStats{}, err
+		return TaskStats{}, err
 	}
-	var stats taskStats
+	var stats TaskStats
 	if err := json.Unmarshal(data, &stats); err != nil {
-		return taskStats{}, fmt.Errorf("task statsを読めません: %w", err)
+		return TaskStats{}, fmt.Errorf("task statsを読めません: %w", err)
 	}
 	return stats, nil
 }
 
-func (s *stateStore) writeTaskStats(stats taskStats) error {
+func (s *StateStore) writeTaskStats(stats TaskStats) error {
 	data, err := json.MarshalIndent(stats, "", "  ")
 	if err != nil {
 		return fmt.Errorf("task statsをJSON化できません: %w", err)
@@ -148,107 +151,10 @@ func (s *stateStore) writeTaskStats(stats taskStats) error {
 	return writeFileAtomic(s.Path(currentStatsFile), append(data, '\n'), 0o600)
 }
 
-func (s *stateStore) RecordModelCall(role sessionRole) {
-	s.UpdateTaskStats(func(stats *taskStats) {
-		stats.ModelCalls++
-		if role == reviewerRole {
-			stats.ReviewerCalls++
-		} else {
-			stats.WorkerCalls++
-		}
-	})
-}
-
-func (s *stateStore) RecordCommand(mode commandMode) {
-	s.UpdateTaskStats(func(stats *taskStats) {
-		switch mode {
-		case modeDecision:
-			stats.DecisionCommands++
-		case modeFix:
-			stats.FixCommands++
-		case modeResume:
-			stats.ResumeCommands++
-		}
-	})
-}
-
-func (s *stateStore) RecordAutoFix() {
-	s.UpdateTaskStats(func(stats *taskStats) {
-		stats.AutoFixRounds++
-	})
-}
-
-func (s *stateStore) RecordRateLimit() {
-	s.UpdateTaskStats(func(stats *taskStats) {
-		stats.RateLimits++
-	})
-}
-
-func (s *stateStore) RecordPacketCompaction() {
-	s.UpdateTaskStats(func(stats *taskStats) {
-		stats.PacketCompactions++
-	})
-}
-
-func (s *stateStore) RecordSolPacket(value packet) {
-	s.UpdateTaskStats(func(stats *taskStats) {
-		stats.SolPacketBytes += value.ByteSize()
-		switch value.Status() {
-		case "NEEDS_SOL_DECISION":
-			stats.NeedsSolDecisionPackets++
-		case "NEEDS_SOL_REVIEW":
-			stats.NeedsSolReviewPackets++
-		case "PASS":
-			stats.PassPackets++
-		}
-	})
-}
-
-func printStats(state *stateStore) error {
-	all, err := state.allTaskStats()
-	if err != nil {
-		return err
-	}
-	aggregate := taskStats{}
-	for _, stats := range all {
-		aggregate.ModelCalls += stats.ModelCalls
-		aggregate.WorkerCalls += stats.WorkerCalls
-		aggregate.ReviewerCalls += stats.ReviewerCalls
-		aggregate.DecisionCommands += stats.DecisionCommands
-		aggregate.FixCommands += stats.FixCommands
-		aggregate.ResumeCommands += stats.ResumeCommands
-		aggregate.AutoFixRounds += stats.AutoFixRounds
-		aggregate.NeedsSolDecisionPackets += stats.NeedsSolDecisionPackets
-		aggregate.NeedsSolReviewPackets += stats.NeedsSolReviewPackets
-		aggregate.PassPackets += stats.PassPackets
-		aggregate.RateLimits += stats.RateLimits
-		aggregate.PacketCompactions += stats.PacketCompactions
-		aggregate.SolPacketBytes += stats.SolPacketBytes
-	}
-
-	fmt.Printf("TASKS: %d\n", len(all))
-	fmt.Printf("MODEL_CALLS: %d\n", aggregate.ModelCalls)
-	fmt.Printf("WORKER_CALLS: %d\n", aggregate.WorkerCalls)
-	fmt.Printf("REVIEWER_CALLS: %d\n", aggregate.ReviewerCalls)
-	fmt.Printf("DECISION_COMMANDS: %d\n", aggregate.DecisionCommands)
-	fmt.Printf("FIX_COMMANDS: %d\n", aggregate.FixCommands)
-	fmt.Printf("RESUME_COMMANDS: %d\n", aggregate.ResumeCommands)
-	fmt.Printf("AUTO_FIX_ROUNDS: %d\n", aggregate.AutoFixRounds)
-	fmt.Printf("NEEDS_SOL_DECISION_PACKETS: %d\n", aggregate.NeedsSolDecisionPackets)
-	fmt.Printf("NEEDS_SOL_REVIEW_PACKETS: %d\n", aggregate.NeedsSolReviewPackets)
-	fmt.Printf("PASS_PACKETS: %d\n", aggregate.PassPackets)
-	fmt.Printf("RATE_LIMITS: %d\n", aggregate.RateLimits)
-	fmt.Printf("PACKET_COMPACTIONS: %d\n", aggregate.PacketCompactions)
-	fmt.Printf("SOL_PACKET_BYTES: %d\n", aggregate.SolPacketBytes)
-	fmt.Printf("CURRENT_TASK_ID: %s\n", state.ReadOr("task.id", "none"))
-	fmt.Printf("CURRENT_TASK_STATUS: %s\n", state.TaskStatus())
-	return nil
-}
-
-// allTaskStatsは--stats専用の集計を行う。
+// AllTaskStatsは--stats専用に履歴と現在のmirrorを全件読み込む。
 // 明示操作のため、読み込み失敗はエラーとして呼び出し元へ返す。
-func (s *stateStore) allTaskStats() ([]taskStats, error) {
-	result := make([]taskStats, 0)
+func (s *StateStore) AllTaskStats() ([]TaskStats, error) {
+	result := make([]TaskStats, 0)
 	historyPaths, err := filepath.Glob(filepath.Join(s.dir, "stats", "*.json"))
 	if err != nil {
 		return nil, err
@@ -259,7 +165,7 @@ func (s *stateStore) allTaskStats() ([]taskStats, error) {
 		if err != nil {
 			return nil, err
 		}
-		var stats taskStats
+		var stats TaskStats
 		if err := json.Unmarshal(data, &stats); err != nil {
 			return nil, fmt.Errorf("task stats historyを読めません: %w", err)
 		}
@@ -272,4 +178,88 @@ func (s *stateStore) allTaskStats() ([]taskStats, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+func (s *StateStore) RecordModelCall(role SessionRole) {
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		stats.ModelCalls++
+		if role == ReviewerRole {
+			stats.ReviewerCalls++
+		} else {
+			stats.WorkerCalls++
+		}
+	})
+}
+
+func (s *StateStore) RecordDecision() {
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		stats.DecisionCommands++
+	})
+}
+
+func (s *StateStore) RecordFix() {
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		stats.FixCommands++
+	})
+}
+
+func (s *StateStore) RecordResume() {
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		stats.ResumeCommands++
+	})
+}
+
+func (s *StateStore) RecordAutoFix() {
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		stats.AutoFixRounds++
+	})
+}
+
+func (s *StateStore) RecordRateLimit() {
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		stats.RateLimits++
+	})
+}
+
+func (s *StateStore) RecordPacketCompaction() {
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		stats.PacketCompactions++
+	})
+}
+
+func (s *StateStore) RecordSolPacket(value packet.Packet) {
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		stats.SolPacketBytes += value.ByteSize()
+		switch value.Status() {
+		case "NEEDS_SOL_DECISION":
+			stats.NeedsSolDecisionPackets++
+		case "NEEDS_SOL_REVIEW":
+			stats.NeedsSolReviewPackets++
+		case "PASS":
+			stats.PassPackets++
+		}
+	})
+}
+
+// Resetは現在タスクの状態・session・baseline・resume checkpointをクリアし、
+// 現在mirrorをstats履歴へアーカイブする。出力は呼び出し側(app)の責務。
+func (s *StateStore) Reset() error {
+	s.ArchiveCurrentStats()
+	names := []string{
+		"task.id",
+		"task.status",
+		"worker.id",
+		"worker.ready",
+		"reviewer.id",
+		"reviewer.ready",
+		"last-request",
+		"last-decision",
+		"pending-decision",
+		"last-review",
+		"baseline-status",
+		"baseline-worktree.patch",
+		"baseline-index.patch",
+		resumeStateFile,
+	}
+	return s.Remove(names...)
 }

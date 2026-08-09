@@ -5,10 +5,13 @@
 - `~/.codex/config.toml`のPC固有設定が残る。
 - `~/.claude/settings.json`の既存設定が残る。
 - `glm-worker`がbuildされる。
+- `glm-worker`のentrypointが`cmd/glm-worker`にあり、実装が`internal`の責務別packageに分離されている。
 - cloneしたリポジトリでは`git pull`後に`install.sh`が動く。
 - リポジトリ側で削除・改名された管理ファイルは次回install時に配置先から消える。
 - sourceのtest/buildが失敗した場合、管理ファイルの配置を開始しない。
 - install完了時に、新しいCodexタスクでのルール再読込が必要な旨を表示する。
+- `GLM_WORKER_HOME`を指定した場合、その配下へ`sessions`を作成し、`~/.glm-worker`へ作成しない。
+- `./tests/install_smoke.sh`で2回実行、隔離先への配置、preflight失敗時の無変更を確認する。
 
 
 
@@ -40,3 +43,13 @@
 - 新規タスク開始時とreset時に前タスク統計をarchiveする。
 - worker/reviewer呼び出し、Sol判断、明示fix、resume、自動fix、Sol向けpacket、rate limit、packet再圧縮を記録する。
 - `glm-worker --stats`だけが統計を表示し、通常packet出力へ統計を混在させない。
+- stats mirrorが破損・書き込み不能でも通常workflowとresetを継続し、warningを出す。
+
+
+## Go品質ゲート
+
+- `go test ./...`が成功する。
+- `go test -race ./...`が成功する。
+- `go vet ./...`が成功する。
+- `go build -o /dev/null ./cmd/glm-worker`が成功する。
+- package別coverageでCLI、config、runner、state遷移、workflowの主要分岐に未検証箇所がないか確認する。

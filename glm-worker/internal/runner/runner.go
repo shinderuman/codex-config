@@ -1,27 +1,32 @@
-package main
+// Package runnerはClaude Code CLIプロセスの起動とZ.ai 5h上限判定を担う。
+package runner
 
 import (
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+
+	"github.com/shinderuman/codex-config/glm-worker/internal/config"
+	"github.com/shinderuman/codex-config/glm-worker/internal/state"
 )
 
-type modelRunner interface {
-	Run(role sessionRole, readOnly bool, effort string, prompt string, outputPath string) error
+// ClaudeRunnerはClaude Code CLIを実際に起動するrunner実装。
+type ClaudeRunner struct {
+	config config.AppConfig
+	state  *state.StateStore
 }
 
-type claudeRunner struct {
-	config appConfig
-	state  *stateStore
+// NewClaudeRunnerはClaudeRunnerを構築する。
+func NewClaudeRunner(cfg config.AppConfig, st *state.StateStore) *ClaudeRunner {
+	return &ClaudeRunner{config: cfg, state: st}
 }
 
-func newClaudeRunner(config appConfig, state *stateStore) *claudeRunner {
-	return &claudeRunner{config: config, state: state}
-}
-
-func (r *claudeRunner) Run(
-	role sessionRole,
+// Runはrole/effort/promptでClaude Codeを起動し出力をoutputPathへ書き出す。
+// 初回起動時は新規sessionを採番し、2回目以降は同一sessionへresumeする。
+func (r *ClaudeRunner) Run(
+	role state.SessionRole,
 	readOnly bool,
 	effort string,
 	prompt string,
@@ -93,24 +98,44 @@ func (r *claudeRunner) Run(
 	return nil
 }
 
-func promptFileName(role sessionRole) string {
-	if role == reviewerRole {
+func promptFileName(role state.SessionRole) string {
+	if role == state.ReviewerRole {
 		return "REVIEWER.md"
 	}
 	return "WORKER.md"
 }
 
-func (r *claudeRunner) modelForRole(role sessionRole) string {
-	if role == reviewerRole {
+func (r *ClaudeRunner) modelForRole(role state.SessionRole) string {
+	if role == state.ReviewerRole {
 		return r.config.ReviewerModel
 	}
 	return r.config.WorkerModel
 }
 
-func (r *claudeRunner) sessionName(role sessionRole) string {
+func (r *ClaudeRunner) sessionName(role state.SessionRole) string {
 	taskID := r.state.TaskID()
 	if len(taskID) > 8 {
 		taskID = taskID[:8]
 	}
 	return fmt.Sprintf("glm-%s-%s-%s", role, r.config.RepoShort, taskID)
+}
+
+// envWithDefaultsはbaseにdefaultsの未設定キーだけを追加する。
+func envWithDefaults(base []string, defaults map[string]string) []string {
+	result := append([]string(nil), base...)
+	present := make(map[string]bool)
+
+	for _, item := range base {
+		if index := strings.IndexByte(item, '='); index >= 0 {
+			present[item[:index]] = true
+		}
+	}
+
+	for key, value := range defaults {
+		if !present[key] {
+			result = append(result, key+"="+value)
+		}
+	}
+
+	return result
 }

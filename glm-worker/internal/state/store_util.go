@@ -1,18 +1,13 @@
-package main
+package state
 
 import (
-	"bytes"
 	"crypto/rand"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
-func stringTrimSpace(value []byte) string {
-	return strings.TrimSpace(string(value))
-}
-
+// newUUIDはUUID version 4形式の文字列を生成する。
 func newUUID() (string, error) {
 	var value [16]byte
 	if _, err := rand.Read(value[:]); err != nil {
@@ -32,6 +27,7 @@ func newUUID() (string, error) {
 	), nil
 }
 
+// writeFileAtomicは一時ファイルへ書き込みrenameで原子的に置換する。
 func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -59,27 +55,4 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	}
 
 	return os.Rename(tempPath, path)
-}
-
-func envWithDefaults(base []string, defaults map[string]string) []string {
-	result := append([]string(nil), base...)
-	present := make(map[string]bool)
-
-	for _, item := range base {
-		if index := strings.IndexByte(item, '='); index >= 0 {
-			present[item[:index]] = true
-		}
-	}
-
-	for key, value := range defaults {
-		if !present[key] {
-			result = append(result, key+"="+value)
-		}
-	}
-
-	return result
-}
-
-func equalBytes(a []byte, b []byte) bool {
-	return bytes.Equal(a, b)
 }

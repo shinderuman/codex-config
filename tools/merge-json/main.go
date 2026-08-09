@@ -49,7 +49,6 @@ func mergeFiles(targetPath string, fragmentPath string) (bool, error) {
 		return false, nil
 	}
 
-
 	data, err := json.MarshalIndent(target, "", "  ")
 	if err != nil {
 		return false, err

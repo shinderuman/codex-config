@@ -56,14 +56,62 @@ codex-config/
 │   └── glm-worker/
 │       └── prompts/
 ├── glm-worker/
-│   └── Goソース
+│   ├── cmd/
+│   │   └── glm-worker/       # CLI entrypoint
+│   └── internal/
+│       ├── app/              # 引数解析・ロック・出力
+│       ├── config/           # 環境変数・リポジトリ設定
+│       ├── packet/           # PACKET解析・検証
+│       ├── runner/           # Claude Codeプロセス実行
+│       ├── state/            # task・session・stats・resume状態
+│       └── workflow/         # worker/reviewer状態機械
 ├── claude/
 │   └── settings-managed.json
 ├── tools/
 │   └── merge-json/
+├── tests/
+│   └── install_smoke.sh
 └── .githooks/
     └── post-merge
 ```
+
+`cmd/glm-worker`は薄いentrypointとし、外部公開しない実装は`internal`配下へ置く。
+package間の依存は`app`から各機能へ向け、状態永続化とworkflowを分離する。
+
+
+## glm-worker CLI
+
+```sh
+glm-worker "<新規タスク>"
+glm-worker --decision "<Sol判断>"
+glm-worker --fix "<NEEDS_SOL_REVIEWへの修正指示>"
+glm-worker --resume
+glm-worker --status
+glm-worker --stats
+glm-worker --reset
+```
+
+- `--decision`は`NEEDS_SOL_DECISION`で停止した同一タスクを継続する。
+- `--fix`は`NEEDS_SOL_REVIEW`後だけ利用できる。
+- `--resume`はZ.ai 5時間上限で停止した同一phase・sessionを再開する。
+- `--status`と`--stats`は参照専用、`--reset`は現在の統計をarchiveして実行状態を消去する。
+
+主な環境変数:
+
+| 変数 | 既定値 | 用途 |
+|---|---|---|
+| `GLM_WORKER_HOME` | `~/.glm-worker` | task・session・statsの保存先 |
+| `GLM_WORKER_PROMPT_DIR` | `~/.codex/glm-worker/prompts` | worker/reviewer prompt |
+| `GLM_WORKER_CLAUDE_BIN` | `claude` | Claude Code実行ファイル |
+| `GLM_WORKER_WORKER_MODEL` | `opus` | worker model alias |
+| `GLM_WORKER_REVIEWER_MODEL` | `haiku` | reviewer model alias |
+| `GLM_WORKER_EFFORT` | `high` | 通常実行effort |
+| `GLM_WORKER_ESCALATED_EFFORT` | `max` | Sol判断後・明示fixのeffort |
+| `GLM_WORKER_MAX_AUTO_FIX_ROUNDS` | `2` | 自動修正の上限回数 |
+
+リポジトリごとの状態は`$GLM_WORKER_HOME/sessions/<repo SHA-256>/`へ保存する。
+`task.status`を正規状態とし、`task-stats.json`は観測用mirrorとして扱う。
+statsの破損・書き込み失敗はwarningを出してworkflowを継続し、明示的な`--stats`だけは読み込みエラーを返す。
 
 
 ## Z.ai 5時間上限からの再開
@@ -126,3 +174,16 @@ glm-worker --stats
 - rate limit、packet再圧縮、Solへ返したpacket bytes
 
 新規タスク開始時に前タスクの統計をarchiveし、`--reset`時も現在値を破棄せずarchiveする。
+
+
+## 開発時の検証
+
+```sh
+cd glm-worker
+go test ./...
+go test -race ./...
+go vet ./...
+go build -o /dev/null ./cmd/glm-worker
+cd ..
+./tests/install_smoke.sh
+```

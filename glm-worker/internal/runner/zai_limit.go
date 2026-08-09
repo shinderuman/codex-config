@@ -1,4 +1,4 @@
-package main
+package runner
 
 import (
 	"fmt"
@@ -15,29 +15,31 @@ const (
 
 var zaiResetPattern = regexp.MustCompile(`Your limit will reset at ([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})`)
 
-type zaiFiveHourLimit struct {
+// ZaiFiveHourLimitはZ.ai GLM Coding Planの5h上限到達情報を表す。
+type ZaiFiveHourLimit struct {
 	ResetAtCST     string
 	ResetAtRFC3339 string
 }
 
-func detectZaiFiveHourLimit(path string) (zaiFiveHourLimit, bool) {
+// DetectZaiFiveHourLimitは出力ログからZ.ai 5h上限到達を検出する。
+func DetectZaiFiveHourLimit(path string) (ZaiFiveHourLimit, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return zaiFiveHourLimit{}, false
+		return ZaiFiveHourLimit{}, false
 	}
 
 	output := string(data)
 	if !strings.Contains(output, "Request rejected (429)") {
-		return zaiFiveHourLimit{}, false
+		return ZaiFiveHourLimit{}, false
 	}
 	if !strings.Contains(output, "["+zaiFiveHourLimitCode+"]") {
-		return zaiFiveHourLimit{}, false
+		return ZaiFiveHourLimit{}, false
 	}
 	if !strings.Contains(output, zaiFiveHourMessage) {
-		return zaiFiveHourLimit{}, false
+		return ZaiFiveHourLimit{}, false
 	}
 
-	limit := zaiFiveHourLimit{}
+	limit := ZaiFiveHourLimit{}
 	match := zaiResetPattern.FindStringSubmatch(output)
 	if len(match) != 2 {
 		return limit, true
@@ -59,12 +61,13 @@ func detectZaiFiveHourLimit(path string) (zaiFiveHourLimit, bool) {
 	return limit, true
 }
 
-type zaiRateLimitError struct {
+// ZaiRateLimitErrorは5h上限到達を呼び出し元へ伝達する業務エラー。
+type ZaiRateLimitError struct {
 	Phase string
-	Limit zaiFiveHourLimit
+	Limit ZaiFiveHourLimit
 }
 
-func (e zaiRateLimitError) Error() string {
+func (e ZaiRateLimitError) Error() string {
 	resetAtCST := e.Limit.ResetAtCST
 	if resetAtCST == "" {
 		resetAtCST = "unknown"

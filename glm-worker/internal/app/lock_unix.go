@@ -1,6 +1,6 @@
 //go:build unix
 
-package main
+package app
 
 import (
 	"fmt"
@@ -8,11 +8,13 @@ import (
 	"syscall"
 )
 
-type repoLock struct {
+// RepoLockはリポジトリ別のプロセス間ロック。
+type RepoLock struct {
 	file *os.File
 }
 
-func acquireRepoLock(path string) (*repoLock, error) {
+// AcquireRepoLockはflock(LOCK_EX|LOCK_NB)で排他ロックを取得する。
+func AcquireRepoLock(path string) (*RepoLock, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("GLM worker lockを開けません: %w", err)
@@ -27,10 +29,11 @@ func acquireRepoLock(path string) (*repoLock, error) {
 		_, _ = fmt.Fprintf(file, "%d\n", os.Getpid())
 	}
 
-	return &repoLock{file: file}, nil
+	return &RepoLock{file: file}, nil
 }
 
-func (l *repoLock) Close() error {
+// Closeはロックを解放する。
+func (l *RepoLock) Close() error {
 	if l == nil || l.file == nil {
 		return nil
 	}
