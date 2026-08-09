@@ -138,6 +138,41 @@ func TestRunModelRecompactsInvalidPacketInSameRunner(t *testing.T) {
 	}
 }
 
+func TestRunModelPreservesPacketCompressionPromptAcrossRateLimit(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{steps: []runnerStep{
+		{output: "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: " + strings.Repeat("x", packet.MaxPacketLineBytes+1) + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nPACKET_END\n"},
+		{output: zaiFiveHourLog, runErr: errors.New("exit status 1")},
+	}}
+	w := newWorkflowT(t, st, r)
+	w.temp = t.TempDir()
+
+	_, err := w.runModel(state.ResumeCheckpoint{
+		Stage:          state.ResumeStageWorker,
+		Phase:          "worker-new",
+		Role:           state.WorkerRole,
+		Effort:         "high",
+		Prompt:         "original implementation prompt",
+		OriginalPrompt: "original implementation prompt",
+		Request:        "request",
+	})
+	if err == nil || !strings.Contains(err.Error(), "STATUS: RATE_LIMITED") {
+		t.Fatalf("packet再圧縮中のrate limit errorを期待: %v", err)
+	}
+
+	checkpoint, loadErr := st.LoadResumeCheckpoint()
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if !checkpoint.PacketCompacted || !strings.Contains(checkpoint.OriginalPrompt, "PACKETだけを再出力") {
+		t.Fatalf("再圧縮promptがcheckpointに保持されていません: %#v", checkpoint)
+	}
+	resumed := resumePrompt(checkpoint)
+	if !strings.Contains(resumed, "PACKETだけを再出力") || strings.Contains(resumed, "original implementation prompt") {
+		t.Fatalf("resumeが再圧縮工程を指していません: %s", resumed)
+	}
+}
+
 func TestExecuteExplicitFixRejectsCompletedTask(t *testing.T) {
 	st := newStateStoreT(t)
 	if err := st.Write("last-request", "request"); err != nil {
@@ -423,6 +458,48 @@ func TestExecuteResumeContinuesAfterRateLimit(t *testing.T) {
 	}
 }
 
+func TestExecuteResumeRestoresRateLimitedStatusAfterRunnerError(t *testing.T) {
+	st := newStateStoreT(t)
+	original := state.ResumeCheckpoint{
+		Stage:          state.ResumeStageWorker,
+		Phase:          "worker-new",
+		Role:           state.WorkerRole,
+		Effort:         "high",
+		Prompt:         "p",
+		OriginalPrompt: "p",
+		Request:        "req",
+		RateLimited:    true,
+		ResetAtCST:     "2026-07-22 14:06:34",
+		ResetAtRFC3339: "2026-07-22T14:06:34+08:00",
+	}
+	if err := st.SaveResumeCheckpoint(original); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetTaskStatus(state.TaskStatusRateLimited); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &scriptedRunner{steps: []runnerStep{{
+		output: "503 temporary service error\n",
+		runErr: errors.New("exit status 1"),
+	}}}
+	w := newWorkflowT(t, st, r)
+	err := w.ExecuteResume()
+	if err == nil || !strings.Contains(err.Error(), "503 temporary service error") {
+		t.Fatalf("runner errorを期待: %v", err)
+	}
+	if st.TaskStatus() != state.TaskStatusRateLimited {
+		t.Fatalf("status = %q", st.TaskStatus())
+	}
+	restored, loadErr := st.LoadResumeCheckpoint()
+	if loadErr != nil || !restored.RateLimited {
+		t.Fatalf("rate-limit checkpointが復元されていません: checkpoint=%#v err=%v", restored, loadErr)
+	}
+	if len(r.prompts) != 1 {
+		t.Fatalf("runner calls = %d", len(r.prompts))
+	}
+}
+
 func TestExecuteResumeContinuesReviewerStage(t *testing.T) {
 	st := newStateStoreT(t)
 	if err := st.SaveResumeCheckpoint(state.ResumeCheckpoint{
@@ -506,12 +583,25 @@ func TestExecuteResumeRejectsUnknownStage(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.SetTaskStatus(state.TaskStatusRateLimited); err != nil {
+		t.Fatal(err)
+	}
 	r := &scriptedRunner{steps: []runnerStep{{output: implementedPacket("done")}}}
 	w := newWorkflowT(t, st, r)
 
 	err := w.ExecuteResume()
 	if err == nil || !strings.Contains(err.Error(), "unknown resume stage") {
 		t.Fatalf("unknown stage error = %v", err)
+	}
+	if len(r.prompts) != 0 {
+		t.Fatalf("不正stageでrunnerが呼ばれました: calls=%d", len(r.prompts))
+	}
+	checkpoint, loadErr := st.LoadResumeCheckpoint()
+	if loadErr != nil || !checkpoint.RateLimited || checkpoint.Stage != state.ResumeStage("unknown") {
+		t.Fatalf("不正stageのcheckpointが保持されていません: checkpoint=%#v err=%v", checkpoint, loadErr)
+	}
+	if st.TaskStatus() != state.TaskStatusRateLimited {
+		t.Fatalf("status = %q", st.TaskStatus())
 	}
 }
 

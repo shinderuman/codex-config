@@ -180,6 +180,9 @@ func (w *Workflow) ExecuteResume() error {
 		if !checkpoint.RateLimited {
 			return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: saved task is not stopped by Z.ai 5h limit")
 		}
+		if !isKnownResumeStage(checkpoint.Stage) {
+			return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: unknown resume stage: %s", checkpoint.Stage)
+		}
 
 		previousCheckpoint := checkpoint
 		if err := w.state.SetTaskStatus(state.TaskStatusActive); err != nil {
@@ -197,6 +200,7 @@ func (w *Workflow) ExecuteResume() error {
 			if loadErr != nil || !saved.RateLimited {
 				_ = w.state.SaveResumeCheckpoint(previousCheckpoint)
 			}
+			_ = w.state.SetTaskStatus(state.TaskStatusRateLimited)
 			return err
 		}
 
@@ -226,6 +230,15 @@ func (w *Workflow) ExecuteResume() error {
 			return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: unknown resume stage: %s", checkpoint.Stage)
 		}
 	})
+}
+
+func isKnownResumeStage(stage state.ResumeStage) bool {
+	switch stage {
+	case state.ResumeStageWorker, state.ResumeStageReview, state.ResumeStageAutoFix:
+		return true
+	default:
+		return false
+	}
 }
 
 func (w *Workflow) handleWorkerResult(request string, workerPacket packet.Packet) error {
@@ -464,7 +477,9 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 			w.state.RecordPacketCompaction()
 			compactCheckpoint := checkpoint
 			compactCheckpoint.Phase += "-packet-compact"
-			compactCheckpoint.Prompt = packetCompressionPrompt(err.Error())
+			compactPrompt := packetCompressionPrompt(err.Error())
+			compactCheckpoint.Prompt = compactPrompt
+			compactCheckpoint.OriginalPrompt = compactPrompt
 			compactCheckpoint.PacketCompacted = true
 			return w.runModel(compactCheckpoint)
 		}
