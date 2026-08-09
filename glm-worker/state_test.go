@@ -35,3 +35,38 @@ func TestSessionIDPersists(t *testing.T) {
 		t.Fatal("unexpected state path")
 	}
 }
+
+func TestStartNewTaskRotatesSessions(t *testing.T) {
+	state := &stateStore{dir: t.TempDir()}
+
+	firstTask, err := state.StartNewTask()
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstWorker, _, err := state.SessionID(workerRole)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := state.MarkReady(workerRole); err != nil {
+		t.Fatal(err)
+	}
+
+	secondTask, err := state.StartNewTask()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondWorker, ready, err := state.SessionID(workerRole)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if firstTask == secondTask {
+		t.Fatal("task ID was not rotated")
+	}
+	if firstWorker == secondWorker {
+		t.Fatal("worker session was not rotated")
+	}
+	if ready {
+		t.Fatal("new task worker session must start unready")
+	}
+}

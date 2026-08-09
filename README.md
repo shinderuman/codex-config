@@ -93,3 +93,14 @@ glm-worker --resume
 ```
 
 同じworker/reviewer sessionと保存済みphaseから再開する。
+
+
+## GLM実行の軽量化
+
+- worker: `opus` alias → `glm-5.2`
+- reviewer: `haiku` alias → `glm-5-turbo`
+- 通常worker/reviewer/自動fix: effort `high`
+- Sol判断後の継続とSolからの明示fix: effort `max`
+- auto-compact window: 500K
+- Claude Code sessionはリポジトリ永久ではなくタスク単位。新規タスク開始時にworker/reviewer session IDを更新する。
+- 同一タスク内の`--decision`、自動fix、`--fix`、Z.ai 5h limit後の`--resume`ではsessionを維持する。

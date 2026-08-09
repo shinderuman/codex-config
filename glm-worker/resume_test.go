@@ -12,6 +12,7 @@ func TestResumeCheckpointPersists(t *testing.T) {
 		Phase:          "reviewer-2",
 		Role:           reviewerRole,
 		ReadOnly:       true,
+		Effort:         "high",
 		Prompt:         "original",
 		OriginalPrompt: "original",
 		Request:        "request",
@@ -30,7 +31,7 @@ func TestResumeCheckpointPersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Phase != checkpoint.Phase || got.ResetAtRFC3339 != checkpoint.ResetAtRFC3339 {
+	if got.Phase != checkpoint.Phase || got.ResetAtRFC3339 != checkpoint.ResetAtRFC3339 || got.Effort != "high" {
 		t.Fatalf("unexpected checkpoint: %#v", got)
 	}
 }

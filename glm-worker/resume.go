@@ -24,6 +24,7 @@ type resumeCheckpoint struct {
 	Phase          string      `json:"phase"`
 	Role           sessionRole `json:"role"`
 	ReadOnly       bool        `json:"read_only"`
+	Effort         string      `json:"effort,omitempty"`
 	Prompt         string      `json:"prompt"`
 	OriginalPrompt string      `json:"original_prompt,omitempty"`
 	Request        string      `json:"request"`

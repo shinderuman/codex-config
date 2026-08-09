@@ -8,7 +8,7 @@ import (
 )
 
 type modelRunner interface {
-	Run(role sessionRole, readOnly bool, prompt string, outputPath string) error
+	Run(role sessionRole, readOnly bool, effort string, prompt string, outputPath string) error
 }
 
 type claudeRunner struct {
@@ -20,7 +20,13 @@ func newClaudeRunner(config appConfig, state *stateStore) *claudeRunner {
 	return &claudeRunner{config: config, state: state}
 }
 
-func (r *claudeRunner) Run(role sessionRole, readOnly bool, prompt string, outputPath string) error {
+func (r *claudeRunner) Run(
+	role sessionRole,
+	readOnly bool,
+	effort string,
+	prompt string,
+	outputPath string,
+) error {
 	sessionID, ready, err := r.state.SessionID(role)
 	if err != nil {
 		return err
@@ -38,15 +44,15 @@ func (r *claudeRunner) Run(role sessionRole, readOnly bool, prompt string, outpu
 		args = append(
 			args,
 			"--session-id", sessionID,
-			"--name", fmt.Sprintf("glm-%s-%s", role, r.config.RepoShort),
+			"--name", r.sessionName(role),
 		)
 	}
 
 	args = append(
 		args,
-		"--model", "opus",
-		"--effort", r.config.Effort,
-		"--autocompact", "1m",
+		"--model", r.modelForRole(role),
+		"--effort", effort,
+		"--autocompact", "500k",
 		"--output-format", "text",
 		"--dangerously-skip-permissions",
 	)
@@ -67,7 +73,7 @@ func (r *claudeRunner) Run(role sessionRole, readOnly bool, prompt string, outpu
 	command.Stdout = output
 	command.Stderr = output
 	command.Env = envWithDefaults(os.Environ(), map[string]string{
-		"CLAUDE_CODE_AUTO_COMPACT_WINDOW":  "1000000",
+		"CLAUDE_CODE_AUTO_COMPACT_WINDOW":  "500000",
 		"CLAUDE_CODE_ALWAYS_ENABLE_EFFORT": "1",
 	})
 
@@ -92,4 +98,19 @@ func promptFileName(role sessionRole) string {
 		return "REVIEWER.md"
 	}
 	return "WORKER.md"
+}
+
+func (r *claudeRunner) modelForRole(role sessionRole) string {
+	if role == reviewerRole {
+		return r.config.ReviewerModel
+	}
+	return r.config.WorkerModel
+}
+
+func (r *claudeRunner) sessionName(role sessionRole) string {
+	taskID := r.state.TaskID()
+	if len(taskID) > 8 {
+		taskID = taskID[:8]
+	}
+	return fmt.Sprintf("glm-%s-%s-%s", role, r.config.RepoShort, taskID)
 }

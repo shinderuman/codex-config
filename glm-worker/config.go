@@ -17,7 +17,10 @@ type appConfig struct {
 	StateBase        string
 	PromptDir        string
 	ClaudeBin        string
-	Effort           string
+	WorkerModel      string
+	ReviewerModel    string
+	RoutineEffort    string
+	EscalatedEffort  string
 	MaxAutoFixRounds int
 }
 
@@ -49,7 +52,10 @@ func loadConfig() (appConfig, error) {
 		StateBase:        filepath.Join(stateHome, "sessions"),
 		PromptDir:        promptDir,
 		ClaudeBin:        envOrDefault("GLM_WORKER_CLAUDE_BIN", "claude"),
-		Effort:           envOrDefault("GLM_WORKER_EFFORT", "max"),
+		WorkerModel:      envOrDefault("GLM_WORKER_WORKER_MODEL", "opus"),
+		ReviewerModel:    envOrDefault("GLM_WORKER_REVIEWER_MODEL", "haiku"),
+		RoutineEffort:    envOrDefault("GLM_WORKER_EFFORT", "high"),
+		EscalatedEffort:  envOrDefault("GLM_WORKER_ESCALATED_EFFORT", "max"),
 		MaxAutoFixRounds: rounds,
 	}, nil
 }

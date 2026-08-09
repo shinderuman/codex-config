@@ -81,6 +81,32 @@ func (s *stateStore) Remove(names ...string) error {
 	return nil
 }
 
+func (s *stateStore) StartNewTask() (string, error) {
+	if err := s.Remove(
+		"task.id",
+		"worker.id",
+		"worker.ready",
+		"reviewer.id",
+		"reviewer.ready",
+		"task.id",
+	); err != nil {
+		return "", err
+	}
+
+	taskID, err := newUUID()
+	if err != nil {
+		return "", err
+	}
+	if err := s.Write("task.id", taskID); err != nil {
+		return "", err
+	}
+	return taskID, nil
+}
+
+func (s *stateStore) TaskID() string {
+	return s.ReadOr("task.id", "legacy")
+}
+
 func (s *stateStore) SessionID(role sessionRole) (string, bool, error) {
 	idName := string(role) + ".id"
 	if id, err := s.Read(idName); err == nil && id != "" {
@@ -110,6 +136,7 @@ func (s *stateStore) RemoveUnreadySession(role sessionRole) error {
 
 func printStatus(state *stateStore) error {
 	fmt.Printf("REPO: %s\n", state.ReadOr("repo-root", "unknown"))
+	fmt.Printf("TASK_ID: %s\n", state.ReadOr("task.id", "none"))
 	fmt.Printf("WORKER_SESSION: %s\n", state.ReadOr("worker.id", "none"))
 	fmt.Printf("REVIEWER_SESSION: %s\n", state.ReadOr("reviewer.id", "none"))
 	if state.Exists("pending-decision") {

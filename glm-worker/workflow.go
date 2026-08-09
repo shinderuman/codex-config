@@ -47,6 +47,10 @@ func (w *workflow) executeNewTask(request string) error {
 		return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: previous task is rate-limited; use --resume or --reset")
 	}
 
+	if _, err := w.state.StartNewTask(); err != nil {
+		return err
+	}
+
 	if err := captureGitBaseline(w.config, w.state); err != nil {
 		return err
 	}
@@ -63,6 +67,7 @@ func (w *workflow) executeNewTask(request string) error {
 		Phase:          "worker-new",
 		Role:           workerRole,
 		ReadOnly:       false,
+		Effort:         w.config.RoutineEffort,
 		Prompt:         prompt,
 		OriginalPrompt: prompt,
 		Request:        request,
@@ -94,6 +99,7 @@ func (w *workflow) executeDecision(decision string) error {
 		Phase:          "worker-decision",
 		Role:           workerRole,
 		ReadOnly:       false,
+		Effort:         w.config.EscalatedEffort,
 		Prompt:         prompt,
 		OriginalPrompt: prompt,
 		Request:        request,
@@ -125,6 +131,7 @@ func (w *workflow) executeExplicitFix(instruction string) error {
 		Phase:          "worker-explicit-fix",
 		Role:           workerRole,
 		ReadOnly:       false,
+		Effort:         w.config.EscalatedEffort,
 		Prompt:         prompt,
 		OriginalPrompt: prompt,
 		Request:        request,
@@ -226,6 +233,7 @@ func (w *workflow) reviewUntilStable(
 		Phase:          fmt.Sprintf("reviewer-%d", reviewNumber),
 		Role:           reviewerRole,
 		ReadOnly:       true,
+		Effort:         w.config.RoutineEffort,
 		Prompt:         prompt,
 		OriginalPrompt: prompt,
 		Request:        request,
@@ -278,6 +286,7 @@ func (w *workflow) handleReviewResult(
 			Phase:          fmt.Sprintf("worker-auto-fix-%d", nextAutoFixes),
 			Role:           workerRole,
 			ReadOnly:       false,
+			Effort:         w.config.RoutineEffort,
 			Prompt:         prompt,
 			OriginalPrompt: prompt,
 			Request:        request,
@@ -339,6 +348,9 @@ func (w *workflow) runModel(checkpoint resumeCheckpoint) (packet, error) {
 	if checkpoint.OriginalPrompt == "" {
 		checkpoint.OriginalPrompt = checkpoint.Prompt
 	}
+	if checkpoint.Effort == "" {
+		checkpoint.Effort = w.config.RoutineEffort
+	}
 
 	if err := w.state.SaveResumeCheckpoint(checkpoint); err != nil {
 		return packet{}, err
@@ -347,6 +359,7 @@ func (w *workflow) runModel(checkpoint resumeCheckpoint) (packet, error) {
 	runErr := w.runner.Run(
 		checkpoint.Role,
 		checkpoint.ReadOnly,
+		checkpoint.Effort,
 		checkpoint.Prompt,
 		outputPath,
 	)

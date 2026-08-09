@@ -18,3 +18,13 @@
 - worker途中、reviewer途中、auto-fix途中のどこで止まってもresume stateが残る。
 - `glm-worker --resume`で同じsession/phaseから継続する。
 - rate limit中にsession ID、working tree、baselineをresetしない。
+
+
+## GLM軽量化
+
+- 新規タスク開始でworker/reviewer session IDが更新される。
+- 同一タスク内のdecision/fix/resumeではsession IDが維持される。
+- workerはopus alias、reviewerはhaiku aliasを利用する。
+- 通常effortはhigh、Sol判断後/明示fixはmax。
+- auto-compact windowは500K。
+- managed model mappingはopus=glm-5.2、haiku=glm-5-turbo。
