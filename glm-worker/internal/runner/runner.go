@@ -126,7 +126,7 @@ func (r *ClaudeRunner) Run(
 	)
 
 	if readOnly {
-		args = append(args, "--disallowedTools", "Edit", "Write", "NotebookEdit")
+		args = append(args, "--disallowedTools", "Edit", "Write", "NotebookEdit", "Agent")
 	}
 
 	args = append(args, "--append-system-prompt-file", systemFile, prompt)

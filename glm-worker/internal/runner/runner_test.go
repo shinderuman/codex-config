@@ -112,7 +112,7 @@ func TestClaudeRunnerRunStartsThenResumesSession(t *testing.T) {
 	if !containsArgument(secondArguments, "--resume") || containsArgument(secondArguments, "--session-id") {
 		t.Fatalf("resume引数 = %#v", secondArguments)
 	}
-	for _, argument := range []string{"--disallowedTools", "Edit", "Write", "NotebookEdit", "second prompt"} {
+	for _, argument := range []string{"--disallowedTools", "Edit", "Write", "NotebookEdit", "Agent", "second prompt"} {
 		if !containsArgument(secondArguments, argument) {
 			t.Fatalf("read-only引数%qがありません: %#v", argument, secondArguments)
 		}
