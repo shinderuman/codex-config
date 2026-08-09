@@ -28,123 +28,44 @@
 - `git commit`はユーザーが明示的に依頼した場合だけ行う。
 - commit・cherry-pick・merge・rebase・revert等を行う場合だけ`~/.codex/instructions/git.md`を読む。
 
-## 4. Sol Highの役割
+## 4. Sol HighとGLMの分担
 
 目的はSol Highの品質判断を維持しながらSol High側のトークン消費を減らすこと。
 
-Sol Highが担当する:
-- ユーザー要求と完了条件の解釈
-- アーキテクチャ・責務・公開API・データモデル・依存方向・互換性の重要判断
-- 原因不明バグの根本原因の妥当性
-- 重要変更で保証すべきテスト観点
-- GLMから返された圧縮パケットの意味的評価
-- 高リスク変更の対象限定レビュー
-- 最終的な採否
+Sol Highは、要求と完了条件、重要なアーキテクチャ・責務・API・データモデル・依存方向・互換性、原因不明バグ、重要テスト観点、GLM packet、高リスク変更、最終採否を判断する。
 
-Sol Highは原則として行わない:
-- リポジトリの一次探索
-- grep、呼び出し元追跡、関連ファイル探索
-- 通常のコード・テストコード実装
-- lint・buildの一次実行
-- GLMが既に行った調査のやり直し
-- GLMの途中経過取得
-- 全diffの無条件な精読
-- reviewerが既に検証した低レベル問題の再検査
-
-## 5. GLMワーカー
+Sol Highは原則として、リポジトリの一次探索、grepや呼び出し元追跡、通常の実装・テスト・lint・build、GLM調査の再実行、途中経過取得、全diffの無条件な精読、reviewerが検証済みの低レベル再検査を行わない。
 
 リポジトリ固有の調査・設計案・実装・テスト・lint・build・自己レビューは原則`glm-worker "<依頼>"`へ委譲する。
+同一タスクのSol判断・修正・5時間上限後の再開ではworker/reviewer sessionを継続し、新規タスクだけ新sessionへ切り替える。過去のGLM文脈をSol Highが再説明しない。
+通常workerはGLM-5.2 / high。初回低リスクreviewはGLM-4.7 / high、高リスク・Sol判断後・自動修正後・明示fix後のreviewはGLM-5.1 / highを一方だけ使う。Sol判断後のworker継続と明示fixはGLM-5.2 / max。
 
-`glm-worker`はタスクごとにworker/reviewerのClaude Codeセッションを保持する。同一タスク内のSol判断・修正・5時間上限後の再開ではsessionを継続し、次の新規タスクでは新sessionへ切り替える。過去のGLM作業文脈をSol Highが再説明しない。
-通常workerはGLM-5.2 / highを使う。独立reviewerは`RISK: LOW`の初回reviewではGLM-4.7 / high、`RISK: HIGH`または自動修正後のreviewではGLM-5.1 / highを使い、両方を直列実行しない。Sol判断後の継続とSolからの明示fixはGLM-5.2 / maxを使う。
+`glm-worker`を実行・待機する前に`~/.codex/instructions/glm-execution.md`を読む。packetを受け取ったら`~/.codex/instructions/glm-packets.md`を読む。
 
-### `STATUS: NEEDS_SOL_DECISION`
-- `DECISION`・`EVIDENCE`・`OPTIONS`・`RECOMMENDATION`を評価する。
-- パケットで足りるならリポジトリを再探索せず判断する。
-- 判断後は元依頼を再記述せず`glm-worker --decision "<判断>"`で同じworker sessionを継続する。
-- パケットだけで判断不能な場合だけ`TARGETS`に限定して現物を確認する。
+## 5. 品質ゲート
 
-### `STATUS: PASS`
-- reviewerの圧縮パケットについて、要求との意味的一致・要求漏れ・矛盾・残余リスクをSol Highが評価する。
-- `RISK: LOW`かつ不整合・不確実性がなければ、GLMの調査をやり直さず全diffも読まない。
-- PASSを機械的に信用せず、圧縮された意味情報への最終判断はSol Highが行う。
+USER_REQUEST・`SPECIFICATION.md`・既存`AGENTS.md`・直前のSol判断で未確定の次の事項はGLMだけで最終確定させない。
 
-### `STATUS: NEEDS_SOL_REVIEW`
-- `TARGETS`と`SOL_QUESTION`に限定して実コードまたはdiffを確認する。
-- 無関係なファイルやdiffまで広げない。
-- 修正が必要ならCodex自身で編集せず`glm-worker --fix "<修正方針>"`で同じworker sessionへ差し戻す。
-- 修正後は独立reviewerまで自動再実行される。
-
-### `STATUS: WORKER_ERROR`
-- エラー要約を確認する。
-- 無関係なリポジトリ調査をSol Highが代行しない。
-- session破損が明示されている場合は`glm-worker --reset`後に再実行する。
-
-## 6. 品質ゲート
-
-次のうち、USER_REQUEST・`SPECIFICATION.md`・既存`AGENTS.md`・直前のSol判断で未確定のものはGLMだけで最終確定させない:
-- アーキテクチャ
-- 新しい責務・型・クラス・package/module
-- 公開API・CLIの意味的変更
-- データモデル・永続化形式
-- 依存方向・新規外部依存
-- 後方互換性
-- 原因不明バグの根本原因
-- セキュリティ・データ破損・不可逆操作
+- アーキテクチャ、責務、公開API・CLI、データモデル・永続化形式、依存方向・新規外部依存、後方互換性
+- 原因不明バグの根本原因、セキュリティ・データ破損・不可逆操作
 - 複数案の選択が将来構造へ意味のある差を生む場合
 
-承認済みの構成内で行う型・package・interfaceの追加、作業単位の分割、命名、明白な仕様違反の修正、テスト追加、互換性を狭めず強化する修正は、それ自体を理由にSol判断へ戻さない。GLM workerと独立reviewerで確定できる低レベル判断として扱う。
-
 これらは実装前`NEEDS_SOL_DECISION`または最終`NEEDS_SOL_REVIEW`でSol Highを通す。
-低リスク変更は独立GLM reviewerのPASS後、Sol Highは圧縮パケットで採否を判断し、全diff精読を省略してよい。
+承認済み構成内の型・package・interface追加、作業分割、命名、明白な仕様違反修正、テスト追加、互換性を狭めない強化は、それ自体を理由にSol判断へ戻さない。
+低リスク変更は独立reviewerのPASS後、Sol Highは圧縮packetで採否を判断し、全diff精読を省略してよい。
 
-## 7. GLM実行と待機
+## 6. Codex自身による編集
 
-この節の目的は、GLM実行中の無意味なSol High再起動とpollingによるトークン消費を防ぐこと。
-ユーザー向けの進捗報告頻度と、GLMプロセスへの問い合わせ頻度は別物として扱い、両者を結び付けない。
-
-- `glm-worker`は外部GLM通信とClaude Codeユーザー設定アクセスが必要なため最初からsandbox外で実行する。
-- sandbox内で試してから昇格する方式を使わず、sandbox内へフォールバックしない。
-- `~/.codex/config.toml`の`background_terminal_max_timeout`は`21600000`ms（6時間）を前提とする。
-- `glm-worker`が実行中なら、background terminalでは利用可能な最大待機時間を指定してblocking waitする。
-- 利用ツールがblocking waitの内部上限でsession IDを返す場合、同一のtool orchestration内で最大待機を再開し、tool callを終了してSol Highへ制御を戻さない。このツール内部の継続待機は許可するが、Sol Highを再起動して`write_stdin`等を呼ぶ方式へ変換しない。
-- 30秒・1分・5分などの固定間隔で`write_stdin`、status確認、端末出力確認、生存確認を繰り返してはならない。
-- 「一定時間ユーザーへ報告しない」「60秒以上無報告にしない」「定期的に進捗を知らせる」等の進捗報告ルールは、GLMへpollする理由にならない。
-- 進捗報告ルールを満たすためにblocking waitの待機時間を短くしたり、待機を中断して`write_stdin`・status確認・端末出力確認を行ってはならない。
-- 上位指示等により待機中のユーザー向け報告が必要な場合でも、GLMへ新たな問い合わせを行わず、最後に確認済みの状態だけを使って報告する。報告のための新しい観測を行わない。
-- 時間が経過したこと自体は進展ではない。「まだ実行中です」だけを生成するためのGLM問い合わせ・端末確認を行わない。
-- ユーザーが「止まっていないか」「状態を確認して」等と明示的に求めた場合に限り、その時点で中間状態を確認してよい。
-- `glm-worker`が完了した場合はblocking waitが終了した結果として処理を再開し、ユーザーの追加入力を待たず可能な次工程を自動で進める。
-- ユーザーの判断・追加情報・許可が本当に必要な場合だけ、その時点で質問して停止する。Sol HighまたはGLMで判断可能な事項を不要にユーザーへ確認しない。
-- 最大待機時間へ到達してもプロセスが生存している場合、再調査・代替作業・重複起動をせず、再び利用可能な最大待機時間でblocking waitする。
-- 一定時間無出力であることだけを理由に失敗扱い・再実行しない。
-- 同じ依頼の`glm-worker`を重複起動しない。
-- GLM処理中にCodex自身が同じ調査・実装を代行しない。
-
-### `STATUS: RATE_LIMITED`
-
-- `STATUS: RATE_LIMITED`はZ.ai GLM Coding Planの5時間利用上限による正常な一時停止として扱い、`WORKER_ERROR`として扱わない。
-- `LIMIT: ZAI_GLM_CODING_PLAN_5H`の場合、`RESET_AT_CST`は中国標準時（CST、UTC+8）であり、日本時間として解釈しない。
-- rate limit時にworking tree、worker/reviewer session、resume stateを破棄・resetしない。
-- 新しい`glm-worker "<元依頼>"`を起動して最初からやり直さない。
-- `AUTO_RESUME_AVAILABLE: true`の場合は`~/.codex/instructions/glm-auto-resume.md`を読み、現在のCodexタスクへ自動再開automationを作成または更新する。ユーザーの再開指示を待たない。
-- 自動再開automationを作成できない場合だけ、停止状態を保持して手動再開を案内する。
-- ユーザーが「作業再開して」「続けて」「再開」等、直前のrate limit停止からの継続を指示した場合は`glm-worker --resume`を実行する。
-- `--resume`時は保存済みの同一タスク・同一phase・同一worker/reviewer sessionから継続し、元依頼をSol Highが再構成して送り直さない。
-- 利用枠がまだ回復していなければ再び`STATUS: RATE_LIMITED`になるため、その状態を保持したまま停止する。
-
-## 8. Codex自身による編集
-
-- Codex自身は原則としてソースコード・テスト・設定・ドキュメントを直接編集しない。
-- GLMの変更に問題があればGLMへ差し戻す。
+- Codex自身は原則としてソースコード・テスト・設定・ドキュメントを直接編集せず、GLMの変更に問題があればGLMへ差し戻す。
 - 1行変更・小規模・機械的であることを理由に直接編集へ切り替えない。
-- ユーザーがCodex自身による直接編集を明示した場合だけ例外。
-- 直接編集する場合は`~/.codex/instructions/worker/`の該当規則を必要時だけ読む。
+- ユーザーがCodex自身による直接編集を明示した場合だけ例外とし、`~/.codex/instructions/worker/`の該当規則を必要時だけ読む。
 
-## 9. 必要時だけ読む規則
+## 7. 必要時だけ読む規則
 
 - commit・Git履歴操作 → `~/.codex/instructions/git.md`
 - バックアップ・大容量一時データ → `~/.codex/instructions/backup.md`
 - AGENTS系ファイル変更 → `~/.codex/instructions/agents-management.md`
+- GLM実行・待機 → `~/.codex/instructions/glm-execution.md`
+- GLM packet処理 → `~/.codex/instructions/glm-packets.md`
 - GLM rate limit自動再開 → `~/.codex/instructions/glm-auto-resume.md`
-- Codex自身が例外的にコードを直接編集 → `~/.codex/instructions/worker/`の該当ファイル
+- Codex自身が例外的に直接編集 → `~/.codex/instructions/worker/`の該当ファイル

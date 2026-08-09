@@ -1,0 +1,27 @@
+# GLM実行と待機
+
+`glm-worker`を実行または待機する場合だけ適用する。目的は無意味なSol High再起動とpollingによるトークン消費を防ぐこと。
+
+## 実行
+
+- 外部GLM通信とClaude Codeユーザー設定アクセスが必要なため、最初からsandbox外で実行し、sandbox内へfallbackしない。
+- `~/.codex/config.toml`の`background_terminal_max_timeout`は`21600000`ms（6時間）を前提とする。
+- 同じ依頼を重複起動せず、GLM処理中にCodex自身が同じ調査・実装を代行しない。
+
+## 待機
+
+- 実行中はbackground terminalで利用可能な最大待機時間を指定してblocking waitする。
+- tool内部上限でsession IDが返る場合は、同じtool orchestration内で最大待機を再開し、Sol Highへ制御を戻して`write_stdin`等を呼ぶ方式へ変換しない。
+- 固定間隔の`write_stdin`、status・端末出力・生存確認を行わない。一定時間無出力であることだけを理由に失敗・再実行しない。
+- ユーザー向け進捗報告のために待機を短縮・中断したりGLMへ問い合わせたりしない。必要な報告は最後に確認済みの状態だけで行う。
+- ユーザーが状態確認を明示した場合だけ中間状態を確認してよい。
+- 最大待機時間後も生存していれば、再調査・代替作業・重複起動をせず再び最大時間で待つ。
+- 完了時はユーザーの追加入力を待たず、packet処理と可能な次工程を進める。ユーザーの判断・追加情報・許可が本当に必要な場合だけ停止する。
+
+## `STATUS: RATE_LIMITED`
+
+- `LIMIT: ZAI_GLM_CODING_PLAN_5H`は正常な一時停止であり、`WORKER_ERROR`にしない。`RESET_AT_CST`は中国標準時（UTC+8）。
+- working tree、task state、session、resume checkpointを破棄・resetせず、新規taskとしてやり直さない。
+- `AUTO_RESUME_AVAILABLE: true`なら`~/.codex/instructions/glm-auto-resume.md`を読み、現在のCodexタスクへ自動再開automationを作成または更新する。作成不能な場合だけ手動再開を案内する。
+- 手動再開指示では`glm-worker --resume`を使い、保存済みの同一task・phase・sessionから継続する。元依頼を再構成しない。
+- 枠が未回復なら再び`RATE_LIMITED`として状態を保持する。
