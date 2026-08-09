@@ -2,6 +2,10 @@
 
 `glm-worker`からpacketまたは`STATUS: WORKER_ERROR`を含む結果を受け取った場合に適用する。
 
+## 共通
+
+- `ARTIFACTS`が`none`以外なら、要求・判断・報告に必要な成果物だけを記載パスから確認し、packetへ全内容を転載しない。
+
 ## `STATUS: NEEDS_SOL_DECISION`
 
 - `DECISION`・`EVIDENCE`・`OPTIONS`・`RECOMMENDATION`・`TEST_OBLIGATIONS`を評価する。

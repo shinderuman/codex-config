@@ -52,11 +52,11 @@ func (r *fakeRunner) factory() RunnerFactory {
 }
 
 func implementedPacketApp(summary string) string {
-	return "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: " + summary + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nPACKET_END\n"
+	return "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: " + summary + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\n"
 }
 
 func passPacketApp() string {
-	return "PACKET_BEGIN\nSTATUS: PASS\nRISK: LOW\nSUMMARY: pass\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: none\nRESIDUAL_RISK: none\nTARGETS: none\nPACKET_END\n"
+	return "PACKET_BEGIN\nSTATUS: PASS\nRISK: LOW\nSUMMARY: pass\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: none\nRESIDUAL_RISK: none\nTARGETS: none\nARTIFACTS: none\nPACKET_END\n"
 }
 
 func newAppConfig(t *testing.T) config.AppConfig {
@@ -84,6 +84,9 @@ func TestExecuteStatusReportsEmptyState(t *testing.T) {
 	if !strings.Contains(out.String(), "TASK_ID: none") {
 		t.Fatalf("空状態のstatus出力がありません: %q", out.String())
 	}
+	if !strings.Contains(out.String(), "ARTIFACT_DIR: none") {
+		t.Fatalf("空状態のartifact出力がありません: %q", out.String())
+	}
 	if !strings.Contains(out.String(), "PENDING_DECISION: no") {
 		t.Fatalf("空状態のpending decision出力がありません: %q", out.String())
 	}
@@ -104,6 +107,9 @@ func TestExecuteStatsReportsEmptyState(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "TELEMETRY_DIR:") {
 		t.Fatalf("telemetry保存先がありません: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "CURRENT_ARTIFACT_DIR: none") {
+		t.Fatalf("artifact保存先がありません: %q", out.String())
 	}
 }
 

@@ -56,6 +56,10 @@ grep -Fq 'DTSTART:YYYYMMDDTHHMMSS' "$success_case/codex/instructions/glm-auto-re
 grep -Fq 'DTSTART;TZID=Asia/Tokyo`は使わない' "$success_case/codex/instructions/glm-auto-resume.md"
 grep -Fq 'automations.next_run_at' "$success_case/codex/instructions/glm-auto-resume.md"
 grep -Fq 'TELEMETRY_DIR' "$success_case/codex/instructions/glm-execution.md"
+grep -Fq '同じ責務・変更理由・検証単位' "$success_case/codex/instructions/glm-execution.md"
+grep -Fq 'REPORT_ARTIFACT_DIR' "$success_case/codex/instructions/glm-execution.md"
+grep -Fq 'ちょうど1物理行' "$success_case/codex/glm-worker/prompts/WORKER.md"
+grep -Fq 'ARTIFACTS:' "$success_case/codex/glm-worker/prompts/REVIEWER.md"
 test -f "$success_case/codex/instructions/local-unmanaged.md"
 test ! -e "$success_case/codex/instructions/obsolete-managed.md"
 test -f "$success_case/codex/rules/default.rules"
@@ -76,7 +80,7 @@ grep -Fq 'packetまたは`STATUS: WORKER_ERROR`を含む結果' "$success_case/c
     cd "$success_source"
     GLM_WORKER_HOME="$success_case/glm-home" \
         "$success_case/bin/glm-worker" --status \
-        | grep -Fq 'TASK_STATUS: none'
+        | grep -Fq 'ARTIFACT_DIR: none'
 )
 
 failure_source="$test_root/failure-source"

@@ -173,7 +173,8 @@ automation時刻はRFC3339のoffsetを保持してUTCへ変換する。heartbeat
 - Claude Code sessionはリポジトリ永久ではなくタスク単位。新規タスク開始時にworker/reviewer session IDを更新する。
 - 同一タスク内の`--decision`、自動fix、Z.ai 5h limit後の`--resume`ではsessionを維持する。
 - `--fix`は`NEEDS_SOL_REVIEW`後だけ使用できる。`PASS`後の追加依頼は新規タスクとして開始し、worker/reviewer sessionを更新する。
-- worker/reviewer packetは最大15行・6 KiB・1行1536 bytes。STATUS別の必須field・RISK整合性・field重複を検証し、契約違反時は同じsessionへ作業をやり直さない再圧縮を1回だけ要求する。
+- worker/reviewer packetは最大15行・6 KiB・1行1536 bytes。各fieldを1物理行に限定し、STATUS別の必須field・RISK整合性・field重複を検証する。契約違反時は同じsessionへ作業をやり直さない再圧縮を1回だけ要求する。
+- packetへ収まらない正確な一覧・監査報告・生成物だけをtask別`ARTIFACT_DIR`へ保存し、worker packetから最終reviewer packetまで`ARTIFACTS`の絶対パスだけを引き継ぐ。`ARTIFACTS`は`none`またはtask専用dir配下の実在通常ファイルに限定し、複数パスはセミコロンで区切る。artifactはstate配下でディレクトリ`0700`・通常ファイル`0600`に揃え、symlinkと特殊ファイルを拒否する。
 - worker errorの診断tailは最大6 KiBに制限し、Codexへ不要な大量ログを返さない。
 
 ## タスク状態と統計
@@ -183,7 +184,7 @@ glm-worker --status
 glm-worker --stats
 ```
 
-`--status`は現在のtask ID、task status、session、判断待ち、rate limit状態を表示する。
+`--status`は現在のtask ID、task status、task別artifact保存先、session、判断待ち、rate limit状態を表示する。
 `--stats`は通常のworker packetへ混ぜず、完了済みと現在のタスクを集計して次を表示する。
 
 - worker/reviewerとmodel alias別の呼び出し回数・実行時間・turn数
@@ -191,10 +192,12 @@ glm-worker --stats
 - Sol判断・明示fix・resume・自動fixの回数
 - `NEEDS_SOL_DECISION`、`NEEDS_SOL_REVIEW`、`PASS`の件数
 - model alias別rate limit、packet再圧縮、Solへ返したpacket bytes
+- 現在taskのartifact保存先
 
 新規タスク開始時に前タスクの統計をarchiveし、`--reset`時も現在値を破棄せずarchiveする。
 `--stats`の`TELEMETRY_DIR`配下には、各呼出しのphase、role、alias、実モデル、effort、session、prompt、最終response、top-level usage、subagentを含むtree usage、所要時間、結果をJSONLで保持する。alias別token集計にはtree usageを用い、top-level turn数は別名で表示する。promptとresponse本文を保存したくない環境では`GLM_WORKER_TELEMETRY_CONTENT=false`を指定し、byte数とSHA-256、usageだけを残す。
 statsとtelemetryのschemaはversion 2で、top-level集計だったversion 1は`--stats`とtelemetry読込から除外する。旧値の移行・混在は行わない。
+artifactはtask更新や`--reset`後もtelemetryと同様にtask ID別で保持する。不要になった成果物の削除は自動化しない。
 
 
 ## 開発時の検証

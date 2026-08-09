@@ -64,11 +64,12 @@ func DetectZaiFiveHourLimit(path string) (ZaiFiveHourLimit, bool) {
 
 // ZaiRateLimitErrorは5h上限到達を呼び出し元へ伝達する業務エラー。
 type ZaiRateLimitError struct {
-	Phase     string
-	Limit     ZaiFiveHourLimit
-	TaskID    string
-	RepoRoot  string
-	RepoShort string
+	Phase           string
+	Limit           ZaiFiveHourLimit
+	TaskID          string
+	RepoRoot        string
+	RepoShort       string
+	ArtifactWarning string
 }
 
 func (e ZaiRateLimitError) Error() string {
@@ -84,7 +85,7 @@ func (e ZaiRateLimitError) Error() string {
 	autoResumeAvailable, autoResumeAt := autoResumeSchedule(e.Limit.ResetAtRFC3339)
 	autoResumeKey := autoResumeKey(e.RepoShort, e.TaskID)
 
-	return fmt.Sprintf(
+	message := fmt.Sprintf(
 		"STATUS: RATE_LIMITED\nLIMIT: ZAI_GLM_CODING_PLAN_5H\nPHASE: %s\nTASK_ID: %s\nREPO_ROOT: %s\nRESET_AT_CST: %s\nRESET_TIMEZONE: CST (China Standard Time, UTC+8)\nRESET_AT_RFC3339: %s\nAUTO_RESUME_AVAILABLE: %t\nAUTO_RESUME_AT_RFC3339: %s\nAUTO_RESUME_KEY: %s\nRESUME_AVAILABLE: true\nRESUME_COMMAND: glm-worker --resume",
 		e.Phase,
 		valueOrUnknown(e.TaskID),
@@ -95,6 +96,10 @@ func (e ZaiRateLimitError) Error() string {
 		autoResumeAt,
 		autoResumeKey,
 	)
+	if e.ArtifactWarning != "" {
+		message += "\nARTIFACT_WARNING: " + strings.ReplaceAll(e.ArtifactWarning, "\n", " ")
+	}
+	return message
 }
 
 func autoResumeSchedule(resetAtRFC3339 string) (bool, string) {

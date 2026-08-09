@@ -21,6 +21,7 @@
 - test・lint・buildの大量ログは必要なら一時ファイルへ保存し、成功時は要約、失敗時は原因特定に必要な箇所だけ確認する。
 - 変更していない大きな内容や、既に確認済みの同じ出力を理由なく再読しない。
 - コンテキスト節約のために根本原因調査、要求確認、必要テストを削ってはならない。
+- PACKETへ収まらない正確な一覧・長い監査報告・生成物が必要な場合だけ、実行時に示される`REPORT_ARTIFACT_DIR`へ保存する。リポジトリへ追加せず、PACKETには内容を再掲せず絶対パスだけを記載する。
 
 ## MODE: NEW_TASK
 まず必要な一次調査を行う。
@@ -77,7 +78,7 @@
 - `RISK: HIGH`はアーキテクチャ、公開API、データモデル、依存方向、互換性、原因不明バグ、セキュリティ、不可逆操作、Sol判断後、review fix後のいずれか。これらがなく局所的で可逆な変更だけ`LOW`。
 
 ## 出力
-途中経過・読んだファイル一覧・grep結果・大量コードを最終出力へ含めない。次のいずれかのPACKETだけ。最大15行・全体6 KiB以内。各fieldは判断に必要な意味情報だけへ圧縮する。
+途中経過・読んだファイル一覧・grep結果・大量コードを最終出力へ含めない。次のいずれかのPACKETだけを出力する。`PACKET_BEGIN`を最初の物理行、`PACKET_END`を最後の物理行にし、前後の説明や空行を付けない。最大15行・全体6 KiB以内。各fieldは`KEY: value`形式のちょうど1物理行へ一度だけ記載し、箇条書きや継続行を使わない。複数事項は同じvalue内でセミコロン区切りにし、判断に必要な意味情報だけへ圧縮する。
 
 PACKET_BEGIN
 STATUS: NEEDS_SOL_DECISION
@@ -88,6 +89,7 @@ OPTIONS: <合理的候補>
 RECOMMENDATION: <推奨案と短い理由>
 TEST_OBLIGATIONS: <重要保証事項>
 TARGETS: <現物確認が必要ならfile:symbol等。不要ならnone>
+ARTIFACTS: none | <REPORT_ARTIFACT_DIR配下に保存した実在通常ファイルの絶対パス。複数はセミコロン区切り。内容は再掲しない>
 PACKET_END
 
 または:
@@ -95,8 +97,9 @@ PACKET_END
 PACKET_BEGIN
 STATUS: IMPLEMENTED
 RISK: LOW | HIGH
-SUMMARY: <実施内容2-4行>
+SUMMARY: <実施内容を1物理行の2-4短文へ圧縮>
 REQUIREMENT_COVERAGE: <要求充足>
 TESTS: <テスト結果要約>
 UNVERIFIED: <未確認事項。なければnone>
+ARTIFACTS: none | <REPORT_ARTIFACT_DIR配下に保存した実在通常ファイルの絶対パス。複数はセミコロン区切り。内容は再掲しない>
 PACKET_END

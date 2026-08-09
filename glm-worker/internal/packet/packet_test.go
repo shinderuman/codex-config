@@ -17,6 +17,7 @@ SUMMARY: first
 REQUIREMENT_COVERAGE: covered
 TESTS: pass
 UNVERIFIED: none
+ARTIFACTS: none
 PACKET_END
 more noise
 PACKET_BEGIN
@@ -29,6 +30,7 @@ TEST_EVIDENCE: pass
 ISSUES: none
 RESIDUAL_RISK: review required
 TARGETS: foo.go:Run
+ARTIFACTS: none
 SOL_QUESTION: architecture direction
 PACKET_END
 `
@@ -57,6 +59,7 @@ SUMMARY: ` + strings.Repeat("x", MaxPacketLineBytes+1) + `
 REQUIREMENT_COVERAGE: covered
 TESTS: pass
 UNVERIFIED: none
+ARTIFACTS: none
 PACKET_END
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -77,6 +80,7 @@ RISK: LOW
 SUMMARY: implemented
 TESTS: pass
 UNVERIFIED: none
+ARTIFACTS: none
 PACKET_END
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -85,6 +89,27 @@ PACKET_END
 
 	if _, err := ParseLast(path); err == nil || !IsConstraintError(err) {
 		t.Fatalf("必須field欠落をpacket制約違反として拒否する必要があります: %v", err)
+	}
+}
+
+func TestParseLastRejectsMissingArtifactsField(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "output.txt")
+	content := `PACKET_BEGIN
+STATUS: IMPLEMENTED
+RISK: LOW
+SUMMARY: implemented
+REQUIREMENT_COVERAGE: covered
+TESTS: pass
+UNVERIFIED: none
+PACKET_END
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ParseLast(path)
+	if err == nil || !strings.Contains(err.Error(), "ARTIFACTS") {
+		t.Fatalf("ARTIFACTS欠落を明示して拒否する必要があります: %v", err)
 	}
 }
 
@@ -111,6 +136,7 @@ TEST_EVIDENCE: pass
 ISSUES: none
 RESIDUAL_RISK: review required
 TARGETS: foo.go:Run
+ARTIFACTS: none
 PACKET_END
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {

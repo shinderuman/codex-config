@@ -12,7 +12,13 @@ import (
 // printStatusは--statusの人間向けレポートを出力する。
 func printStatus(st *state.StateStore, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "REPO: %s\n", st.ReadOr("repo-root", "unknown"))
-	fmt.Fprintf(stdout, "TASK_ID: %s\n", st.ReadOr("task.id", "none"))
+	taskID := st.ReadOr("task.id", "none")
+	fmt.Fprintf(stdout, "TASK_ID: %s\n", taskID)
+	if taskID != "none" {
+		fmt.Fprintf(stdout, "ARTIFACT_DIR: %s\n", st.ArtifactDir(taskID))
+	} else {
+		fmt.Fprintln(stdout, "ARTIFACT_DIR: none")
+	}
 	fmt.Fprintf(stdout, "TASK_STATUS: %s\n", st.TaskStatus())
 	fmt.Fprintf(stdout, "WORKER_SESSION: %s\n", st.ReadOr("worker.id", "none"))
 	fmt.Fprintf(stdout, "REVIEWER_SESSION: %s\n", st.ReadOr("reviewer.id", "none"))
@@ -108,6 +114,12 @@ func printStats(st *state.StateStore, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "TELEMETRY_DIR: %s\n", st.Path("telemetry"))
 	fmt.Fprintf(stdout, "CURRENT_TASK_ID: %s\n", st.ReadOr("task.id", "none"))
 	fmt.Fprintf(stdout, "CURRENT_TASK_STATUS: %s\n", st.TaskStatus())
+	currentTaskID := st.ReadOr("task.id", "none")
+	if currentTaskID != "none" {
+		fmt.Fprintf(stdout, "CURRENT_ARTIFACT_DIR: %s\n", st.ArtifactDir(currentTaskID))
+	} else {
+		fmt.Fprintln(stdout, "CURRENT_ARTIFACT_DIR: none")
+	}
 	return nil
 }
 

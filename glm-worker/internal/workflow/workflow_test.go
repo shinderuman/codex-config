@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -55,27 +56,31 @@ func (r *scriptedRunner) Run(
 }
 
 func implementedPacket(summary string) string {
-	return "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: " + summary + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nPACKET_END\n"
+	return implementedPacketWithArtifacts(summary, "none")
+}
+
+func implementedPacketWithArtifacts(summary string, artifacts string) string {
+	return "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: " + summary + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: " + artifacts + "\nPACKET_END\n"
 }
 
 func implementedPacketWithRisk(summary string, risk string) string {
-	return "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: " + risk + "\nSUMMARY: " + summary + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nPACKET_END\n"
+	return "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: " + risk + "\nSUMMARY: " + summary + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\n"
 }
 
 func passPacket() string {
-	return "PACKET_BEGIN\nSTATUS: PASS\nRISK: LOW\nSUMMARY: pass\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: none\nRESIDUAL_RISK: none\nTARGETS: none\nPACKET_END\n"
+	return "PACKET_BEGIN\nSTATUS: PASS\nRISK: LOW\nSUMMARY: pass\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: none\nRESIDUAL_RISK: none\nTARGETS: none\nARTIFACTS: none\nPACKET_END\n"
 }
 
 func needsSolReviewPacket() string {
-	return "PACKET_BEGIN\nSTATUS: NEEDS_SOL_REVIEW\nRISK: HIGH\nSUMMARY: review\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: i\nRESIDUAL_RISK: r\nTARGETS: t\nSOL_QUESTION: q\nPACKET_END\n"
+	return "PACKET_BEGIN\nSTATUS: NEEDS_SOL_REVIEW\nRISK: HIGH\nSUMMARY: review\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: i\nRESIDUAL_RISK: r\nTARGETS: t\nARTIFACTS: none\nSOL_QUESTION: q\nPACKET_END\n"
 }
 
 func needsSolDecisionPacket() string {
-	return "PACKET_BEGIN\nSTATUS: NEEDS_SOL_DECISION\nRISK: HIGH\nDECISION: d\nEVIDENCE: e\nOPTIONS: o\nRECOMMENDATION: r\nTEST_OBLIGATIONS: tests\nTARGETS: t\nPACKET_END\n"
+	return "PACKET_BEGIN\nSTATUS: NEEDS_SOL_DECISION\nRISK: HIGH\nDECISION: d\nEVIDENCE: e\nOPTIONS: o\nRECOMMENDATION: r\nTEST_OBLIGATIONS: tests\nTARGETS: t\nARTIFACTS: none\nPACKET_END\n"
 }
 
 func fixRequiredPacket() string {
-	return "PACKET_BEGIN\nSTATUS: FIX_REQUIRED\nRISK: HIGH\nSUMMARY: fix\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: i\nRESIDUAL_RISK: r\nTARGETS: t\nPACKET_END\n"
+	return "PACKET_BEGIN\nSTATUS: FIX_REQUIRED\nRISK: HIGH\nSUMMARY: fix\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: i\nRESIDUAL_RISK: r\nTARGETS: t\nARTIFACTS: none\nPACKET_END\n"
 }
 
 func unknownStatusPacket() string {
@@ -159,8 +164,11 @@ func TestRunModelRecordsPromptResponseAndUsage(t *testing.T) {
 		t.Fatalf("telemetry logs = %#v", logs)
 	}
 	got := logs[0]
-	if got.Prompt != "implementation instruction" || got.SystemPrompt != "worker system instruction" || got.Response != implementedPacket("done") {
+	if !strings.HasPrefix(got.Prompt, "implementation instruction\n\nREPORT_ARTIFACT_DIR: ") || got.SystemPrompt != "worker system instruction" || got.Response != implementedPacket("done") {
 		t.Fatalf("telemetry content = %#v", got)
+	}
+	if !strings.Contains(r.prompts[0], artifactPromptMarker) {
+		t.Fatalf("artifact保存先がrunner promptにありません: %q", r.prompts[0])
 	}
 	if got.TopLevelUsage.CacheReadInputTokens != 2 || got.TreeUsage.CacheReadInputTokens != 37 || got.ResolvedModelUsage["glm-5.2"].OutputTokens != 40 {
 		t.Fatalf("telemetry usage = %#v", got)
@@ -221,7 +229,7 @@ func currentStats(t *testing.T, st *state.StateStore) state.TaskStats {
 func TestRunModelRecompactsInvalidPacketInSameRunner(t *testing.T) {
 	st := newStateStoreT(t)
 	r := &scriptedRunner{steps: []runnerStep{
-		{output: "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: " + strings.Repeat("x", packet.MaxPacketLineBytes+1) + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nPACKET_END\n"},
+		{output: "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: " + strings.Repeat("x", packet.MaxPacketLineBytes+1) + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\n"},
 		{output: implementedPacket("implemented")},
 	}}
 	w := newWorkflowT(t, st, r)
@@ -260,10 +268,48 @@ func TestRunModelRecompactsInvalidPacketInSameRunner(t *testing.T) {
 	}
 }
 
+func TestRunModelRecompactsArtifactOutsideTaskDir(t *testing.T) {
+	st := newStateStoreT(t)
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := &scriptedRunner{steps: []runnerStep{
+		{output: implementedPacketWithArtifacts("invalid artifact", outside)},
+		{output: implementedPacket("compacted")},
+	}}
+	w := newWorkflowT(t, st, r)
+	w.temp = t.TempDir()
+
+	result, err := w.runModel(state.ResumeCheckpoint{
+		Stage:   state.ResumeStageWorker,
+		Phase:   "worker-new",
+		Role:    state.WorkerRole,
+		Model:   "opus",
+		Effort:  "high",
+		Prompt:  "original",
+		Request: "request",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Fields["ARTIFACTS"] != "none" || len(r.prompts) != 2 {
+		t.Fatalf("artifact pathが再圧縮されていません: result=%#v prompts=%d", result, len(r.prompts))
+	}
+	taskID, _ := st.TaskID()
+	logs, logErr := st.ReadModelCallLogs(taskID)
+	if logErr != nil {
+		t.Fatal(logErr)
+	}
+	if len(logs) != 2 || logs[0].Outcome != "invalid_packet" || !strings.Contains(logs[0].Error, "artifact dir配下") {
+		t.Fatalf("artifact validation telemetry = %#v", logs)
+	}
+}
+
 func TestRunModelPreservesPacketCompressionPromptAcrossRateLimit(t *testing.T) {
 	st := newStateStoreT(t)
 	r := &scriptedRunner{steps: []runnerStep{
-		{output: "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: " + strings.Repeat("x", packet.MaxPacketLineBytes+1) + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nPACKET_END\n"},
+		{output: "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: " + strings.Repeat("x", packet.MaxPacketLineBytes+1) + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\n"},
 		{output: zaiFiveHourLog, runErr: errors.New("exit status 1")},
 	}}
 	w := newWorkflowT(t, st, r)
@@ -343,6 +389,12 @@ func TestExecuteNewTaskReachesPass(t *testing.T) {
 	}
 	if strings.Join(r.models, ",") != "opus,haiku" {
 		t.Fatalf("models = %#v", r.models)
+	}
+	if !strings.Contains(r.prompts[0], artifactPromptMarker) {
+		t.Fatalf("worker promptにartifact保存先がありません: %q", r.prompts[0])
+	}
+	if strings.Contains(r.prompts[1], artifactPromptMarker) {
+		t.Fatalf("read-only reviewerへartifact書込指示を渡しています: %q", r.prompts[1])
 	}
 }
 
@@ -584,6 +636,47 @@ func TestRunModelSurfacesZaiFiveHourLimit(t *testing.T) {
 	}
 }
 
+func TestRateLimitStateSurvivesArtifactProtectionError(t *testing.T) {
+	st := newStateStoreT(t)
+	artifactDir, err := st.PrepareArtifactDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(target, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(artifactDir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	r := &scriptedRunner{steps: []runnerStep{{
+		output: zaiFiveHourLog,
+		runErr: errors.New("exit status 1"),
+	}}}
+	w := newWorkflowT(t, st, r)
+	w.temp = t.TempDir()
+
+	_, err = w.runModel(state.ResumeCheckpoint{
+		Stage:   state.ResumeStageWorker,
+		Phase:   "worker-new",
+		Role:    state.WorkerRole,
+		Model:   "opus",
+		Effort:  "high",
+		Prompt:  "p",
+		Request: "req",
+	})
+	if err == nil || !strings.Contains(err.Error(), "STATUS: RATE_LIMITED") || !strings.Contains(err.Error(), "ARTIFACT_WARNING:") {
+		t.Fatalf("artifact警告付きrate limit errorを期待: %v", err)
+	}
+	checkpoint, loadErr := st.LoadResumeCheckpoint()
+	if loadErr != nil || !checkpoint.RateLimited {
+		t.Fatalf("rate-limit checkpointが保存されていません: checkpoint=%#v err=%v", checkpoint, loadErr)
+	}
+	if st.TaskStatus() != state.TaskStatusRateLimited {
+		t.Fatalf("status = %q", st.TaskStatus())
+	}
+}
+
 func TestExecuteResumeContinuesAfterRateLimit(t *testing.T) {
 	st := newStateStoreT(t)
 	if err := st.Write("last-request", "req"); err != nil {
@@ -684,6 +777,7 @@ func TestExecuteResumeContinuesReviewerStage(t *testing.T) {
 			"REQUIREMENT_COVERAGE: covered",
 			"TESTS: pass",
 			"UNVERIFIED: none",
+			"ARTIFACTS: none",
 		},
 		ReviewNumber: 1,
 		RateLimited:  true,

@@ -43,8 +43,9 @@
 - reviewerはAgent/subagentを利用せず、reviewerモデルから上位モデルへの暗黙な再委譲を行わない。
 - rate limit後のresumeでもcheckpointへ保存したreviewer modelを維持する。
 - version 1のresume checkpointを受理せず、model欠落時にroleから補完しない。
-- packetは15行・6 KiB・1行1536 bytes以内で、STATUS別必須field、RISK整合性、field重複を検証する。
+- packetは15行・6 KiB・1行1536 bytes以内で、各fieldを1物理行に限定し、STATUS別必須field、RISK整合性、field重複を検証する。
 - packet契約違反時は同一sessionへ再圧縮を1回だけ依頼し、作業を再実行しない。
+- packetへ収まらない正確な成果物はtask別artifactへ保存し、packetではtask専用dir配下に実在する通常ファイルの絶対パスだけを返す。artifact dir外・欠落・directory・symlinkを拒否し、所有者限定権限を検証する。
 - worker errorの診断tailは6 KiBを超えない。
 
 

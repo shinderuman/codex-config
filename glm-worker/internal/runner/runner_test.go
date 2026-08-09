@@ -262,10 +262,11 @@ func TestEnvWithDefaultsPreservesExistingValues(t *testing.T) {
 
 func TestZaiRateLimitErrorIncludesResumeMetadata(t *testing.T) {
 	err := ZaiRateLimitError{
-		Phase:     "reviewer-1",
-		TaskID:    "12345678-aaaa-bbbb-cccc-dddddddddddd",
-		RepoRoot:  "/repo",
-		RepoShort: "abcdef123456",
+		Phase:           "reviewer-1",
+		TaskID:          "12345678-aaaa-bbbb-cccc-dddddddddddd",
+		RepoRoot:        "/repo",
+		RepoShort:       "abcdef123456",
+		ArtifactWarning: "artifactを保護できません",
 		Limit: ZaiFiveHourLimit{
 			ResetAtCST:     "2026-08-09 22:35:58",
 			ResetAtRFC3339: "2026-08-09T22:35:58+08:00",
@@ -282,6 +283,7 @@ func TestZaiRateLimitErrorIncludesResumeMetadata(t *testing.T) {
 		"AUTO_RESUME_AT_RFC3339: 2026-08-09T22:37:58+08:00",
 		"AUTO_RESUME_KEY: glm-worker-resume-abcdef123456-12345678",
 		"RESUME_COMMAND: glm-worker --resume",
+		"ARTIFACT_WARNING: artifactを保護できません",
 	} {
 		if !strings.Contains(err, value) {
 			t.Fatalf("rate limit errorに%qがありません: %s", value, err)

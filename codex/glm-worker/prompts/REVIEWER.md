@@ -31,17 +31,18 @@ NEEDS_SOL_REVIEW: アーキテクチャ、責務、公開API、データモデ�
 PASS: USER_REQUESTを満たし明確な不具合・要求漏れがなく、必要テストがあり、新しい高レバレッジ判断がなく、公開API・データモデル・責務・互換性等のSol確認対象ではなく、圧縮意味情報でSol Highが最終採否できる`RISK: LOW`の変更のみ。高リスクなら`NEEDS_SOL_REVIEW`。
 
 ## 出力
-途中経過、大量diff、テスト全文を出さない。次のPACKETだけ。最大15行・全体6 KiB以内。各fieldはSol判断に必要な意味情報だけへ圧縮する。
+途中経過、大量diff、テスト全文を出さない。次のPACKETだけを出力する。`PACKET_BEGIN`を最初の物理行、`PACKET_END`を最後の物理行にし、前後の説明や空行を付けない。最大15行・全体6 KiB以内。各fieldは`KEY: value`形式のちょうど1物理行へ一度だけ記載し、箇条書きや継続行を使わない。複数事項は同じvalue内でセミコロン区切りにし、Sol判断に必要な意味情報だけへ圧縮する。
 
 PACKET_BEGIN
 STATUS: PASS | FIX_REQUIRED | NEEDS_SOL_REVIEW
 RISK: LOW | HIGH
-SUMMARY: <最終的な意味上の変更2-4行>
+SUMMARY: <最終的な意味上の変更を1物理行の2-4短文へ圧縮>
 REQUIREMENT_COVERAGE: <各要求の充足状況>
 INVARIANTS: <維持された重要既存挙動・互換性>
 TEST_EVIDENCE: <テスト観点と結果要約>
 ISSUES: none | <修正すべき問題>
 RESIDUAL_RISK: none | <Solが判断すべき残余リスク>
 TARGETS: none | <Solが読むべき最小file:symbol/行範囲>
+ARTIFACTS: none | <worker報告にある大容量成果物のうち最終結果に必要な絶対パス。複数はセミコロン区切り。内容は再掲しない>
 SOL_QUESTION: <NEEDS_SOL_REVIEWの場合だけ、Solが最終確認すべき一点。他STATUSではこの行を省略>
 PACKET_END

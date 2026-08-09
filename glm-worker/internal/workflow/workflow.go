@@ -425,6 +425,16 @@ func (w *Workflow) handleAutoFixResult(
 
 func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, error) {
 	outputPath := filepath.Join(w.temp, checkpoint.Phase+".log")
+	if checkpoint.Role == state.WorkerRole {
+		artifactDir, err := w.state.PrepareArtifactDir()
+		if err != nil {
+			return packet.Packet{}, err
+		}
+		checkpoint.Prompt = withArtifactContext(checkpoint.Prompt, artifactDir)
+		if checkpoint.OriginalPrompt != "" {
+			checkpoint.OriginalPrompt = withArtifactContext(checkpoint.OriginalPrompt, artifactDir)
+		}
+	}
 
 	if checkpoint.OriginalPrompt == "" {
 		checkpoint.OriginalPrompt = checkpoint.Prompt
@@ -454,7 +464,6 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	w.state.RecordModelDuration(checkpoint.Model, completedAt.Sub(startedAt))
 	if runErr != nil {
 		if limit, ok := runner.DetectZaiFiveHourLimit(outputPath); ok {
-			w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "rate_limited", "", runErr, outputPath)
 			// 5h上限ではsession IDを破棄しない。
 			// Claude Codeの同一sessionへ--resumeして作業途中から継続する。
 			if err := w.state.MarkReady(checkpoint.Role); err != nil {
@@ -476,15 +485,30 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 			if err != nil {
 				return packet.Packet{}, err
 			}
+			artifactErr := w.state.SecureArtifactDir()
+			telemetryErr := runErr
+			artifactWarning := ""
+			if artifactErr != nil {
+				artifactWarning = artifactErr.Error()
+				telemetryErr = fmt.Errorf("%v; %w", runErr, artifactErr)
+			}
+			w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "rate_limited", "", telemetryErr, outputPath)
 			return packet.Packet{}, runner.ZaiRateLimitError{
-				Phase:     checkpoint.Phase,
-				Limit:     limit,
-				TaskID:    taskID,
-				RepoRoot:  w.config.RepoRoot,
-				RepoShort: w.config.RepoShort,
+				Phase:           checkpoint.Phase,
+				Limit:           limit,
+				TaskID:          taskID,
+				RepoRoot:        w.config.RepoRoot,
+				RepoShort:       w.config.RepoShort,
+				ArtifactWarning: artifactWarning,
 			}
 		}
+	}
 
+	if err := w.state.SecureArtifactDir(); err != nil {
+		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", err, outputPath)
+		return packet.Packet{}, err
+	}
+	if runErr != nil {
 		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "error", "", runErr, outputPath)
 		_ = w.state.ClearResumeCheckpoint()
 		_ = w.state.RemoveUnreadySession(checkpoint.Role)
@@ -501,6 +525,14 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	}
 
 	result, err := packet.ParseLast(outputPath)
+	if err == nil {
+		taskID, taskErr := w.state.TaskID()
+		if taskErr != nil {
+			w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", taskErr, outputPath)
+			return packet.Packet{}, taskErr
+		}
+		err = packet.ValidateArtifacts(result, w.state.ArtifactDir(taskID))
+	}
 	if err != nil {
 		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "invalid_packet", "", err, outputPath)
 		if packet.IsConstraintError(err) && !checkpoint.PacketCompacted {
@@ -646,6 +678,7 @@ func nonConvergedPacket(reviewPacket packet.Packet) packet.Packet {
 		fmt.Sprintf("ISSUES: %s", reviewPacket.Fields["ISSUES"]),
 		"RESIDUAL_RISK: reviewer指摘が残っている可能性",
 		"TARGETS: 最終diffと直近reviewer指摘に限定",
+		fmt.Sprintf("ARTIFACTS: %s", reviewPacket.Fields["ARTIFACTS"]),
 		"SOL_QUESTION: 未解決問題の修正方針を判断する",
 	})
 }
