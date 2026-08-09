@@ -34,7 +34,7 @@ func TestSessionNameIncludesTaskID(t *testing.T) {
 		state:  st,
 	}
 
-	got := r.sessionName(state.WorkerRole)
+	got := r.sessionName(state.WorkerRole, "12345678-aaaa-bbbb-cccc-dddddddddddd")
 	want := "glm-worker-abcdef123456-12345678"
 	if got != want {
 		t.Fatalf("session name = %q, want %q", got, want)
@@ -121,6 +121,16 @@ func TestClaudeRunnerRejectsMissingPrompt(t *testing.T) {
 	err := r.Run(state.WorkerRole, "worker-model", false, "high", "prompt", filepath.Join(t.TempDir(), "output"))
 	if err == nil || !strings.Contains(err.Error(), "required promptがありません") {
 		t.Fatalf("missing prompt error = %v", err)
+	}
+}
+
+func TestClaudeRunnerRejectsMissingTaskID(t *testing.T) {
+	st := newTestStateStore(t)
+	r := NewClaudeRunner(config.AppConfig{}, st)
+
+	err := r.Run(state.WorkerRole, "worker-model", false, "high", "prompt", filepath.Join(t.TempDir(), "output"))
+	if err == nil || !strings.Contains(err.Error(), "task.idがありません") {
+		t.Fatalf("missing task ID error = %v", err)
 	}
 }
 

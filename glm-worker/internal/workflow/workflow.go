@@ -427,7 +427,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 		checkpoint.OriginalPrompt = checkpoint.Prompt
 	}
 	if checkpoint.Model == "" {
-		checkpoint.Model = w.checkpointModel(checkpoint)
+		return packet.Packet{}, fmt.Errorf("STATUS: WORKER_ERROR\nPHASE: %s\nERROR: checkpoint model is missing", checkpoint.Phase)
 	}
 	if checkpoint.Effort == "" {
 		checkpoint.Effort = w.config.RoutineEffort
@@ -465,10 +465,14 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 			}
 			w.state.RecordRateLimit()
 
+			taskID, err := w.state.TaskID()
+			if err != nil {
+				return packet.Packet{}, err
+			}
 			return packet.Packet{}, runner.ZaiRateLimitError{
 				Phase:     checkpoint.Phase,
 				Limit:     limit,
-				TaskID:    w.state.TaskID(),
+				TaskID:    taskID,
 				RepoRoot:  w.config.RepoRoot,
 				RepoShort: w.config.RepoShort,
 			}
@@ -507,13 +511,6 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 		)
 	}
 	return result, nil
-}
-
-func (w *Workflow) checkpointModel(checkpoint state.ResumeCheckpoint) string {
-	if checkpoint.Role == state.ReviewerRole {
-		return w.reviewerModel(packet.FromLines(checkpoint.WorkerPacket), checkpoint.AutoFixes)
-	}
-	return w.config.WorkerModel
 }
 
 func workerError(phase string, outputPath string, runErr error) error {

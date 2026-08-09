@@ -39,6 +39,7 @@
 - managed model mappingはopus=glm-5.2、haiku=glm-4.7、sonnet=glm-5.1。
 - `RISK: LOW`の初回reviewは4.7、`RISK: HIGH`または自動修正後のreviewは5.1を1回だけ選ぶ。
 - rate limit後のresumeでもcheckpointへ保存したreviewer modelを維持する。
+- version 1のresume checkpointを受理せず、model欠落時にroleから補完しない。
 - packetは15行・6 KiB・1行1536 bytes以内で、STATUS別必須fieldを検証する。
 - packet契約違反時は同一sessionへ再圧縮を1回だけ依頼し、作業を再実行しない。
 

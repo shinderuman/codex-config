@@ -60,10 +60,24 @@ func TestLoadResumeCheckpointRejectsCorruptionAndVersion(t *testing.T) {
 		t.Fatalf("corruption error = %v", err)
 	}
 
-	if err := os.WriteFile(st.Path(resumeStateFile), []byte("{\"version\":2}"), 0o600); err != nil {
+	if err := os.WriteFile(st.Path(resumeStateFile), []byte("{\"version\":1}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.LoadResumeCheckpoint(); err == nil || !strings.Contains(err.Error(), "unsupported resume state version") {
 		t.Fatalf("version error = %v", err)
+	}
+}
+
+func TestResumeCheckpointRequiresModel(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	if err := st.SaveResumeCheckpoint(ResumeCheckpoint{Stage: ResumeStageWorker}); err == nil || !strings.Contains(err.Error(), "model is required") {
+		t.Fatalf("save error = %v", err)
+	}
+
+	if err := os.WriteFile(st.Path(resumeStateFile), []byte("{\"version\":2,\"stage\":\"worker\"}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.LoadResumeCheckpoint(); err == nil || !strings.Contains(err.Error(), "model is required") {
+		t.Fatalf("load error = %v", err)
 	}
 }

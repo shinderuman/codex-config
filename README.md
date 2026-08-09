@@ -163,6 +163,7 @@ wake時は同じローカルcheckoutでtask IDと`rate-limited`状態を照合�
 - `RISK: HIGH`または自動修正後のreviewer: `sonnet` alias → `glm-5.1`
 - reviewerは4.7と5.1を直列実行せず、worker packetと自動修正履歴から一方だけを選ぶ。
 - 選択したmodel aliasはresume checkpointへ保存し、5時間上限後も同じモデルで再開する。
+- resume checkpointはversion 2でmodelを必須とする。旧versionの自動移行やroleからのmodel推定は行わない。
 - 通常worker/reviewer/自動fix: effort `high`
 - Sol判断後の継続とSolからの明示fix: effort `max`
 - auto-compact window: 500K

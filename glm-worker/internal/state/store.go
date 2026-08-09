@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/shinderuman/codex-config/glm-worker/internal/config"
-	"github.com/shinderuman/codex-config/glm-worker/internal/packet"
 )
 
 // SessionRoleはworker/reviewerの役割を区別する。
@@ -135,32 +134,19 @@ func (s *StateStore) StartNewTask() (string, error) {
 	return taskID, nil
 }
 
-// TaskIDは現在タスクのIDを返す。未設定時は"legacy"。
-func (s *StateStore) TaskID() string {
-	return s.ReadOr("task.id", "legacy")
+// TaskIDは現在タスクの必須IDを返す。
+func (s *StateStore) TaskID() (string, error) {
+	taskID, err := s.Read("task.id")
+	if err != nil || taskID == "" {
+		return "", fmt.Errorf("task.idがありません")
+	}
+	return taskID, nil
 }
 
-// TaskStatusは現在タスクの状態を、各種stateファイルから推論して返す。
+// TaskStatusは正規状態であるtask.statusを返す。
 func (s *StateStore) TaskStatus() TaskStatus {
 	if status, err := s.Read("task.status"); err == nil && status != "" {
 		return TaskStatus(status)
-	}
-	if s.Exists("pending-decision") {
-		return TaskStatusWaitingDecision
-	}
-	if checkpoint, err := s.LoadResumeCheckpoint(); err == nil && checkpoint.RateLimited {
-		return TaskStatusRateLimited
-	}
-	if review, err := s.Read("last-review"); err == nil {
-		switch packet.FromLines(strings.Split(review, "\n")).Status() {
-		case "PASS":
-			return TaskStatusComplete
-		case "NEEDS_SOL_REVIEW":
-			return TaskStatusWaitingSolReview
-		}
-	}
-	if s.Exists("task.id") {
-		return TaskStatusActive
 	}
 	return TaskStatus("none")
 }

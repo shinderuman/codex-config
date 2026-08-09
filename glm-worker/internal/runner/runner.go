@@ -36,6 +36,10 @@ func (r *ClaudeRunner) Run(
 	if model == "" {
 		return fmt.Errorf("modelを指定してください")
 	}
+	taskID, err := r.state.TaskID()
+	if err != nil {
+		return err
+	}
 	sessionID, ready, err := r.state.SessionID(role)
 	if err != nil {
 		return err
@@ -53,7 +57,7 @@ func (r *ClaudeRunner) Run(
 		args = append(
 			args,
 			"--session-id", sessionID,
-			"--name", r.sessionName(role),
+			"--name", r.sessionName(role, taskID),
 		)
 	}
 
@@ -109,8 +113,7 @@ func promptFileName(role state.SessionRole) string {
 	return "WORKER.md"
 }
 
-func (r *ClaudeRunner) sessionName(role state.SessionRole) string {
-	taskID := r.state.TaskID()
+func (r *ClaudeRunner) sessionName(role state.SessionRole, taskID string) string {
 	if len(taskID) > 8 {
 		taskID = taskID[:8]
 	}

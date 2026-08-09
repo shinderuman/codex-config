@@ -45,7 +45,7 @@ func Load() (AppConfig, error) {
 
 	stateHome := envOrDefault("GLM_WORKER_HOME", filepath.Join(home, ".glm-worker"))
 	promptDir := envOrDefault("GLM_WORKER_PROMPT_DIR", filepath.Join(home, ".codex", "glm-worker", "prompts"))
-	rounds, err := intEnv("GLM_WORKER_MAX_AUTO_FIX_ROUNDS", "GLM_WORKER_MAX_REVIEW_ROUNDS", 2)
+	rounds, err := intEnv("GLM_WORKER_MAX_AUTO_FIX_ROUNDS", 2)
 	if err != nil {
 		return AppConfig{}, err
 	}
@@ -95,18 +95,15 @@ func envOrDefault(name string, defaultValue string) string {
 	return defaultValue
 }
 
-func intEnv(primary string, legacy string, defaultValue int) (int, error) {
-	raw := os.Getenv(primary)
-	if raw == "" && legacy != "" {
-		raw = os.Getenv(legacy)
-	}
+func intEnv(name string, defaultValue int) (int, error) {
+	raw := os.Getenv(name)
 	if raw == "" {
 		return defaultValue, nil
 	}
 
 	value, err := strconv.Atoi(raw)
 	if err != nil || value < 0 {
-		return 0, fmt.Errorf("%sは0以上の整数で指定してください", primary)
+		return 0, fmt.Errorf("%sは0以上の整数で指定してください", name)
 	}
 	return value, nil
 }

@@ -7,7 +7,10 @@ import (
 	"os"
 )
 
-const resumeStateFile = "resume-state.json"
+const (
+	resumeStateFile    = "resume-state.json"
+	resumeStateVersion = 2
+)
 
 // ResumeStageは中断再開の復元段階を表す。
 type ResumeStage string
@@ -24,7 +27,7 @@ type ResumeCheckpoint struct {
 	Stage           ResumeStage `json:"stage"`
 	Phase           string      `json:"phase"`
 	Role            SessionRole `json:"role"`
-	Model           string      `json:"model,omitempty"`
+	Model           string      `json:"model"`
 	ReadOnly        bool        `json:"read_only"`
 	Effort          string      `json:"effort,omitempty"`
 	Prompt          string      `json:"prompt"`
@@ -42,7 +45,10 @@ type ResumeCheckpoint struct {
 
 // SaveResumeCheckpointは中断再開用状態を原子的に書き込む。
 func (s *StateStore) SaveResumeCheckpoint(checkpoint ResumeCheckpoint) error {
-	checkpoint.Version = 1
+	if checkpoint.Model == "" {
+		return fmt.Errorf("resume state model is required")
+	}
+	checkpoint.Version = resumeStateVersion
 	data, err := json.MarshalIndent(checkpoint, "", "  ")
 	if err != nil {
 		return fmt.Errorf("resume stateをJSON化できません: %w", err)
@@ -68,8 +74,11 @@ func (s *StateStore) LoadResumeCheckpoint() (ResumeCheckpoint, error) {
 	if err := json.Unmarshal(data, &checkpoint); err != nil {
 		return ResumeCheckpoint{}, fmt.Errorf("resume stateを読めません: %w", err)
 	}
-	if checkpoint.Version != 1 {
+	if checkpoint.Version != resumeStateVersion {
 		return ResumeCheckpoint{}, fmt.Errorf("unsupported resume state version: %d", checkpoint.Version)
+	}
+	if checkpoint.Model == "" {
+		return ResumeCheckpoint{}, fmt.Errorf("resume state model is required")
 	}
 	return checkpoint, nil
 }

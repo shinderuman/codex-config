@@ -160,32 +160,28 @@ func TestTaskStatsRecordCounters(t *testing.T) {
 	}
 }
 
-func TestTaskStatusInfersLegacyState(t *testing.T) {
+func TestTaskStatusDoesNotInferMissingCanonicalState(t *testing.T) {
 	st := &StateStore{dir: t.TempDir()}
-	if err := st.Write("task.id", "legacy-task"); err != nil {
+	if err := st.Write("task.id", "task-without-status"); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Write("last-review", "STATUS: NEEDS_SOL_REVIEW\nRISK: HIGH"); err != nil {
 		t.Fatal(err)
 	}
-	if status := st.TaskStatus(); status != TaskStatusWaitingSolReview {
-		t.Fatalf("legacy task status = %q", status)
-	}
-
-	if err := st.Remove("last-review"); err != nil {
-		t.Fatal(err)
-	}
 	if err := st.Touch("pending-decision"); err != nil {
 		t.Fatal(err)
 	}
-	if status := st.TaskStatus(); status != TaskStatusWaitingDecision {
-		t.Fatalf("legacy pending decision status = %q", status)
+	if status := st.TaskStatus(); status != TaskStatus("none") {
+		t.Fatalf("task.statusなしで状態を推定しました: %q", status)
 	}
 }
 
-func TestTaskStatsLazilyInitializesLegacyTask(t *testing.T) {
+func TestTaskStatsRebuildsMissingMirrorForCurrentTask(t *testing.T) {
 	st := &StateStore{dir: t.TempDir()}
-	if err := st.Write("task.id", "legacy-task"); err != nil {
+	if err := st.Write("task.id", "current-task"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetTaskStatus(TaskStatusActive); err != nil {
 		t.Fatal(err)
 	}
 	st.RecordModelCall(WorkerRole)
@@ -194,8 +190,8 @@ func TestTaskStatsLazilyInitializesLegacyTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.TaskID != "legacy-task" || stats.ModelCalls != 1 {
-		t.Fatalf("legacy task stats = %#v", stats)
+	if stats.TaskID != "current-task" || stats.ModelCalls != 1 {
+		t.Fatalf("recovered task stats = %#v", stats)
 	}
 }
 

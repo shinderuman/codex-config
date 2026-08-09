@@ -108,7 +108,10 @@ func currentStats(t *testing.T, st *state.StateStore) state.TaskStats {
 	if err != nil {
 		t.Fatal(err)
 	}
-	taskID := st.TaskID()
+	taskID, err := st.TaskID()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, s := range all {
 		if s.TaskID == taskID {
 			return s
@@ -438,7 +441,10 @@ func TestRunModelSurfacesZaiFiveHourLimit(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "STATUS: RATE_LIMITED") {
 		t.Fatalf("rate limit errorを期待: %v", err)
 	}
-	taskID := st.TaskID()
+	taskID, taskErr := st.TaskID()
+	if taskErr != nil {
+		t.Fatal(taskErr)
+	}
 	for _, value := range []string{
 		"TASK_ID: " + taskID,
 		"REPO_ROOT: /repo",
@@ -701,24 +707,23 @@ func TestRunModelSurfacesWorkerError(t *testing.T) {
 	}
 }
 
-func TestRunModelSelectsModelForVersionOneCheckpoint(t *testing.T) {
+func TestRunModelRejectsMissingModelBeforeRunnerCall(t *testing.T) {
 	st := newStateStoreT(t)
-	r := &scriptedRunner{steps: []runnerStep{{output: passPacket()}}}
+	r := &scriptedRunner{}
 	w := newWorkflowT(t, st, r)
 	w.temp = t.TempDir()
 
 	_, err := w.runModel(state.ResumeCheckpoint{
-		Stage:        state.ResumeStageReview,
-		Phase:        "reviewer-1",
-		Role:         state.ReviewerRole,
-		Prompt:       "p",
-		WorkerPacket: []string{"STATUS: IMPLEMENTED", "RISK: HIGH"},
+		Stage:  state.ResumeStageWorker,
+		Phase:  "worker-new",
+		Role:   state.WorkerRole,
+		Prompt: "p",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "checkpoint model is missing") {
+		t.Fatalf("missing model error = %v", err)
 	}
-	if strings.Join(r.models, ",") != "sonnet" {
-		t.Fatalf("model = %#v", r.models)
+	if len(r.prompts) != 0 {
+		t.Fatalf("model未指定でrunnerが呼ばれました: calls=%d", len(r.prompts))
 	}
 }
 

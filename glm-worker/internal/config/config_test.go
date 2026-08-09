@@ -21,35 +21,35 @@ func TestEnvOrDefault(t *testing.T) {
 
 func TestIntEnvPrimary(t *testing.T) {
 	t.Setenv("GLM_TEST_INT", "5")
-	got, err := intEnv("GLM_TEST_INT", "GLM_TEST_INT_LEGACY", 2)
+	got, err := intEnv("GLM_TEST_INT", 2)
 	if err != nil || got != 5 {
 		t.Fatalf("got %d err %v", got, err)
 	}
 }
 
-func TestIntEnvLegacyFallback(t *testing.T) {
-	t.Setenv("GLM_TEST_INT_LEGACY", "7")
-	got, err := intEnv("GLM_TEST_INT_PRIMARY_UNSET", "GLM_TEST_INT_LEGACY", 2)
-	if err != nil || got != 7 {
-		t.Fatalf("got %d err %v", got, err)
-	}
-}
-
 func TestIntEnvDefault(t *testing.T) {
-	got, err := intEnv("GLM_TEST_INT_NEITHER", "GLM_TEST_INT_NEITHER_LEGACY", 2)
+	got, err := intEnv("GLM_TEST_INT_NEITHER", 2)
 	if err != nil || got != 2 {
 		t.Fatalf("got %d err %v", got, err)
 	}
 }
 
+func TestIntEnvDoesNotUseRemovedLegacyName(t *testing.T) {
+	t.Setenv("GLM_WORKER_MAX_REVIEW_ROUNDS", "7")
+	got, err := intEnv("GLM_WORKER_MAX_AUTO_FIX_ROUNDS", 2)
+	if err != nil || got != 2 {
+		t.Fatalf("removed legacy envを参照しました: got %d err %v", got, err)
+	}
+}
+
 func TestIntEnvRejectsInvalid(t *testing.T) {
 	t.Setenv("GLM_TEST_INT_BAD", "abc")
-	if _, err := intEnv("GLM_TEST_INT_BAD", "", 2); err == nil {
+	if _, err := intEnv("GLM_TEST_INT_BAD", 2); err == nil {
 		t.Fatal("非整数値を拒否する必要があります")
 	}
 
 	t.Setenv("GLM_TEST_INT_NEG", "-1")
-	if _, err := intEnv("GLM_TEST_INT_NEG", "", 2); err == nil {
+	if _, err := intEnv("GLM_TEST_INT_NEG", 2); err == nil {
 		t.Fatal("負値を拒否する必要があります")
 	}
 }
