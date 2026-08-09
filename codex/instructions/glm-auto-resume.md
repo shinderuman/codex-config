@@ -7,10 +7,14 @@
 - `AUTO_RESUME_AVAILABLE: true`、`AUTO_RESUME_AT_RFC3339`、`AUTO_RESUME_KEY`、`TASK_ID`、`REPO_ROOT`が揃っていることを確認する。
 - Codex appの`automation_update`を使い、現在のローカルタスクへ紐づくheartbeat automationを作成または更新する。standalone taskやworktree automationは使わない。
 - automation名は`AUTO_RESUME_KEY`を使い、同名があれば新規作成せず更新する。
-- 実行時刻は`AUTO_RESUME_AT_RFC3339`とする。時刻前の固定間隔pollingは行わない。
+- 実行時刻は`AUTO_RESUME_AT_RFC3339`が表す絶対時刻とする。offsetを捨てずUTCへ変換し、時刻前の固定間隔pollingは行わない。
+- heartbeat schedulerは`DTSTART`の`TZID`を`next_run_at`計算へ反映せず、壁時計部分をUTCとして扱う。`DTSTART;TZID=Asia/Tokyo`は使わない。
+- 新規作成と既存更新のどちらでも、`AUTO_RESUME_AT_RFC3339`をUTCへ変換し、UTCの年月日時分秒を`DTSTART:YYYYMMDDTHHMMSS`、繰り返しを`RRULE:FREQ=DAILY;COUNT=1`とする1回限りの予約を同じautomation IDへ設定する。
+- `suggested_create`は作成提案の表示であり、automation作成完了として扱わない。`Created automation`とautomation IDを確認する。
+- 既存heartbeatの時刻更新でも、同じautomation IDへUTCへ変換した`DTSTART`を指定する。JSTやCSTの壁時計時刻をそのまま渡さない。
 - automationの実行環境は`REPO_ROOT`と同じローカルcheckoutを選ぶ。別worktreeではrepo hashが変わりresume stateを参照できない。
 - 生のautomation directiveやRRULEを本文へ出力せず、利用可能なtool schemaに従う。
-- automation作成結果を確認してからrate limit停止を報告する。作成不能な場合だけ手動`glm-worker --resume`をfallbackとして案内する。
+- automation toolの成功応答だけを予約成功の根拠にしない。`~/.codex/sqlite/codex-dev.db`の`automations.next_run_at`をJSTへ変換し、意図した絶対時刻と一致することを確認してからrate limit停止を報告する。DBを確認できない場合はCodex app上の次回実行時刻を確認する。作成不能または時刻不一致の場合だけ手動`glm-worker --resume`をfallbackとして案内する。
 
 ## wake時
 

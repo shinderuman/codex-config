@@ -26,6 +26,8 @@
 - rate limit出力にtask ID、repo root、2分の猶予を加えた自動再開時刻、重複防止keyを含める。
 - 自動再開automationは同じローカルCodexタスクへ紐づき、別worktreeを使わない。
 - wake時にtask IDと`rate-limited`状態を照合し、古い予約から`--resume`しない。
+- 新規作成・既存更新ともRFC3339時刻をUTCへ変換し、`TZID`なしの1回限りの`DTSTART`へ設定する。
+- automation toolの成功応答だけで完了扱いせず、SQLiteの`automations.next_run_at`またはCodex app上の次回実行が意図したJST時刻と一致することを確認する。
 
 
 ## GLM軽量化
