@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const modelCallLogVersion = 2
+
 // TokenUsageは1回のmodel呼出し全体のtoken使用量。
 type TokenUsage struct {
 	InputTokens              int64 `json:"input_tokens"`
@@ -53,11 +55,12 @@ type ModelCallLog struct {
 	ResponseBytes       int                           `json:"response_bytes"`
 	ResponseSHA256      string                        `json:"response_sha256"`
 	Error               string                        `json:"error,omitempty"`
-	Usage               TokenUsage                    `json:"usage"`
+	TopLevelUsage       TokenUsage                    `json:"top_level_usage"`
+	TreeUsage           TokenUsage                    `json:"tree_usage"`
 	WallDurationMS      int64                         `json:"wall_duration_ms"`
 	ClaudeDurationMS    int64                         `json:"claude_duration_ms,omitempty"`
 	ClaudeAPIDurationMS int64                         `json:"claude_api_duration_ms,omitempty"`
-	NumTurns            int                           `json:"num_turns,omitempty"`
+	TopLevelTurns       int                           `json:"top_level_turns,omitempty"`
 	TotalCostUSD        float64                       `json:"total_cost_usd,omitempty"`
 }
 
@@ -65,7 +68,7 @@ type ModelCallLog struct {
 // どちらかが失敗しても正規workflowを止めない。
 func (s *StateStore) RecordModelCallLog(value ModelCallLog) {
 	if value.Version == 0 {
-		value.Version = 1
+		value.Version = modelCallLogVersion
 	}
 	if value.CallID == "" {
 		callID, err := newUUID()
@@ -75,6 +78,7 @@ func (s *StateStore) RecordModelCallLog(value ModelCallLog) {
 			value.CallID = callID
 		}
 	}
+	value.TreeUsage = modelCallTreeUsage(value)
 	if err := s.appendModelCallLog(value); err != nil {
 		warnStatsFailure("telemetry追記", err)
 	}
@@ -107,19 +111,36 @@ func (s *StateStore) appendModelCallLog(value ModelCallLog) error {
 
 func (s *StateStore) recordTokenUsage(value ModelCallLog) {
 	s.UpdateTaskStats(func(stats *TaskStats) {
-		addInt64(&stats.InputTokensByAlias, value.ModelAlias, value.Usage.InputTokens)
-		addInt64(&stats.CacheCreationInputTokensByAlias, value.ModelAlias, value.Usage.CacheCreationInputTokens)
-		addInt64(&stats.CacheReadInputTokensByAlias, value.ModelAlias, value.Usage.CacheReadInputTokens)
-		addInt64(&stats.OutputTokensByAlias, value.ModelAlias, value.Usage.OutputTokens)
-		addInt(&stats.NumTurnsByAlias, value.ModelAlias, value.NumTurns)
+		addInt64(&stats.InputTokensByAlias, value.ModelAlias, value.TreeUsage.InputTokens)
+		addInt64(&stats.CacheCreationInputTokensByAlias, value.ModelAlias, value.TreeUsage.CacheCreationInputTokens)
+		addInt64(&stats.CacheReadInputTokensByAlias, value.ModelAlias, value.TreeUsage.CacheReadInputTokens)
+		addInt64(&stats.OutputTokensByAlias, value.ModelAlias, value.TreeUsage.OutputTokens)
+		addInt(&stats.TopLevelTurnsByAlias, value.ModelAlias, value.TopLevelTurns)
 		for model, usage := range value.ResolvedModelUsage {
-			addInt(&stats.ModelCallsByResolvedModel, model, 1)
+			addInt(&stats.CallTreesByResolvedModel, model, 1)
 			addInt64(&stats.InputTokensByResolvedModel, model, usage.InputTokens)
 			addInt64(&stats.CacheCreationInputTokensByResolvedModel, model, usage.CacheCreationInputTokens)
 			addInt64(&stats.CacheReadInputTokensByResolvedModel, model, usage.CacheReadInputTokens)
 			addInt64(&stats.OutputTokensByResolvedModel, model, usage.OutputTokens)
 		}
 	})
+}
+
+func modelCallTreeUsage(value ModelCallLog) TokenUsage {
+	if value.TreeUsage != (TokenUsage{}) {
+		return value.TreeUsage
+	}
+	var result TokenUsage
+	for _, usage := range value.ResolvedModelUsage {
+		result.InputTokens += usage.InputTokens
+		result.CacheCreationInputTokens += usage.CacheCreationInputTokens
+		result.CacheReadInputTokens += usage.CacheReadInputTokens
+		result.OutputTokens += usage.OutputTokens
+	}
+	if result == (TokenUsage{}) {
+		return value.TopLevelUsage
+	}
+	return result
 }
 
 func addInt(values *map[string]int, key string, value int) {
@@ -163,6 +184,9 @@ func (s *StateStore) ReadModelCallLogs(taskID string) ([]ModelCallLog, error) {
 		var value ModelCallLog
 		if err := json.Unmarshal(scanner.Bytes(), &value); err != nil {
 			return nil, fmt.Errorf("telemetryを読めません: %w", err)
+		}
+		if value.Version != modelCallLogVersion {
+			continue
 		}
 		result = append(result, value)
 	}

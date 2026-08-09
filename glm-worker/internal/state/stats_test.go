@@ -179,3 +179,54 @@ func TestAllTaskStatsSurfacesCorruptedMirror(t *testing.T) {
 		t.Fatal("明示 --stats は破損mirrorをエラーとして返す必要があります")
 	}
 }
+
+func TestAllTaskStatsSkipsVersion1(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	currentTask, err := st.StartNewTask()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyPath := filepath.Join(st.dir, "stats", "legacy.json")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"version":1,"task_id":"legacy","model_calls":99,"input_tokens_by_alias":{"opus":999}}`
+	if err := os.WriteFile(legacyPath, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := st.AllTaskStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 || all[0].TaskID != currentTask || all[0].Version != taskStatsVersion {
+		t.Fatalf("version 1を除外したstats = %#v", all)
+	}
+}
+
+func TestUpdateTaskStatsRebuildsVersion1Mirror(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	taskID, err := st.StartNewTask()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"version":1,"task_id":"` + taskID + `","model_calls":99,"input_tokens_by_alias":{"opus":999}}`
+	if err := os.WriteFile(st.Path(currentStatsFile), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	warnings, restore := captureStatsWarnings(t)
+	defer restore()
+
+	st.RecordModelCall(WorkerRole, "opus")
+
+	stats, err := st.loadTaskStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Version != taskStatsVersion || stats.ModelCalls != 1 || stats.InputTokensByAlias["opus"] != 0 {
+		t.Fatalf("version 1から再構築したstats = %#v", stats)
+	}
+	if warnings.Len() == 0 {
+		t.Fatal("version 1を破棄したwarningがありません")
+	}
+}

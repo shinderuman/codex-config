@@ -13,7 +13,12 @@ import (
 	"github.com/shinderuman/codex-config/glm-worker/internal/packet"
 )
 
-const currentStatsFile = "task-stats.json"
+const (
+	currentStatsFile = "task-stats.json"
+	taskStatsVersion = 2
+)
+
+var errUnsupportedTaskStatsVersion = errors.New("unsupported task stats version")
 
 // statsWarnOutはtask statsのbest-effort警告の出力先。
 // task-stats.jsonは観測用mirrorであり、task.statusが正規状態のため、
@@ -35,8 +40,8 @@ type TaskStats struct {
 	CacheCreationInputTokensByAlias         map[string]int64 `json:"cache_creation_input_tokens_by_alias,omitempty"`
 	CacheReadInputTokensByAlias             map[string]int64 `json:"cache_read_input_tokens_by_alias,omitempty"`
 	OutputTokensByAlias                     map[string]int64 `json:"output_tokens_by_alias,omitempty"`
-	NumTurnsByAlias                         map[string]int   `json:"num_turns_by_alias,omitempty"`
-	ModelCallsByResolvedModel               map[string]int   `json:"model_calls_by_resolved_model,omitempty"`
+	TopLevelTurnsByAlias                    map[string]int   `json:"top_level_turns_by_alias,omitempty"`
+	CallTreesByResolvedModel                map[string]int   `json:"call_trees_by_resolved_model,omitempty"`
 	InputTokensByResolvedModel              map[string]int64 `json:"input_tokens_by_resolved_model,omitempty"`
 	CacheCreationInputTokensByResolvedModel map[string]int64 `json:"cache_creation_input_tokens_by_resolved_model,omitempty"`
 	CacheReadInputTokensByResolvedModel     map[string]int64 `json:"cache_read_input_tokens_by_resolved_model,omitempty"`
@@ -63,7 +68,7 @@ func warnStatsFailure(operation string, err error) {
 // 失敗してもtask.statusなど正規状態へ影響しないためwarningだけ出す。
 func (s *StateStore) InitializeTaskStats(taskID string) {
 	stats := TaskStats{
-		Version:   1,
+		Version:   taskStatsVersion,
 		TaskID:    taskID,
 		StartedAt: time.Now().UTC(),
 		Status:    TaskStatusActive,
@@ -107,7 +112,7 @@ func (s *StateStore) bootstrapTaskStats() (TaskStats, error) {
 		return TaskStats{}, fmt.Errorf("task.idがありません")
 	}
 	return TaskStats{
-		Version:   1,
+		Version:   taskStatsVersion,
 		TaskID:    taskID,
 		StartedAt: time.Now().UTC(),
 		Status:    s.TaskStatus(),
@@ -149,9 +154,16 @@ func (s *StateStore) loadTaskStats() (TaskStats, error) {
 	if err != nil {
 		return TaskStats{}, err
 	}
+	return decodeTaskStats(data)
+}
+
+func decodeTaskStats(data []byte) (TaskStats, error) {
 	var stats TaskStats
 	if err := json.Unmarshal(data, &stats); err != nil {
 		return TaskStats{}, fmt.Errorf("task statsを読めません: %w", err)
+	}
+	if stats.Version != taskStatsVersion {
+		return TaskStats{}, fmt.Errorf("%w: %d", errUnsupportedTaskStatsVersion, stats.Version)
 	}
 	return stats, nil
 }
@@ -178,8 +190,11 @@ func (s *StateStore) AllTaskStats() ([]TaskStats, error) {
 		if err != nil {
 			return nil, err
 		}
-		var stats TaskStats
-		if err := json.Unmarshal(data, &stats); err != nil {
+		stats, err := decodeTaskStats(data)
+		if errors.Is(err, errUnsupportedTaskStatsVersion) {
+			continue
+		}
+		if err != nil {
 			return nil, fmt.Errorf("task stats historyを読めません: %w", err)
 		}
 		result = append(result, stats)
@@ -187,6 +202,8 @@ func (s *StateStore) AllTaskStats() ([]TaskStats, error) {
 	current, err := s.loadTaskStats()
 	if err == nil {
 		result = append(result, current)
+	} else if errors.Is(err, errUnsupportedTaskStatsVersion) {
+		return result, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}

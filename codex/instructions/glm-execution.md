@@ -7,7 +7,7 @@
 - 外部GLM通信とClaude Codeユーザー設定アクセスが必要なため、最初からsandbox外で実行し、sandbox内へfallbackしない。
 - `~/.codex/config.toml`の`background_terminal_max_timeout`は`21600000`ms（6時間）を前提とする。
 - 同じ依頼を重複起動せず、GLM処理中にCodex自身が同じ調査・実装を代行しない。
-- モデル配分・token節約・品質バランスの調整を依頼された場合だけ`glm-worker --stats`を実行し、出力の`TELEMETRY_DIR`にあるタスク別JSONLを対象に、phase・role・effort・alias・実モデル・usage・prompt・response・結果を比較する。通常作業では調整目的のためだけに詳細ログを読まない。
+- モデル配分・token節約・品質バランスの調整を依頼された場合だけ`glm-worker --stats`を実行し、出力の`TELEMETRY_DIR`にあるタスク別JSONLを対象に、phase・role・effort・alias・実モデル・tree usage・top-level usage・prompt・response・結果を比較する。総消費量にはsubagentを含むtree usageを使う。通常作業では調整目的のためだけに詳細ログを読まない。
 
 ## 待機
 

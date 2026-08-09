@@ -43,11 +43,11 @@ type RunResult struct {
 	SessionID          string
 	Resumed            bool
 	Response           string
-	Usage              TokenUsage
+	TopLevelUsage      TokenUsage
 	ModelUsage         map[string]ModelUsage
 	DurationMS         int64
 	DurationAPIMS      int64
-	NumTurns           int
+	TopLevelTurns      int
 	TotalCostUSD       float64
 	SystemPrompt       string
 	SystemPromptBytes  int
@@ -166,11 +166,11 @@ func (r *ClaudeRunner) Run(
 	parsed, parseErr := parseClaudeJSONResult(rawOutputPath)
 	if parseErr == nil {
 		result.Response = parsed.Result
-		result.Usage = parsed.Usage
+		result.TopLevelUsage = parsed.Usage
 		result.ModelUsage = parsed.ModelUsage
 		result.DurationMS = parsed.DurationMS
 		result.DurationAPIMS = parsed.DurationAPIMS
-		result.NumTurns = parsed.NumTurns
+		result.TopLevelTurns = parsed.NumTurns
 		result.TotalCostUSD = parsed.TotalCostUSD
 	}
 
@@ -208,14 +208,6 @@ func parseClaudeJSONResult(path string) (claudeJSONResult, error) {
 	}
 	if result.Type != "result" {
 		return claudeJSONResult{}, fmt.Errorf("Claude CLIのJSON出力typeが不正です: %q", result.Type)
-	}
-	if result.Usage == (TokenUsage{}) {
-		for _, usage := range result.ModelUsage {
-			result.Usage.InputTokens += usage.InputTokens
-			result.Usage.CacheCreationInputTokens += usage.CacheCreationInputTokens
-			result.Usage.CacheReadInputTokens += usage.CacheReadInputTokens
-			result.Usage.OutputTokens += usage.OutputTokens
-		}
 	}
 	return result, nil
 }

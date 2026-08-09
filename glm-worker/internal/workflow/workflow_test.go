@@ -118,18 +118,18 @@ func TestRunModelRecordsPromptResponseAndUsage(t *testing.T) {
 		output: implementedPacket("done"),
 		result: runner.RunResult{
 			SessionID: "worker-session",
-			Usage: runner.TokenUsage{
-				InputTokens:              10,
-				CacheCreationInputTokens: 20,
-				CacheReadInputTokens:     30,
-				OutputTokens:             40,
+			TopLevelUsage: runner.TokenUsage{
+				InputTokens:          1,
+				CacheReadInputTokens: 2,
+				OutputTokens:         3,
 			},
 			ModelUsage: map[string]runner.ModelUsage{
-				"glm-5.2": {InputTokens: 10, CacheReadInputTokens: 30, OutputTokens: 40},
+				"glm-5.2": {InputTokens: 10, CacheCreationInputTokens: 20, CacheReadInputTokens: 30, OutputTokens: 40},
+				"glm-4.7": {InputTokens: 5, CacheReadInputTokens: 7, OutputTokens: 8},
 			},
 			DurationMS:    1200,
 			DurationAPIMS: 900,
-			NumTurns:      2,
+			TopLevelTurns: 2,
 			SystemPrompt:  "worker system instruction",
 		},
 	}}}
@@ -162,11 +162,11 @@ func TestRunModelRecordsPromptResponseAndUsage(t *testing.T) {
 	if got.Prompt != "implementation instruction" || got.SystemPrompt != "worker system instruction" || got.Response != implementedPacket("done") {
 		t.Fatalf("telemetry content = %#v", got)
 	}
-	if got.Usage.CacheReadInputTokens != 30 || got.ResolvedModelUsage["glm-5.2"].OutputTokens != 40 {
+	if got.TopLevelUsage.CacheReadInputTokens != 2 || got.TreeUsage.CacheReadInputTokens != 37 || got.ResolvedModelUsage["glm-5.2"].OutputTokens != 40 {
 		t.Fatalf("telemetry usage = %#v", got)
 	}
 	stats := currentStats(t, st)
-	if stats.CacheReadInputTokensByAlias["opus"] != 30 || stats.OutputTokensByResolvedModel["glm-5.2"] != 40 {
+	if stats.CacheReadInputTokensByAlias["opus"] != 37 || stats.OutputTokensByAlias["opus"] != 48 || stats.OutputTokensByResolvedModel["glm-5.2"] != 40 {
 		t.Fatalf("token stats = %#v", stats)
 	}
 }

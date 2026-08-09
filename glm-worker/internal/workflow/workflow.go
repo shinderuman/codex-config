@@ -586,16 +586,16 @@ func (w *Workflow) recordModelCall(
 		ResponseBytes:      len([]byte(response)),
 		ResponseSHA256:     hex.EncodeToString(responseHash[:]),
 		Error:              errorText,
-		Usage: state.TokenUsage{
-			InputTokens:              runResult.Usage.InputTokens,
-			CacheCreationInputTokens: runResult.Usage.CacheCreationInputTokens,
-			CacheReadInputTokens:     runResult.Usage.CacheReadInputTokens,
-			OutputTokens:             runResult.Usage.OutputTokens,
+		TopLevelUsage: state.TokenUsage{
+			InputTokens:              runResult.TopLevelUsage.InputTokens,
+			CacheCreationInputTokens: runResult.TopLevelUsage.CacheCreationInputTokens,
+			CacheReadInputTokens:     runResult.TopLevelUsage.CacheReadInputTokens,
+			OutputTokens:             runResult.TopLevelUsage.OutputTokens,
 		},
 		WallDurationMS:      completedAt.Sub(startedAt).Milliseconds(),
 		ClaudeDurationMS:    runResult.DurationMS,
 		ClaudeAPIDurationMS: runResult.DurationAPIMS,
-		NumTurns:            runResult.NumTurns,
+		TopLevelTurns:       runResult.TopLevelTurns,
 		TotalCostUSD:        runResult.TotalCostUSD,
 	})
 }

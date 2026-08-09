@@ -124,16 +124,16 @@ func TestPrintStatsAggregatesAndSortsModelAliases(t *testing.T) {
 	st.RecordModelCallLog(state.ModelCallLog{
 		TaskID:     st.ReadOr("task.id", "unknown"),
 		ModelAlias: "opus",
-		Usage: state.TokenUsage{
-			InputTokens:              10,
-			CacheCreationInputTokens: 20,
-			CacheReadInputTokens:     30,
-			OutputTokens:             40,
+		TopLevelUsage: state.TokenUsage{
+			InputTokens:          1,
+			CacheReadInputTokens: 2,
+			OutputTokens:         3,
 		},
 		ResolvedModelUsage: map[string]state.ResolvedModelUsage{
-			"glm-5.2": {InputTokens: 10, CacheReadInputTokens: 30, OutputTokens: 40},
+			"glm-5.2": {InputTokens: 10, CacheCreationInputTokens: 20, CacheReadInputTokens: 30, OutputTokens: 40},
+			"glm-4.7": {InputTokens: 5, CacheReadInputTokens: 7, OutputTokens: 8},
 		},
-		NumTurns: 2,
+		TopLevelTurns: 2,
 	})
 
 	var out bytes.Buffer
@@ -150,13 +150,13 @@ func TestPrintStatsAggregatesAndSortsModelAliases(t *testing.T) {
 		t.Fatalf("model別実行時間が集計されていません: %q", out.String())
 	}
 	for _, value := range []string{
-		"INPUT_TOKENS_BY_ALIAS: opus=10",
+		"INPUT_TOKENS_BY_ALIAS: opus=15",
 		"CACHE_CREATION_INPUT_TOKENS_BY_ALIAS: opus=20",
-		"CACHE_READ_INPUT_TOKENS_BY_ALIAS: opus=30",
-		"TOTAL_PROMPT_TOKENS_BY_ALIAS: opus=60",
-		"OUTPUT_TOKENS_BY_ALIAS: opus=40",
-		"NUM_TURNS_BY_ALIAS: opus=2",
-		"MODEL_CALLS_BY_RESOLVED_MODEL: glm-5.2=1",
+		"CACHE_READ_INPUT_TOKENS_BY_ALIAS: opus=37",
+		"TOTAL_PROMPT_TOKENS_BY_ALIAS: opus=72",
+		"OUTPUT_TOKENS_BY_ALIAS: opus=48",
+		"TOP_LEVEL_TURNS_BY_ALIAS: opus=2",
+		"CALL_TREES_BY_RESOLVED_MODEL: glm-4.7=1,glm-5.2=1",
 	} {
 		if !strings.Contains(out.String(), value) {
 			t.Fatalf("token statsに%qがありません: %q", value, out.String())

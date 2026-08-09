@@ -187,13 +187,14 @@ glm-worker --stats
 `--stats`は通常のworker packetへ混ぜず、完了済みと現在のタスクを集計して次を表示する。
 
 - worker/reviewerとmodel alias別の呼び出し回数・実行時間・turn数
-- alias別およびClaude CLIが報告した実モデル別のinput、cache creation、cache read、output token
+- alias別の呼出しツリー全体、およびClaude CLIが報告した実モデル別のinput、cache creation、cache read、output token
 - Sol判断・明示fix・resume・自動fixの回数
 - `NEEDS_SOL_DECISION`、`NEEDS_SOL_REVIEW`、`PASS`の件数
 - model alias別rate limit、packet再圧縮、Solへ返したpacket bytes
 
 新規タスク開始時に前タスクの統計をarchiveし、`--reset`時も現在値を破棄せずarchiveする。
-`--stats`の`TELEMETRY_DIR`配下には、各呼出しのphase、role、alias、実モデル、effort、session、prompt、最終response、usage、所要時間、結果をJSONLで保持する。promptとresponse本文を保存したくない環境では`GLM_WORKER_TELEMETRY_CONTENT=false`を指定し、byte数とSHA-256、usageだけを残す。
+`--stats`の`TELEMETRY_DIR`配下には、各呼出しのphase、role、alias、実モデル、effort、session、prompt、最終response、top-level usage、subagentを含むtree usage、所要時間、結果をJSONLで保持する。alias別token集計にはtree usageを用い、top-level turn数は別名で表示する。promptとresponse本文を保存したくない環境では`GLM_WORKER_TELEMETRY_CONTENT=false`を指定し、byte数とSHA-256、usageだけを残す。
+statsとtelemetryのschemaはversion 2で、top-level集計だったversion 1は`--stats`とtelemetry読込から除外する。旧値の移行・混在は行わない。
 
 
 ## 開発時の検証

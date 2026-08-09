@@ -93,8 +93,8 @@ func TestClaudeRunnerRunStartsThenResumesSession(t *testing.T) {
 	if output, err := os.ReadFile(firstOutput); err != nil || string(output) != "runner output\n" {
 		t.Fatalf("output = %q, err = %v", output, err)
 	}
-	if firstResult.Usage.InputTokens != 11 || firstResult.Usage.CacheReadInputTokens != 13 || firstResult.Usage.OutputTokens != 14 {
-		t.Fatalf("usage = %#v", firstResult.Usage)
+	if firstResult.TopLevelUsage.InputTokens != 11 || firstResult.TopLevelUsage.CacheReadInputTokens != 13 || firstResult.TopLevelUsage.OutputTokens != 14 {
+		t.Fatalf("usage = %#v", firstResult.TopLevelUsage)
 	}
 	if firstResult.ModelUsage["glm-5.2"].OutputTokens != 14 || firstResult.SystemPromptSHA256 == "" || firstResult.SystemPrompt != "system" {
 		t.Fatalf("run result = %#v", firstResult)
@@ -176,8 +176,8 @@ func TestClaudeRunnerPreservesErrorResultAndUsage(t *testing.T) {
 	if err == nil {
 		t.Fatal("exit statusを返す必要があります")
 	}
-	if result.Usage.InputTokens != 5 || result.Usage.OutputTokens != 6 {
-		t.Fatalf("error usage = %#v", result.Usage)
+	if result.TopLevelUsage.InputTokens != 5 || result.TopLevelUsage.OutputTokens != 6 {
+		t.Fatalf("error usage = %#v", result.TopLevelUsage)
 	}
 	data, readErr := os.ReadFile(outputPath)
 	if readErr != nil {
@@ -219,7 +219,7 @@ func TestClaudeRunnerRejectsInvalidJSONWithoutMarkingSessionReady(t *testing.T) 
 	}
 }
 
-func TestParseClaudeJSONResultAggregatesModelUsageFallback(t *testing.T) {
+func TestParseClaudeJSONResultKeepsTopLevelAndTreeUsageSeparate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "result.json")
 	data := `{"type":"result","result":"packet","modelUsage":{"glm-4.7":{"inputTokens":3,"cacheCreationInputTokens":4,"cacheReadInputTokens":5,"outputTokens":6},"glm-5.1":{"inputTokens":7,"outputTokens":8}}}`
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
@@ -229,8 +229,11 @@ func TestParseClaudeJSONResultAggregatesModelUsageFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Usage.InputTokens != 10 || result.Usage.CacheCreationInputTokens != 4 || result.Usage.CacheReadInputTokens != 5 || result.Usage.OutputTokens != 14 {
-		t.Fatalf("fallback usage = %#v", result.Usage)
+	if result.Usage != (TokenUsage{}) {
+		t.Fatalf("top-level usage = %#v", result.Usage)
+	}
+	if result.ModelUsage["glm-4.7"].InputTokens != 3 || result.ModelUsage["glm-5.1"].OutputTokens != 8 {
+		t.Fatalf("model usage = %#v", result.ModelUsage)
 	}
 }
 
