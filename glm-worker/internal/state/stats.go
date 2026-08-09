@@ -22,24 +22,27 @@ var statsWarnOut io.Writer = os.Stderr
 
 // TaskStatsは観測用のタスク統計mirror。
 type TaskStats struct {
-	Version                 int        `json:"version"`
-	TaskID                  string     `json:"task_id"`
-	StartedAt               time.Time  `json:"started_at"`
-	ArchivedAt              *time.Time `json:"archived_at,omitempty"`
-	Status                  TaskStatus `json:"status"`
-	ModelCalls              int        `json:"model_calls"`
-	WorkerCalls             int        `json:"worker_calls"`
-	ReviewerCalls           int        `json:"reviewer_calls"`
-	DecisionCommands        int        `json:"decision_commands"`
-	FixCommands             int        `json:"fix_commands"`
-	ResumeCommands          int        `json:"resume_commands"`
-	AutoFixRounds           int        `json:"auto_fix_rounds"`
-	NeedsSolDecisionPackets int        `json:"needs_sol_decision_packets"`
-	NeedsSolReviewPackets   int        `json:"needs_sol_review_packets"`
-	PassPackets             int        `json:"pass_packets"`
-	RateLimits              int        `json:"rate_limits"`
-	PacketCompactions       int        `json:"packet_compactions"`
-	SolPacketBytes          int        `json:"sol_packet_bytes"`
+	Version                 int              `json:"version"`
+	TaskID                  string           `json:"task_id"`
+	StartedAt               time.Time        `json:"started_at"`
+	ArchivedAt              *time.Time       `json:"archived_at,omitempty"`
+	Status                  TaskStatus       `json:"status"`
+	ModelCalls              int              `json:"model_calls"`
+	ModelCallsByAlias       map[string]int   `json:"model_calls_by_alias,omitempty"`
+	ModelDurationMSByAlias  map[string]int64 `json:"model_duration_ms_by_alias,omitempty"`
+	RateLimitsByAlias       map[string]int   `json:"rate_limits_by_alias,omitempty"`
+	WorkerCalls             int              `json:"worker_calls"`
+	ReviewerCalls           int              `json:"reviewer_calls"`
+	DecisionCommands        int              `json:"decision_commands"`
+	FixCommands             int              `json:"fix_commands"`
+	ResumeCommands          int              `json:"resume_commands"`
+	AutoFixRounds           int              `json:"auto_fix_rounds"`
+	NeedsSolDecisionPackets int              `json:"needs_sol_decision_packets"`
+	NeedsSolReviewPackets   int              `json:"needs_sol_review_packets"`
+	PassPackets             int              `json:"pass_packets"`
+	RateLimits              int              `json:"rate_limits"`
+	PacketCompactions       int              `json:"packet_compactions"`
+	SolPacketBytes          int              `json:"sol_packet_bytes"`
 }
 
 func warnStatsFailure(operation string, err error) {
@@ -180,14 +183,27 @@ func (s *StateStore) AllTaskStats() ([]TaskStats, error) {
 	return result, nil
 }
 
-func (s *StateStore) RecordModelCall(role SessionRole) {
+func (s *StateStore) RecordModelCall(role SessionRole, model string) {
 	s.UpdateTaskStats(func(stats *TaskStats) {
 		stats.ModelCalls++
+		if stats.ModelCallsByAlias == nil {
+			stats.ModelCallsByAlias = make(map[string]int)
+		}
+		stats.ModelCallsByAlias[model]++
 		if role == ReviewerRole {
 			stats.ReviewerCalls++
 		} else {
 			stats.WorkerCalls++
 		}
+	})
+}
+
+func (s *StateStore) RecordModelDuration(model string, duration time.Duration) {
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		if stats.ModelDurationMSByAlias == nil {
+			stats.ModelDurationMSByAlias = make(map[string]int64)
+		}
+		stats.ModelDurationMSByAlias[model] += duration.Milliseconds()
 	})
 }
 
@@ -215,9 +231,13 @@ func (s *StateStore) RecordAutoFix() {
 	})
 }
 
-func (s *StateStore) RecordRateLimit() {
+func (s *StateStore) RecordRateLimit(model string) {
 	s.UpdateTaskStats(func(stats *TaskStats) {
 		stats.RateLimits++
+		if stats.RateLimitsByAlias == nil {
+			stats.RateLimitsByAlias = make(map[string]int)
+		}
+		stats.RateLimitsByAlias[model]++
 	})
 }
 

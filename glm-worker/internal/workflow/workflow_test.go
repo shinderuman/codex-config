@@ -54,19 +54,19 @@ func implementedPacketWithRisk(summary string, risk string) string {
 }
 
 func passPacket() string {
-	return "PACKET_BEGIN\nSTATUS: PASS\nRISK: LOW\nSUMMARY: pass\nREQUIREMENT_COVERAGE: covered\nTEST_EVIDENCE: ev\nISSUES: none\nRESIDUAL_RISK: none\nTARGETS: none\nPACKET_END\n"
+	return "PACKET_BEGIN\nSTATUS: PASS\nRISK: LOW\nSUMMARY: pass\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: none\nRESIDUAL_RISK: none\nTARGETS: none\nPACKET_END\n"
 }
 
 func needsSolReviewPacket() string {
-	return "PACKET_BEGIN\nSTATUS: NEEDS_SOL_REVIEW\nRISK: HIGH\nSUMMARY: review\nREQUIREMENT_COVERAGE: covered\nTEST_EVIDENCE: ev\nISSUES: i\nRESIDUAL_RISK: r\nTARGETS: t\nSOL_QUESTION: q\nPACKET_END\n"
+	return "PACKET_BEGIN\nSTATUS: NEEDS_SOL_REVIEW\nRISK: HIGH\nSUMMARY: review\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: i\nRESIDUAL_RISK: r\nTARGETS: t\nSOL_QUESTION: q\nPACKET_END\n"
 }
 
 func needsSolDecisionPacket() string {
-	return "PACKET_BEGIN\nSTATUS: NEEDS_SOL_DECISION\nRISK: HIGH\nDECISION: d\nEVIDENCE: e\nOPTIONS: o\nRECOMMENDATION: r\nTARGETS: t\nPACKET_END\n"
+	return "PACKET_BEGIN\nSTATUS: NEEDS_SOL_DECISION\nRISK: HIGH\nDECISION: d\nEVIDENCE: e\nOPTIONS: o\nRECOMMENDATION: r\nTEST_OBLIGATIONS: tests\nTARGETS: t\nPACKET_END\n"
 }
 
 func fixRequiredPacket() string {
-	return "PACKET_BEGIN\nSTATUS: FIX_REQUIRED\nRISK: HIGH\nSUMMARY: fix\nREQUIREMENT_COVERAGE: covered\nTEST_EVIDENCE: ev\nISSUES: i\nRESIDUAL_RISK: r\nTARGETS: t\nPACKET_END\n"
+	return "PACKET_BEGIN\nSTATUS: FIX_REQUIRED\nRISK: HIGH\nSUMMARY: fix\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: i\nRESIDUAL_RISK: r\nTARGETS: t\nPACKET_END\n"
 }
 
 func unknownStatusPacket() string {
@@ -320,6 +320,9 @@ func TestExecuteDecisionContinuesPendingTask(t *testing.T) {
 	if len(r.prompts) == 0 || !strings.Contains(r.prompts[0], "A案で進める") {
 		t.Fatalf("decision prompt = %#v", r.prompts)
 	}
+	if strings.Join(r.models, ",") != "opus,sonnet" {
+		t.Fatalf("models = %#v", r.models)
+	}
 }
 
 func TestExecuteExplicitFixContinuesSolReviewTask(t *testing.T) {
@@ -350,6 +353,9 @@ func TestExecuteExplicitFixContinuesSolReviewTask(t *testing.T) {
 	}
 	if stats := currentStats(t, st); stats.FixCommands != 1 {
 		t.Fatalf("fix stats = %#v", stats)
+	}
+	if strings.Join(r.models, ",") != "opus,sonnet" {
+		t.Fatalf("models = %#v", r.models)
 	}
 }
 

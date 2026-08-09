@@ -105,7 +105,7 @@ glm-worker --reset
 | `GLM_WORKER_CLAUDE_BIN` | `claude` | Claude Code実行ファイル |
 | `GLM_WORKER_WORKER_MODEL` | `opus` | worker model alias |
 | `GLM_WORKER_REVIEWER_MODEL` | `haiku` | 通常reviewer model alias |
-| `GLM_WORKER_HIGH_RISK_REVIEWER_MODEL` | `sonnet` | 高リスク・自動修正後reviewer model alias |
+| `GLM_WORKER_HIGH_RISK_REVIEWER_MODEL` | `sonnet` | 高リスク・Sol判断後・修正後reviewer model alias |
 | `GLM_WORKER_EFFORT` | `high` | 通常実行effort |
 | `GLM_WORKER_ESCALATED_EFFORT` | `max` | Sol判断後・明示fixのeffort |
 | `GLM_WORKER_MAX_AUTO_FIX_ROUNDS` | `2` | 自動修正の上限回数 |
@@ -160,7 +160,7 @@ wake時は同じローカルcheckoutでtask IDと`rate-limited`状態を照合�
 
 - worker: `opus` alias → `glm-5.2`
 - 通常reviewer: `haiku` alias → `glm-4.7`
-- `RISK: HIGH`または自動修正後のreviewer: `sonnet` alias → `glm-5.1`
+- `RISK: HIGH`、Sol判断後、自動修正後、明示fix後のreviewer: `sonnet` alias → `glm-5.1`
 - reviewerは4.7と5.1を直列実行せず、worker packetと自動修正履歴から一方だけを選ぶ。
 - 選択したmodel aliasはresume checkpointへ保存し、5時間上限後も同じモデルで再開する。
 - resume checkpointはversion 2でmodelを必須とする。旧versionの自動移行やroleからのmodel推定は行わない。
@@ -170,7 +170,8 @@ wake時は同じローカルcheckoutでtask IDと`rate-limited`状態を照合�
 - Claude Code sessionはリポジトリ永久ではなくタスク単位。新規タスク開始時にworker/reviewer session IDを更新する。
 - 同一タスク内の`--decision`、自動fix、Z.ai 5h limit後の`--resume`ではsessionを維持する。
 - `--fix`は`NEEDS_SOL_REVIEW`後だけ使用できる。`PASS`後の追加依頼は新規タスクとして開始し、worker/reviewer sessionを更新する。
-- worker/reviewer packetは最大15行・6 KiB・1行1536 bytes。field欠落を含む契約違反時は、同じsessionへ作業をやり直さない再圧縮を1回だけ要求する。
+- worker/reviewer packetは最大15行・6 KiB・1行1536 bytes。STATUS別の必須field・RISK整合性・field重複を検証し、契約違反時は同じsessionへ作業をやり直さない再圧縮を1回だけ要求する。
+- worker errorの診断tailは最大6 KiBに制限し、Codexへ不要な大量ログを返さない。
 
 ## タスク状態と統計
 
@@ -182,10 +183,10 @@ glm-worker --stats
 `--status`は現在のtask ID、task status、session、判断待ち、rate limit状態を表示する。
 `--stats`は通常のworker packetへ混ぜず、完了済みと現在のタスクを集計して次を表示する。
 
-- worker/reviewerのmodel呼び出し回数
+- worker/reviewerとmodel alias別の呼び出し回数・実行時間
 - Sol判断・明示fix・resume・自動fixの回数
 - `NEEDS_SOL_DECISION`、`NEEDS_SOL_REVIEW`、`PASS`の件数
-- rate limit、packet再圧縮、Solへ返したpacket bytes
+- model alias別rate limit、packet再圧縮、Solへ返したpacket bytes
 
 新規タスク開始時に前タスクの統計をarchiveし、`--reset`時も現在値を破棄せずarchiveする。
 

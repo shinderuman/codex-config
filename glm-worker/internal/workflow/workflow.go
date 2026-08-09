@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/shinderuman/codex-config/glm-worker/internal/config"
 	"github.com/shinderuman/codex-config/glm-worker/internal/packet"
@@ -285,7 +286,7 @@ func (w *Workflow) reviewUntilStable(
 		Stage:          state.ResumeStageReview,
 		Phase:          fmt.Sprintf("reviewer-%d", reviewNumber),
 		Role:           state.ReviewerRole,
-		Model:          w.reviewerModel(workerPacket, autoFixes),
+		Model:          w.reviewerModel(workerPacket, autoFixes, w.state.Exists("last-decision"), w.state.Exists("last-review")),
 		ReadOnly:       true,
 		Effort:         w.config.RoutineEffort,
 		Prompt:         prompt,
@@ -378,8 +379,8 @@ func (w *Workflow) handleReviewResult(
 	}
 }
 
-func (w *Workflow) reviewerModel(workerPacket packet.Packet, autoFixes int) string {
-	if workerPacket.Risk() == "HIGH" || autoFixes > 0 {
+func (w *Workflow) reviewerModel(workerPacket packet.Packet, autoFixes int, hasDecision bool, hasPriorReview bool) string {
+	if workerPacket.Risk() == "HIGH" || autoFixes > 0 || hasDecision || hasPriorReview {
 		return w.config.HighRiskReviewerModel
 	}
 	return w.config.ReviewerModel
@@ -436,8 +437,9 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	if err := w.state.SaveResumeCheckpoint(checkpoint); err != nil {
 		return packet.Packet{}, err
 	}
-	w.state.RecordModelCall(checkpoint.Role)
+	w.state.RecordModelCall(checkpoint.Role, checkpoint.Model)
 
+	startedAt := time.Now()
 	runErr := w.runner.Run(
 		checkpoint.Role,
 		checkpoint.Model,
@@ -446,6 +448,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 		checkpoint.Prompt,
 		outputPath,
 	)
+	w.state.RecordModelDuration(checkpoint.Model, time.Since(startedAt))
 	if runErr != nil {
 		if limit, ok := runner.DetectZaiFiveHourLimit(outputPath); ok {
 			// 5h上限ではsession IDを破棄しない。
@@ -463,7 +466,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 			if err := w.state.SetTaskStatus(state.TaskStatusRateLimited); err != nil {
 				return packet.Packet{}, err
 			}
-			w.state.RecordRateLimit()
+			w.state.RecordRateLimit(checkpoint.Model)
 
 			taskID, err := w.state.TaskID()
 			if err != nil {

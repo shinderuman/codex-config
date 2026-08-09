@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shinderuman/codex-config/glm-worker/internal/config"
 	"github.com/shinderuman/codex-config/glm-worker/internal/state"
@@ -54,7 +55,7 @@ func implementedPacketApp(summary string) string {
 }
 
 func passPacketApp() string {
-	return "PACKET_BEGIN\nSTATUS: PASS\nRISK: LOW\nSUMMARY: pass\nREQUIREMENT_COVERAGE: covered\nTEST_EVIDENCE: ev\nISSUES: none\nRESIDUAL_RISK: none\nTARGETS: none\nPACKET_END\n"
+	return "PACKET_BEGIN\nSTATUS: PASS\nRISK: LOW\nSUMMARY: pass\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: none\nRESIDUAL_RISK: none\nTARGETS: none\nPACKET_END\n"
 }
 
 func newAppConfig(t *testing.T) config.AppConfig {
@@ -96,6 +97,39 @@ func TestExecuteStatsReportsEmptyState(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "TASKS: 0") {
 		t.Fatalf("空状態のstats出力がありません: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "MODEL_CALLS_BY_ALIAS: none") || !strings.Contains(out.String(), "RATE_LIMITS_BY_ALIAS: none") {
+		t.Fatalf("空状態のmodel別stats出力がありません: %q", out.String())
+	}
+}
+
+func TestPrintStatsAggregatesAndSortsModelAliases(t *testing.T) {
+	cfg := newAppConfig(t)
+	st, err := state.NewStateStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.StartNewTask(); err != nil {
+		t.Fatal(err)
+	}
+	st.RecordModelCall(state.WorkerRole, "opus")
+	st.RecordModelCall(state.ReviewerRole, "haiku")
+	st.RecordModelCall(state.ReviewerRole, "sonnet")
+	st.RecordModelDuration("sonnet", 2*time.Second)
+	st.RecordRateLimit("opus")
+
+	var out bytes.Buffer
+	if err := printStats(st, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "MODEL_CALLS_BY_ALIAS: haiku=1,opus=1,sonnet=1") {
+		t.Fatalf("model別statsが安定順で集計されていません: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "RATE_LIMITS_BY_ALIAS: opus=1") {
+		t.Fatalf("model別rate limitが集計されていません: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "MODEL_DURATION_MS_BY_ALIAS: sonnet=2000") {
+		t.Fatalf("model別実行時間が集計されていません: %q", out.String())
 	}
 }
 

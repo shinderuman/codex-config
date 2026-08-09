@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shinderuman/codex-config/glm-worker/internal/config"
 	"github.com/shinderuman/codex-config/glm-worker/internal/packet"
@@ -124,13 +125,14 @@ func TestTaskStatsRecordCounters(t *testing.T) {
 	if _, err := st.StartNewTask(); err != nil {
 		t.Fatal(err)
 	}
-	st.RecordModelCall(WorkerRole)
-	st.RecordModelCall(ReviewerRole)
+	st.RecordModelCall(WorkerRole, "opus")
+	st.RecordModelCall(ReviewerRole, "haiku")
+	st.RecordModelDuration("opus", 1500*time.Millisecond)
 	st.RecordDecision()
 	st.RecordFix()
 	st.RecordResume()
 	st.RecordAutoFix()
-	st.RecordRateLimit()
+	st.RecordRateLimit("haiku")
 	st.RecordPacketCompaction()
 	st.RecordSolPacket(packet.FromLines([]string{
 		"STATUS: PASS",
@@ -151,6 +153,9 @@ func TestTaskStatsRecordCounters(t *testing.T) {
 	}
 	if stats.ModelCalls != 2 || stats.WorkerCalls != 1 || stats.ReviewerCalls != 1 {
 		t.Fatalf("model counters = %#v", stats)
+	}
+	if stats.ModelCallsByAlias["opus"] != 1 || stats.ModelCallsByAlias["haiku"] != 1 || stats.ModelDurationMSByAlias["opus"] != 1500 || stats.RateLimitsByAlias["haiku"] != 1 {
+		t.Fatalf("model alias counters = %#v", stats)
 	}
 	if stats.PacketCompactions != 1 || stats.PassPackets != 1 || stats.NeedsSolDecisionPackets != 1 || stats.NeedsSolReviewPackets != 1 || stats.SolPacketBytes == 0 {
 		t.Fatalf("packet counters = %#v", stats)
@@ -184,7 +189,7 @@ func TestTaskStatsRebuildsMissingMirrorForCurrentTask(t *testing.T) {
 	if err := st.SetTaskStatus(TaskStatusActive); err != nil {
 		t.Fatal(err)
 	}
-	st.RecordModelCall(WorkerRole)
+	st.RecordModelCall(WorkerRole, "opus")
 
 	stats, err := st.loadTaskStats()
 	if err != nil {

@@ -74,6 +74,7 @@
 - 不明な根本原因を推測で確定しない。
 - 既存責務・API・データ構造を無断変更しない。
 - テスト成功だけを正しさの根拠にしない。
+- `RISK: HIGH`はアーキテクチャ、公開API、データモデル、依存方向、互換性、原因不明バグ、セキュリティ、不可逆操作、Sol判断後、review fix後のいずれか。これらがなく局所的で可逆な変更だけ`LOW`。
 
 ## 出力
 途中経過・読んだファイル一覧・grep結果・大量コードを最終出力へ含めない。次のいずれかのPACKETだけ。最大15行・全体6 KiB以内。各fieldは判断に必要な意味情報だけへ圧縮する。
@@ -94,12 +95,8 @@ PACKET_END
 PACKET_BEGIN
 STATUS: IMPLEMENTED
 RISK: LOW | HIGH
-CHANGED: <変更ファイル。調査のみならnone>
 SUMMARY: <実施内容2-4行>
 REQUIREMENT_COVERAGE: <要求充足>
-TEST_OBLIGATIONS: <保証事項>
 TESTS: <テスト結果要約>
-LINT_BUILD: <結果。該当なしn/a>
-DESIGN_DECISIONS: <Sol判断/重要設計。なければnone>
 UNVERIFIED: <未確認事項。なければnone>
 PACKET_END

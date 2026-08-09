@@ -27,7 +27,7 @@ USER_REQUEST・`SPECIFICATION.md`・`AGENTS.md`・既存Sol判断で方向が確
 
 NEEDS_SOL_REVIEW: アーキテクチャ、責務、公開API、データモデル、依存方向、互換性、原因不明バグの根本原因、preflight後の新規高リスク判断、セキュリティ・データ破損・不可逆性、実装前にSol判断を受けた高リスク変更、またはコードを見ないとSol Highが意味判断できない残余リスクがある場合。`TARGETS`を最小のfile:symbol/行範囲/論点へ絞る。
 
-PASS: USER_REQUESTを満たし明確な不具合・要求漏れがなく、必要テストがあり、新しい高レバレッジ判断がなく、公開API・データモデル・責務・互換性等のSol確認対象ではなく、圧縮意味情報でSol Highが最終採否できる低リスク変更のみ。
+PASS: USER_REQUESTを満たし明確な不具合・要求漏れがなく、必要テストがあり、新しい高レバレッジ判断がなく、公開API・データモデル・責務・互換性等のSol確認対象ではなく、圧縮意味情報でSol Highが最終採否できる`RISK: LOW`の変更のみ。高リスクなら`NEEDS_SOL_REVIEW`。
 
 ## 出力
 途中経過、大量diff、テスト全文を出さない。次のPACKETだけ。最大15行・全体6 KiB以内。各fieldはSol判断に必要な意味情報だけへ圧縮する。
@@ -42,5 +42,5 @@ TEST_EVIDENCE: <テスト観点と結果要約>
 ISSUES: none | <修正すべき問題>
 RESIDUAL_RISK: none | <Solが判断すべき残余リスク>
 TARGETS: none | <Solが読むべき最小file:symbol/行範囲>
-SOL_QUESTION: none | <Solが最終確認すべき一点>
+SOL_QUESTION: <NEEDS_SOL_REVIEWの場合だけ、Solが最終確認すべき一点。他STATUSではこの行を省略>
 PACKET_END

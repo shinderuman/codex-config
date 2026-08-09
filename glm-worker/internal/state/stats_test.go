@@ -102,7 +102,7 @@ func TestRecordModelCallContinuesWithCorruptedStats(t *testing.T) {
 	warn, restore := captureStatsWarnings(t)
 	defer restore()
 
-	st.RecordModelCall(WorkerRole)
+	st.RecordModelCall(WorkerRole, "opus")
 
 	if !strings.Contains(warn.String(), "WARNING") {
 		t.Fatalf("破損mirrorの警告が出ませんでした: %q", warn.String())
@@ -158,7 +158,7 @@ func TestUpdateTaskStatsToleratesWriteFailure(t *testing.T) {
 	warn, restore := captureStatsWarnings(t)
 	defer restore()
 
-	st.RecordModelCall(WorkerRole)
+	st.RecordModelCall(WorkerRole, "opus")
 
 	if !strings.Contains(warn.String(), "WARNING") {
 		t.Fatalf("書き込み失敗の警告が出ませんでした: %q", warn.String())

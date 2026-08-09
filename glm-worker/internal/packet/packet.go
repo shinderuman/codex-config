@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode/utf8"
 )
 
 // PACKET出力契約。テストや呼び出し側もこの上限に基づいて検証する。
@@ -14,6 +15,7 @@ const (
 	MaxPacketLines     = 15
 	MaxPacketBytes     = 6 * 1024
 	MaxPacketLineBytes = 1536
+	MaxDiagnosticBytes = 6 * 1024
 )
 
 // constraintErrorはPACKETの行数・サイズ・必須fieldなどの契約違反を表す。
@@ -122,6 +124,19 @@ func Validate(value Packet) error {
 		}
 	}
 
+	seen := make(map[string]struct{}, len(value.Lines))
+	for _, line := range value.Lines {
+		key, _, ok := strings.Cut(line, ":")
+		key = strings.TrimSpace(key)
+		if !ok || key == "" {
+			return &constraintError{reason: "packetの各行はKEY: value形式にしてください"}
+		}
+		if _, exists := seen[key]; exists {
+			return &constraintError{reason: fmt.Sprintf("packet field %sが重複しています", key)}
+		}
+		seen[key] = struct{}{}
+	}
+
 	status := value.Status()
 	required, ok := requiredFields[status]
 	if !ok {
@@ -129,6 +144,12 @@ func Validate(value Packet) error {
 	}
 	if risk := value.Risk(); risk != "LOW" && risk != "HIGH" {
 		return &constraintError{reason: fmt.Sprintf("packet RISKはLOWまたはHIGHで指定してください: %q", risk)}
+	}
+	if (status == "NEEDS_SOL_DECISION" || status == "NEEDS_SOL_REVIEW") && value.Risk() != "HIGH" {
+		return &constraintError{reason: fmt.Sprintf("%sのRISKはHIGHにしてください", status)}
+	}
+	if status == "PASS" && value.Risk() != "LOW" {
+		return &constraintError{reason: "PASSのRISKはLOWにしてください。高リスクならNEEDS_SOL_REVIEWを返してください"}
 	}
 
 	for _, field := range required {
@@ -140,11 +161,11 @@ func Validate(value Packet) error {
 }
 
 var requiredFields = map[string][]string{
-	"NEEDS_SOL_DECISION": {"STATUS", "RISK", "DECISION", "EVIDENCE", "OPTIONS", "RECOMMENDATION", "TARGETS"},
+	"NEEDS_SOL_DECISION": {"STATUS", "RISK", "DECISION", "EVIDENCE", "OPTIONS", "RECOMMENDATION", "TEST_OBLIGATIONS", "TARGETS"},
 	"IMPLEMENTED":        {"STATUS", "RISK", "SUMMARY", "REQUIREMENT_COVERAGE", "TESTS", "UNVERIFIED"},
-	"PASS":               {"STATUS", "RISK", "SUMMARY", "REQUIREMENT_COVERAGE", "TEST_EVIDENCE", "ISSUES", "RESIDUAL_RISK", "TARGETS"},
-	"FIX_REQUIRED":       {"STATUS", "RISK", "SUMMARY", "REQUIREMENT_COVERAGE", "TEST_EVIDENCE", "ISSUES", "RESIDUAL_RISK", "TARGETS"},
-	"NEEDS_SOL_REVIEW":   {"STATUS", "RISK", "SUMMARY", "REQUIREMENT_COVERAGE", "TEST_EVIDENCE", "ISSUES", "RESIDUAL_RISK", "TARGETS", "SOL_QUESTION"},
+	"PASS":               {"STATUS", "RISK", "SUMMARY", "REQUIREMENT_COVERAGE", "INVARIANTS", "TEST_EVIDENCE", "ISSUES", "RESIDUAL_RISK", "TARGETS"},
+	"FIX_REQUIRED":       {"STATUS", "RISK", "SUMMARY", "REQUIREMENT_COVERAGE", "INVARIANTS", "TEST_EVIDENCE", "ISSUES", "RESIDUAL_RISK", "TARGETS"},
+	"NEEDS_SOL_REVIEW":   {"STATUS", "RISK", "SUMMARY", "REQUIREMENT_COVERAGE", "INVARIANTS", "TEST_EVIDENCE", "ISSUES", "RESIDUAL_RISK", "TARGETS", "SOL_QUESTION"},
 }
 
 func (p Packet) Status() string {
@@ -189,5 +210,14 @@ func Tail(path string, count int) string {
 		lines = append(lines, scanner.Text())
 	}
 
-	return strings.Join(lines, "\n")
+	result := strings.Join(lines, "\n")
+	if len(result) <= MaxDiagnosticBytes {
+		return result
+	}
+	prefix := "[前方を省略]\n"
+	start := len(result) - (MaxDiagnosticBytes - len(prefix))
+	for start < len(result) && !utf8.RuneStart(result[start]) {
+		start++
+	}
+	return prefix + result[start:]
 }

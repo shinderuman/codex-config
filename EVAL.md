@@ -33,21 +33,22 @@
 - 新規タスク開始でworker/reviewer session IDが更新される。
 - 同一タスク内のdecision/fix/resumeではsession IDが維持される。
 - `--fix`は`NEEDS_SOL_REVIEW`状態だけで許可され、`PASS`後は拒否される。
-- workerはopus alias、通常reviewerはhaiku alias、高リスク・自動修正後reviewerはsonnet aliasを利用する。
+- workerはopus alias、通常reviewerはhaiku alias、高リスク・Sol判断後・自動修正後・明示fix後reviewerはsonnet aliasを利用する。
 - 通常effortはhigh、Sol判断後/明示fixはmax。
 - auto-compact windowは500K。
 - managed model mappingはopus=glm-5.2、haiku=glm-4.7、sonnet=glm-5.1。
-- `RISK: LOW`の初回reviewは4.7、`RISK: HIGH`または自動修正後のreviewは5.1を1回だけ選ぶ。
+- `RISK: LOW`の初回reviewは4.7、高リスク・Sol判断後・自動修正後・明示fix後のreviewは5.1を1回だけ選ぶ。
 - rate limit後のresumeでもcheckpointへ保存したreviewer modelを維持する。
 - version 1のresume checkpointを受理せず、model欠落時にroleから補完しない。
-- packetは15行・6 KiB・1行1536 bytes以内で、STATUS別必須fieldを検証する。
+- packetは15行・6 KiB・1行1536 bytes以内で、STATUS別必須field、RISK整合性、field重複を検証する。
 - packet契約違反時は同一sessionへ再圧縮を1回だけ依頼し、作業を再実行しない。
+- worker errorの診断tailは6 KiBを超えない。
 
 
 ## 統計
 
 - 新規タスク開始時とreset時に前タスク統計をarchiveする。
-- worker/reviewer呼び出し、Sol判断、明示fix、resume、自動fix、Sol向けpacket、rate limit、packet再圧縮を記録する。
+- worker/reviewerとmodel alias別の呼び出し回数・実行時間、Sol判断、明示fix、resume、自動fix、Sol向けpacket、model alias別rate limit、packet再圧縮を記録する。
 - `glm-worker --stats`だけが統計を表示し、通常packet出力へ統計を混在させない。
 - stats mirrorが破損・書き込み不能でも通常workflowとresetを継続し、warningを出す。
 

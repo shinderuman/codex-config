@@ -3,6 +3,8 @@ package app
 import (
 	"fmt"
 	"io"
+	"sort"
+	"strings"
 
 	"github.com/shinderuman/codex-config/glm-worker/internal/state"
 )
@@ -44,6 +46,9 @@ func printStats(st *state.StateStore, stdout io.Writer) error {
 	aggregate := state.TaskStats{}
 	for _, stats := range all {
 		aggregate.ModelCalls += stats.ModelCalls
+		mergeIntMap(&aggregate.ModelCallsByAlias, stats.ModelCallsByAlias)
+		mergeInt64Map(&aggregate.ModelDurationMSByAlias, stats.ModelDurationMSByAlias)
+		mergeIntMap(&aggregate.RateLimitsByAlias, stats.RateLimitsByAlias)
 		aggregate.WorkerCalls += stats.WorkerCalls
 		aggregate.ReviewerCalls += stats.ReviewerCalls
 		aggregate.DecisionCommands += stats.DecisionCommands
@@ -60,6 +65,8 @@ func printStats(st *state.StateStore, stdout io.Writer) error {
 
 	fmt.Fprintf(stdout, "TASKS: %d\n", len(all))
 	fmt.Fprintf(stdout, "MODEL_CALLS: %d\n", aggregate.ModelCalls)
+	fmt.Fprintf(stdout, "MODEL_CALLS_BY_ALIAS: %s\n", formatIntMap(aggregate.ModelCallsByAlias))
+	fmt.Fprintf(stdout, "MODEL_DURATION_MS_BY_ALIAS: %s\n", formatInt64Map(aggregate.ModelDurationMSByAlias))
 	fmt.Fprintf(stdout, "WORKER_CALLS: %d\n", aggregate.WorkerCalls)
 	fmt.Fprintf(stdout, "REVIEWER_CALLS: %d\n", aggregate.ReviewerCalls)
 	fmt.Fprintf(stdout, "DECISION_COMMANDS: %d\n", aggregate.DecisionCommands)
@@ -70,11 +77,54 @@ func printStats(st *state.StateStore, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "NEEDS_SOL_REVIEW_PACKETS: %d\n", aggregate.NeedsSolReviewPackets)
 	fmt.Fprintf(stdout, "PASS_PACKETS: %d\n", aggregate.PassPackets)
 	fmt.Fprintf(stdout, "RATE_LIMITS: %d\n", aggregate.RateLimits)
+	fmt.Fprintf(stdout, "RATE_LIMITS_BY_ALIAS: %s\n", formatIntMap(aggregate.RateLimitsByAlias))
 	fmt.Fprintf(stdout, "PACKET_COMPACTIONS: %d\n", aggregate.PacketCompactions)
 	fmt.Fprintf(stdout, "SOL_PACKET_BYTES: %d\n", aggregate.SolPacketBytes)
 	fmt.Fprintf(stdout, "CURRENT_TASK_ID: %s\n", st.ReadOr("task.id", "none"))
 	fmt.Fprintf(stdout, "CURRENT_TASK_STATUS: %s\n", st.TaskStatus())
 	return nil
+}
+
+func mergeIntMap(target *map[string]int, source map[string]int) {
+	if *target == nil {
+		*target = make(map[string]int)
+	}
+	for key, value := range source {
+		(*target)[key] += value
+	}
+}
+
+func mergeInt64Map(target *map[string]int64, source map[string]int64) {
+	if *target == nil {
+		*target = make(map[string]int64)
+	}
+	for key, value := range source {
+		(*target)[key] += value
+	}
+}
+
+func formatIntMap(values map[string]int) string {
+	items := make([]string, 0, len(values))
+	for key, value := range values {
+		items = append(items, fmt.Sprintf("%s=%d", key, value))
+	}
+	sort.Strings(items)
+	if len(items) == 0 {
+		return "none"
+	}
+	return strings.Join(items, ",")
+}
+
+func formatInt64Map(values map[string]int64) string {
+	items := make([]string, 0, len(values))
+	for key, value := range values {
+		items = append(items, fmt.Sprintf("%s=%d", key, value))
+	}
+	sort.Strings(items)
+	if len(items) == 0 {
+		return "none"
+	}
+	return strings.Join(items, ",")
 }
 
 // resetStateは状態をクリアし完了レポートを出力する。
