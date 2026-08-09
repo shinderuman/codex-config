@@ -31,3 +31,13 @@ func TestParseCommandResume(t *testing.T) {
 		t.Fatalf("unexpected command: %#v", command)
 	}
 }
+
+func TestParseCommandStats(t *testing.T) {
+	command, err := parseCommand([]string{"--stats"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command.Mode != modeStats {
+		t.Fatalf("unexpected command: %#v", command)
+	}
+}

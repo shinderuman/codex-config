@@ -82,7 +82,7 @@ Sol Highは原則として行わない:
 
 ## 6. 品質ゲート
 
-次はGLMだけで最終確定させない:
+次のうち、USER_REQUEST・`SPECIFICATION.md`・既存`AGENTS.md`・直前のSol判断で未確定のものはGLMだけで最終確定させない:
 - アーキテクチャ
 - 新しい責務・型・クラス・package/module
 - 公開API・CLIの意味的変更
@@ -92,6 +92,8 @@ Sol Highは原則として行わない:
 - 原因不明バグの根本原因
 - セキュリティ・データ破損・不可逆操作
 - 複数案の選択が将来構造へ意味のある差を生む場合
+
+承認済みの構成内で行う型・package・interfaceの追加、作業単位の分割、命名、明白な仕様違反の修正、テスト追加、互換性を狭めず強化する修正は、それ自体を理由にSol判断へ戻さない。GLM workerと独立reviewerで確定できる低レベル判断として扱う。
 
 これらは実装前`NEEDS_SOL_DECISION`または最終`NEEDS_SOL_REVIEW`でSol Highを通す。
 低リスク変更は独立GLM reviewerのPASS後、Sol Highは圧縮パケットで採否を判断し、全diff精読を省略してよい。
@@ -105,6 +107,7 @@ Sol Highは原則として行わない:
 - sandbox内で試してから昇格する方式を使わず、sandbox内へフォールバックしない。
 - `~/.codex/config.toml`の`background_terminal_max_timeout`は`21600000`ms（6時間）を前提とする。
 - `glm-worker`が実行中なら、background terminalでは利用可能な最大待機時間を指定してblocking waitする。
+- 利用ツールがblocking waitの内部上限でsession IDを返す場合、同一のtool orchestration内で最大待機を再開し、tool callを終了してSol Highへ制御を戻さない。このツール内部の継続待機は許可するが、Sol Highを再起動して`write_stdin`等を呼ぶ方式へ変換しない。
 - 30秒・1分・5分などの固定間隔で`write_stdin`、status確認、端末出力確認、生存確認を繰り返してはならない。
 - 「一定時間ユーザーへ報告しない」「60秒以上無報告にしない」「定期的に進捗を知らせる」等の進捗報告ルールは、GLMへpollする理由にならない。
 - 進捗報告ルールを満たすためにblocking waitの待機時間を短くしたり、待機を中断して`write_stdin`・status確認・端末出力確認を行ってはならない。

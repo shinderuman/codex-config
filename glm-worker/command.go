@@ -13,6 +13,7 @@ const (
 	modeFix
 	modeResume
 	modeStatus
+	modeStats
 	modeReset
 )
 
@@ -23,7 +24,7 @@ type command struct {
 
 func parseCommand(args []string) (command, error) {
 	if len(args) == 0 {
-		return command{}, fmt.Errorf("usage: glm-worker <instruction> | --decision <decision> | --fix <instruction> | --resume | --status | --reset")
+		return command{}, fmt.Errorf("usage: glm-worker <instruction> | --decision <decision> | --fix <instruction> | --resume | --status | --stats | --reset")
 	}
 
 	switch args[0] {
@@ -41,6 +42,11 @@ func parseCommand(args []string) (command, error) {
 			return command{}, fmt.Errorf("usage: glm-worker --status")
 		}
 		return command{Mode: modeStatus}, nil
+	case "--stats":
+		if len(args) != 1 {
+			return command{}, fmt.Errorf("usage: glm-worker --stats")
+		}
+		return command{Mode: modeStats}, nil
 	case "--reset":
 		if len(args) != 1 {
 			return command{}, fmt.Errorf("usage: glm-worker --reset")

@@ -7,6 +7,8 @@
 - `glm-worker`がbuildされる。
 - cloneしたリポジトリでは`git pull`後に`install.sh`が動く。
 - リポジトリ側で削除・改名された管理ファイルは次回install時に配置先から消える。
+- sourceのtest/buildが失敗した場合、管理ファイルの配置を開始しない。
+- install完了時に、新しいCodexタスクでのルール再読込が必要な旨を表示する。
 
 
 
@@ -24,7 +26,17 @@
 
 - 新規タスク開始でworker/reviewer session IDが更新される。
 - 同一タスク内のdecision/fix/resumeではsession IDが維持される。
+- `--fix`は`NEEDS_SOL_REVIEW`状態だけで許可され、`PASS`後は拒否される。
 - workerはopus alias、reviewerはhaiku aliasを利用する。
 - 通常effortはhigh、Sol判断後/明示fixはmax。
 - auto-compact windowは500K。
 - managed model mappingはopus=glm-5.2、haiku=glm-5-turbo。
+- packetは15行・6 KiB・1行1536 bytes以内で、STATUS別必須fieldを検証する。
+- packet契約違反時は同一sessionへ再圧縮を1回だけ依頼し、作業を再実行しない。
+
+
+## 統計
+
+- 新規タスク開始時とreset時に前タスク統計をarchiveする。
+- worker/reviewer呼び出し、Sol判断、明示fix、resume、自動fix、Sol向けpacket、rate limit、packet再圧縮を記録する。
+- `glm-worker --stats`だけが統計を表示し、通常packet出力へ統計を混在させない。

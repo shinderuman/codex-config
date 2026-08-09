@@ -200,6 +200,25 @@ build_glm_worker() {
     trap - EXIT HUP INT TERM
 }
 
+preflight() {
+    build_dir=$(mktemp -d "${TMPDIR:-/tmp}/codex-config-preflight.XXXXXX")
+
+    if ! (
+        cd "$repo_root/glm-worker"
+        go test ./...
+        go build -buildvcs=false -trimpath -o "$build_dir/glm-worker" .
+
+        cd "$repo_root/tools/merge-json"
+        go test ./...
+        go build -buildvcs=false -trimpath -o "$build_dir/merge-json" .
+    ); then
+        rm -rf "$build_dir"
+        return 1
+    fi
+
+    rm -rf "$build_dir"
+}
+
 merge_claude_settings() {
     mkdir -p "$(dirname "$claude_settings")"
 
@@ -238,12 +257,15 @@ require cmp
 require awk
 require install
 
+printf '%s\n' 'preflight: validating source before applying managed files'
+preflight
+build_glm_worker
 install_codex_files
 merge_codex_config
-build_glm_worker
 merge_claude_settings
 install_pull_hook
 
 mkdir -p "$HOME/.glm-worker/sessions"
 
 printf '%s\n' 'install complete'
+printf '%s\n' 'Codexルールの再読込を保証するには、新しいCodexタスクを開始してください。'

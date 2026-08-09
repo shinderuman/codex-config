@@ -82,3 +82,13 @@ INDEPENDENT_REVIEW:
 修正後に必要なテスト・lint・build・自己レビューまで行ってください。
 `, request, decision, reviewPacket.String())
 }
+
+func packetCompressionPrompt(reason string) string {
+	return fmt.Sprintf(`直前の作業結果は有効ですが、最終PACKETが出力契約を満たしていません。
+作業・調査・テストをやり直さず、直前の結果を意味を失わない範囲で再圧縮し、PACKETだけを再出力してください。
+最大15行・全体6 KiB・1行1536 bytes以内です。system promptで指定されたSTATUS別fieldを省略しないでください。
+
+違反内容:
+%s
+`, reason)
+}

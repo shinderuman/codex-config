@@ -24,6 +24,9 @@ ZIPからでも同じで、任意の場所へ展開して`./install.sh`を実行
 一方、過去に`install.sh`が配置した管理ファイルはmanifestで追跡し、リポジトリ側で削除・改名された場合は次回install時に旧ファイルを削除する。
 バックアップは作成しない。
 
+管理ファイルを変更する前に、`glm-worker`とJSON merge toolのtest/buildをpreflightとして実行する。preflight失敗時は管理ファイルを更新しない。
+install完了後、既に開いているCodexタスクが`AGENTS.md`を再読込する保証はない。ルール反映を保証するには新しいCodexタスクを開始する。
+
 ## 2回目以降
 
 ```sh
@@ -103,4 +106,23 @@ glm-worker --resume
 - Sol判断後の継続とSolからの明示fix: effort `max`
 - auto-compact window: 500K
 - Claude Code sessionはリポジトリ永久ではなくタスク単位。新規タスク開始時にworker/reviewer session IDを更新する。
-- 同一タスク内の`--decision`、自動fix、`--fix`、Z.ai 5h limit後の`--resume`ではsessionを維持する。
+- 同一タスク内の`--decision`、自動fix、Z.ai 5h limit後の`--resume`ではsessionを維持する。
+- `--fix`は`NEEDS_SOL_REVIEW`後だけ使用できる。`PASS`後の追加依頼は新規タスクとして開始し、worker/reviewer sessionを更新する。
+- worker/reviewer packetは最大15行・6 KiB・1行1536 bytes。field欠落を含む契約違反時は、同じsessionへ作業をやり直さない再圧縮を1回だけ要求する。
+
+## タスク状態と統計
+
+```sh
+glm-worker --status
+glm-worker --stats
+```
+
+`--status`は現在のtask ID、task status、session、判断待ち、rate limit状態を表示する。
+`--stats`は通常のworker packetへ混ぜず、完了済みと現在のタスクを集計して次を表示する。
+
+- worker/reviewerのmodel呼び出し回数
+- Sol判断・明示fix・resume・自動fixの回数
+- `NEEDS_SOL_DECISION`、`NEEDS_SOL_REVIEW`、`PASS`の件数
+- rate limit、packet再圧縮、Solへ返したpacket bytes
+
+新規タスク開始時に前タスクの統計をarchiveし、`--reset`時も現在値を破棄せずarchiveする。

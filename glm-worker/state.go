@@ -5,13 +5,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type sessionRole string
+type taskStatus string
 
 const (
 	workerRole   sessionRole = "worker"
 	reviewerRole sessionRole = "reviewer"
+
+	taskStatusActive           taskStatus = "active"
+	taskStatusWaitingDecision  taskStatus = "waiting-decision"
+	taskStatusWaitingSolReview taskStatus = "waiting-sol-review"
+	taskStatusComplete         taskStatus = "complete"
+	taskStatusRateLimited      taskStatus = "rate-limited"
 )
 
 type stateStore struct {
@@ -82,13 +90,16 @@ func (s *stateStore) Remove(names ...string) error {
 }
 
 func (s *stateStore) StartNewTask() (string, error) {
+	if err := s.ArchiveCurrentStats(); err != nil {
+		return "", err
+	}
 	if err := s.Remove(
 		"task.id",
 		"worker.id",
 		"worker.ready",
 		"reviewer.id",
 		"reviewer.ready",
-		"task.id",
+		"task.status",
 	); err != nil {
 		return "", err
 	}
@@ -100,11 +111,50 @@ func (s *stateStore) StartNewTask() (string, error) {
 	if err := s.Write("task.id", taskID); err != nil {
 		return "", err
 	}
+	if err := s.InitializeTaskStats(taskID); err != nil {
+		return "", err
+	}
+	if err := s.SetTaskStatus(taskStatusActive); err != nil {
+		return "", err
+	}
 	return taskID, nil
 }
 
 func (s *stateStore) TaskID() string {
 	return s.ReadOr("task.id", "legacy")
+}
+
+func (s *stateStore) TaskStatus() taskStatus {
+	if status, err := s.Read("task.status"); err == nil && status != "" {
+		return taskStatus(status)
+	}
+	if s.Exists("pending-decision") {
+		return taskStatusWaitingDecision
+	}
+	if checkpoint, err := s.LoadResumeCheckpoint(); err == nil && checkpoint.RateLimited {
+		return taskStatusRateLimited
+	}
+	if review, err := s.Read("last-review"); err == nil {
+		switch packetFromLines(strings.Split(review, "\n")).Status() {
+		case "PASS":
+			return taskStatusComplete
+		case "NEEDS_SOL_REVIEW":
+			return taskStatusWaitingSolReview
+		}
+	}
+	if s.Exists("task.id") {
+		return taskStatusActive
+	}
+	return taskStatus("none")
+}
+
+func (s *stateStore) SetTaskStatus(status taskStatus) error {
+	if err := s.Write("task.status", string(status)); err != nil {
+		return err
+	}
+	return s.UpdateTaskStats(func(stats *taskStats) {
+		stats.Status = status
+	})
 }
 
 func (s *stateStore) SessionID(role sessionRole) (string, bool, error) {
@@ -137,6 +187,7 @@ func (s *stateStore) RemoveUnreadySession(role sessionRole) error {
 func printStatus(state *stateStore) error {
 	fmt.Printf("REPO: %s\n", state.ReadOr("repo-root", "unknown"))
 	fmt.Printf("TASK_ID: %s\n", state.ReadOr("task.id", "none"))
+	fmt.Printf("TASK_STATUS: %s\n", state.TaskStatus())
 	fmt.Printf("WORKER_SESSION: %s\n", state.ReadOr("worker.id", "none"))
 	fmt.Printf("REVIEWER_SESSION: %s\n", state.ReadOr("reviewer.id", "none"))
 	if state.Exists("pending-decision") {
@@ -160,7 +211,12 @@ func printStatus(state *stateStore) error {
 }
 
 func resetState(state *stateStore) error {
+	if err := state.ArchiveCurrentStats(); err != nil {
+		return err
+	}
 	names := []string{
+		"task.id",
+		"task.status",
 		"worker.id",
 		"worker.ready",
 		"reviewer.id",

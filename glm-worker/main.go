@@ -31,6 +31,9 @@ func run(args []string) error {
 	if command.Mode == modeStatus {
 		return printStatus(state)
 	}
+	if command.Mode == modeStats {
+		return printStats(state)
+	}
 
 	lock, err := acquireRepoLock(state.LockPath())
 	if err != nil {

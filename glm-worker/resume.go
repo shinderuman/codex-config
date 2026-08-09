@@ -19,22 +19,23 @@ const (
 )
 
 type resumeCheckpoint struct {
-	Version        int         `json:"version"`
-	Stage          resumeStage `json:"stage"`
-	Phase          string      `json:"phase"`
-	Role           sessionRole `json:"role"`
-	ReadOnly       bool        `json:"read_only"`
-	Effort         string      `json:"effort,omitempty"`
-	Prompt         string      `json:"prompt"`
-	OriginalPrompt string      `json:"original_prompt,omitempty"`
-	Request        string      `json:"request"`
-	Decision       string      `json:"decision,omitempty"`
-	WorkerPacket   []string    `json:"worker_packet,omitempty"`
-	ReviewNumber   int         `json:"review_number,omitempty"`
-	AutoFixes      int         `json:"auto_fixes,omitempty"`
-	RateLimited    bool        `json:"rate_limited"`
-	ResetAtCST     string      `json:"reset_at_cst,omitempty"`
-	ResetAtRFC3339 string      `json:"reset_at_rfc3339,omitempty"`
+	Version         int         `json:"version"`
+	Stage           resumeStage `json:"stage"`
+	Phase           string      `json:"phase"`
+	Role            sessionRole `json:"role"`
+	ReadOnly        bool        `json:"read_only"`
+	Effort          string      `json:"effort,omitempty"`
+	Prompt          string      `json:"prompt"`
+	OriginalPrompt  string      `json:"original_prompt,omitempty"`
+	Request         string      `json:"request"`
+	Decision        string      `json:"decision,omitempty"`
+	WorkerPacket    []string    `json:"worker_packet,omitempty"`
+	ReviewNumber    int         `json:"review_number,omitempty"`
+	AutoFixes       int         `json:"auto_fixes,omitempty"`
+	RateLimited     bool        `json:"rate_limited"`
+	ResetAtCST      string      `json:"reset_at_cst,omitempty"`
+	ResetAtRFC3339  string      `json:"reset_at_rfc3339,omitempty"`
+	PacketCompacted bool        `json:"packet_compacted,omitempty"`
 }
 
 func (s *stateStore) SaveResumeCheckpoint(checkpoint resumeCheckpoint) error {

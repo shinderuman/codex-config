@@ -81,7 +81,7 @@ func (w *workflow) executeNewTask(request string) error {
 }
 
 func (w *workflow) executeDecision(decision string) error {
-	if !w.state.Exists("pending-decision") {
+	if w.state.TaskStatus() != taskStatusWaitingDecision || !w.state.Exists("pending-decision") {
 		return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: no pending Sol decision for this repository")
 	}
 
@@ -90,6 +90,12 @@ func (w *workflow) executeDecision(decision string) error {
 		return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: original request is missing")
 	}
 	if err := w.state.Write("last-decision", decision); err != nil {
+		return err
+	}
+	if err := w.state.SetTaskStatus(taskStatusActive); err != nil {
+		return err
+	}
+	if err := w.state.RecordCommand(modeDecision); err != nil {
 		return err
 	}
 
@@ -117,6 +123,9 @@ func (w *workflow) executeExplicitFix(instruction string) error {
 	if w.state.Exists("pending-decision") {
 		return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: task is waiting for Sol decision; resolve it before --fix")
 	}
+	if w.state.TaskStatus() != taskStatusWaitingSolReview {
+		return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: --fix is only available after NEEDS_SOL_REVIEW; start a new task after PASS")
+	}
 
 	request, err := w.state.Read("last-request")
 	if err != nil {
@@ -125,6 +134,12 @@ func (w *workflow) executeExplicitFix(instruction string) error {
 
 	decision := w.state.ReadOr("last-decision", "none")
 	review := w.state.ReadOr("last-review", "none")
+	if err := w.state.SetTaskStatus(taskStatusActive); err != nil {
+		return err
+	}
+	if err := w.state.RecordCommand(modeFix); err != nil {
+		return err
+	}
 	prompt := explicitFixPrompt(request, decision, review, instruction)
 	checkpoint := resumeCheckpoint{
 		Stage:          resumeStageWorker,
@@ -155,6 +170,12 @@ func (w *workflow) executeResume() error {
 	}
 
 	previousCheckpoint := checkpoint
+	if err := w.state.SetTaskStatus(taskStatusActive); err != nil {
+		return err
+	}
+	if err := w.state.RecordCommand(modeResume); err != nil {
+		return err
+	}
 	checkpoint.Prompt = resumePrompt(checkpoint)
 	checkpoint.RateLimited = false
 	checkpoint.ResetAtCST = ""
@@ -202,10 +223,15 @@ func (w *workflow) handleWorkerResult(request string, workerPacket packet) error
 		if err := w.state.Touch("pending-decision"); err != nil {
 			return err
 		}
-		printPacket(workerPacket)
-		return nil
+		if err := w.state.SetTaskStatus(taskStatusWaitingDecision); err != nil {
+			return err
+		}
+		return w.emitPacket(workerPacket)
 	case "IMPLEMENTED":
 		if err := w.state.Remove("pending-decision"); err != nil {
+			return err
+		}
+		if err := w.state.SetTaskStatus(taskStatusActive); err != nil {
 			return err
 		}
 		return w.reviewUntilStable(request, workerPacket, 1, 0)
@@ -268,14 +294,24 @@ func (w *workflow) handleReviewResult(
 	autoFixes int,
 ) error {
 	switch reviewPacket.Status() {
-	case "PASS", "NEEDS_SOL_REVIEW":
-		printPacket(reviewPacket)
-		return nil
+	case "PASS":
+		if err := w.state.SetTaskStatus(taskStatusComplete); err != nil {
+			return err
+		}
+		return w.emitPacket(reviewPacket)
+
+	case "NEEDS_SOL_REVIEW":
+		if err := w.state.SetTaskStatus(taskStatusWaitingSolReview); err != nil {
+			return err
+		}
+		return w.emitPacket(reviewPacket)
 
 	case "FIX_REQUIRED":
 		if autoFixes >= w.config.MaxAutoFixRounds {
-			printNonConvergedPacket(reviewPacket)
-			return nil
+			if err := w.state.SetTaskStatus(taskStatusWaitingSolReview); err != nil {
+				return err
+			}
+			return w.emitPacket(nonConvergedPacket(reviewPacket))
 		}
 
 		nextAutoFixes := autoFixes + 1
@@ -293,6 +329,9 @@ func (w *workflow) handleReviewResult(
 			Decision:       decision,
 			ReviewNumber:   reviewNumber,
 			AutoFixes:      nextAutoFixes,
+		}
+		if err := w.state.RecordAutoFix(); err != nil {
+			return err
 		}
 
 		fixPacket, err := w.runModel(checkpoint)
@@ -323,11 +362,16 @@ func (w *workflow) handleAutoFixResult(
 		if err := w.state.Touch("pending-decision"); err != nil {
 			return err
 		}
-		printPacket(fixPacket)
-		return nil
+		if err := w.state.SetTaskStatus(taskStatusWaitingDecision); err != nil {
+			return err
+		}
+		return w.emitPacket(fixPacket)
 
 	case "IMPLEMENTED":
 		if err := w.state.Remove("pending-decision"); err != nil {
+			return err
+		}
+		if err := w.state.SetTaskStatus(taskStatusActive); err != nil {
 			return err
 		}
 		return w.reviewUntilStable(
@@ -355,6 +399,9 @@ func (w *workflow) runModel(checkpoint resumeCheckpoint) (packet, error) {
 	if err := w.state.SaveResumeCheckpoint(checkpoint); err != nil {
 		return packet{}, err
 	}
+	if err := w.state.RecordModelCall(checkpoint.Role); err != nil {
+		return packet{}, err
+	}
 
 	runErr := w.runner.Run(
 		checkpoint.Role,
@@ -375,6 +422,12 @@ func (w *workflow) runModel(checkpoint resumeCheckpoint) (packet, error) {
 			checkpoint.ResetAtCST = limit.ResetAtCST
 			checkpoint.ResetAtRFC3339 = limit.ResetAtRFC3339
 			if err := w.state.SaveResumeCheckpoint(checkpoint); err != nil {
+				return packet{}, err
+			}
+			if err := w.state.SetTaskStatus(taskStatusRateLimited); err != nil {
+				return packet{}, err
+			}
+			if err := w.state.RecordRateLimit(); err != nil {
 				return packet{}, err
 			}
 
@@ -399,6 +452,16 @@ func (w *workflow) runModel(checkpoint resumeCheckpoint) (packet, error) {
 
 	result, err := parseLastPacket(outputPath)
 	if err != nil {
+		if isPacketConstraintError(err) && !checkpoint.PacketCompacted {
+			if err := w.state.RecordPacketCompaction(); err != nil {
+				return packet{}, err
+			}
+			compactCheckpoint := checkpoint
+			compactCheckpoint.Phase += "-packet-compact"
+			compactCheckpoint.Prompt = packetCompressionPrompt(err.Error())
+			compactCheckpoint.PacketCompacted = true
+			return w.runModel(compactCheckpoint)
+		}
 		return packet{}, fmt.Errorf(
 			"STATUS: WORKER_ERROR\nPHASE: %s-format\nERROR: %v\nOUTPUT_TAIL_BEGIN\n%s\nOUTPUT_TAIL_END",
 			checkpoint.Phase,
@@ -423,15 +486,25 @@ func workerError(phase string, outputPath string, runErr error) error {
 	)
 }
 
-func printNonConvergedPacket(reviewPacket packet) {
-	fmt.Println("STATUS: NEEDS_SOL_REVIEW")
-	fmt.Println("RISK: HIGH")
-	fmt.Println("SUMMARY: GLM workerと独立reviewerの自動修正が規定回数内に収束しなかった")
-	fmt.Println("REQUIREMENT_COVERAGE: 最終状態をSol Highで確認する必要あり")
-	fmt.Println("INVARIANTS: 未確定")
-	fmt.Println("TEST_EVIDENCE: 直近worker/reviewerで検証実施")
-	fmt.Printf("ISSUES: %s\n", reviewPacket.Fields["ISSUES"])
-	fmt.Println("RESIDUAL_RISK: reviewer指摘が残っている可能性")
-	fmt.Println("TARGETS: 最終diffと直近reviewer指摘に限定")
-	fmt.Println("SOL_QUESTION: 未解決問題の修正方針を判断する")
+func (w *workflow) emitPacket(value packet) error {
+	if err := w.state.RecordSolPacket(value); err != nil {
+		return err
+	}
+	printPacket(value)
+	return nil
+}
+
+func nonConvergedPacket(reviewPacket packet) packet {
+	return packetFromLines([]string{
+		"STATUS: NEEDS_SOL_REVIEW",
+		"RISK: HIGH",
+		"SUMMARY: GLM workerと独立reviewerの自動修正が規定回数内に収束しなかった",
+		"REQUIREMENT_COVERAGE: 最終状態をSol Highで確認する必要あり",
+		"INVARIANTS: 未確定",
+		"TEST_EVIDENCE: 直近worker/reviewerで検証実施",
+		fmt.Sprintf("ISSUES: %s", reviewPacket.Fields["ISSUES"]),
+		"RESIDUAL_RISK: reviewer指摘が残っている可能性",
+		"TARGETS: 最終diffと直近reviewer指摘に限定",
+		"SOL_QUESTION: 未解決問題の修正方針を判断する",
+	})
 }
