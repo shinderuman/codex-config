@@ -116,6 +116,7 @@ func (s *StateStore) StartNewTask() (string, error) {
 		"reviewer.id",
 		"reviewer.ready",
 		"task.status",
+		"isolation.policy",
 	); err != nil {
 		return "", err
 	}
@@ -191,4 +192,20 @@ func (s *StateStore) RemoveUnreadySession(role SessionRole) error {
 		return nil
 	}
 	return s.Remove(string(role) + ".id")
+}
+
+// ResetRoleSessionは役割別sessionを採番し直せるようidとreadyを削除する。
+// 現行の隔離policyと一致しない旧sessionのresumeを拒否して新sessionへ切り替える際に使う。
+func (s *StateStore) ResetRoleSession(role SessionRole) error {
+	return s.Remove(string(role)+".id", string(role)+".ready")
+}
+
+// IsolationPolicyはsession採番時に記録したClaude起動の隔離policy versionを返す。
+func (s *StateStore) IsolationPolicy() string {
+	return s.ReadOr("isolation.policy", "")
+}
+
+// SetIsolationPolicyは現行の隔離policy versionを記録する。
+func (s *StateStore) SetIsolationPolicy(version string) error {
+	return s.Write("isolation.policy", version)
 }

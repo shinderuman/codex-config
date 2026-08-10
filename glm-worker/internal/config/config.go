@@ -14,12 +14,18 @@ import (
 
 // AppConfigはglm-worker全体で共有される設定。
 type AppConfig struct {
-	RepoRoot              string
-	RepoHash              string
-	RepoShort             string
-	StateBase             string
-	PromptDir             string
-	ClaudeBin             string
+	RepoRoot  string
+	RepoHash  string
+	RepoShort string
+	StateBase string
+	PromptDir string
+	ClaudeBin string
+	// ClaudeConfigDirはClaude CLIのconfig dir(CLAUDE_CONFIG_DIR, 既定~/.claude)。
+	// user global memory(<dir>/CLAUDE.md, <dir>/rules/**)の除外path解決に使う。
+	ClaudeConfigDir string
+	// EnvAllowlistは親process環境からworkerへ追加で受け渡すenv key。
+	// OS必須・Z.ai必須keyは常に渡り、それ以外はここへ指定したkeyだけ追加される。
+	EnvAllowlist          []string
 	WorkerModel           string
 	ReviewerModel         string
 	HighRiskReviewerModel string
@@ -46,6 +52,8 @@ func Load() (AppConfig, error) {
 
 	stateHome := envOrDefault("GLM_WORKER_HOME", filepath.Join(home, ".glm-worker"))
 	promptDir := envOrDefault("GLM_WORKER_PROMPT_DIR", filepath.Join(home, ".codex", "glm-worker", "prompts"))
+	claudeConfigDir := envOrDefault("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	envAllowlist := splitEnvList(os.Getenv("GLM_WORKER_ENV_ALLOWLIST"))
 	rounds, err := intEnv("GLM_WORKER_MAX_AUTO_FIX_ROUNDS", 2)
 	if err != nil {
 		return AppConfig{}, err
@@ -62,6 +70,8 @@ func Load() (AppConfig, error) {
 		StateBase:             filepath.Join(stateHome, "sessions"),
 		PromptDir:             promptDir,
 		ClaudeBin:             envOrDefault("GLM_WORKER_CLAUDE_BIN", "claude"),
+		ClaudeConfigDir:       claudeConfigDir,
+		EnvAllowlist:          envAllowlist,
 		WorkerModel:           envOrDefault("GLM_WORKER_WORKER_MODEL", "opus"),
 		ReviewerModel:         envOrDefault("GLM_WORKER_REVIEWER_MODEL", "haiku"),
 		HighRiskReviewerModel: envOrDefault("GLM_WORKER_HIGH_RISK_REVIEWER_MODEL", "sonnet"),
@@ -99,6 +109,21 @@ func envOrDefault(name string, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// splitEnvListはカンマ区切りのenv valueを空要素を除いたkey列へ分割する。
+func splitEnvList(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if key := strings.TrimSpace(part); key != "" {
+			result = append(result, key)
+		}
+	}
+	return result
 }
 
 func intEnv(name string, defaultValue int) (int, error) {

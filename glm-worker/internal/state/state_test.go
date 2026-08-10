@@ -226,6 +226,51 @@ func TestRemoveUnreadySessionOnlyRemovesUnreadyID(t *testing.T) {
 	}
 }
 
+func TestIsolationPolicyRoundTripAndDefaultEmpty(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	if got := st.IsolationPolicy(); got != "" {
+		t.Fatalf("default policy = %q, want empty", got)
+	}
+	if err := st.SetIsolationPolicy("claude-isolation-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.IsolationPolicy(); got != "claude-isolation-1" {
+		t.Fatalf("policy = %q", got)
+	}
+}
+
+func TestResetRoleSessionClearsIDAndReady(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	if _, _, err := st.SessionID(WorkerRole); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkReady(WorkerRole); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ResetRoleSession(WorkerRole); err != nil {
+		t.Fatal(err)
+	}
+	if st.Exists("worker.id") || st.Exists("worker.ready") {
+		t.Fatal("ResetRoleSessionがid/readyを残しています")
+	}
+}
+
+func TestStartNewTaskClearsIsolationPolicy(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	if _, err := st.StartNewTask(); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetIsolationPolicy("claude-isolation-stale"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.StartNewTask(); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.IsolationPolicy(); got != "" {
+		t.Fatalf("StartNewTask後のpolicy = %q, want empty", got)
+	}
+}
+
 func TestCaptureGitBaselineAndDescription(t *testing.T) {
 	repository := t.TempDir()
 	command := exec.Command("git", "init", "--quiet", repository)

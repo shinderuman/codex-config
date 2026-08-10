@@ -93,6 +93,8 @@ func TestLoadBuildsConfigFromRepositoryAndEnvironment(t *testing.T) {
 	stateHome := filepath.Join(t.TempDir(), "state")
 	promptDir := filepath.Join(t.TempDir(), "prompts")
 	t.Setenv("HOME", home)
+	// 既定ClaudeConfigDir($HOME/.claude)を検証するため、外部envのCLAUDE_CONFIG_DIRを空にする。
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("GLM_WORKER_HOME", stateHome)
 	t.Setenv("GLM_WORKER_PROMPT_DIR", promptDir)
 	t.Setenv("GLM_WORKER_CLAUDE_BIN", "claude-test")
@@ -120,6 +122,9 @@ func TestLoadBuildsConfigFromRepositoryAndEnvironment(t *testing.T) {
 	}
 	if loaded.StateBase != filepath.Join(stateHome, "sessions") || loaded.PromptDir != promptDir {
 		t.Fatalf("path config = %#v", loaded)
+	}
+	if loaded.ClaudeConfigDir != filepath.Join(home, ".claude") {
+		t.Fatalf("ClaudeConfigDir = %q, want %q", loaded.ClaudeConfigDir, filepath.Join(home, ".claude"))
 	}
 	if loaded.ClaudeBin != "claude-test" || loaded.WorkerModel != "worker-test" || loaded.ReviewerModel != "reviewer-test" || loaded.HighRiskReviewerModel != "reviewer-high-test" {
 		t.Fatalf("runner config = %#v", loaded)
@@ -157,5 +162,81 @@ func TestLoadRejectsInvalidReviewRounds(t *testing.T) {
 	t.Setenv("GLM_WORKER_MAX_AUTO_FIX_ROUNDS", "invalid")
 	if _, err := Load(); err == nil {
 		t.Fatal("invalid review roundsを拒否する必要があります")
+	}
+}
+
+func TestLoadRespectsClaudeConfigDirEnv(t *testing.T) {
+	repository := filepath.Join(t.TempDir(), "repository")
+	if err := os.MkdirAll(repository, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command("git", "init", "--quiet", repository)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+
+	previousDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repository); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", "/override/claude-config")
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ClaudeConfigDir != "/override/claude-config" {
+		t.Fatalf("ClaudeConfigDir = %q, want /override/claude-config", loaded.ClaudeConfigDir)
+	}
+}
+
+func TestLoadParsesEnvAllowlist(t *testing.T) {
+	repository := filepath.Join(t.TempDir(), "repository")
+	if err := os.MkdirAll(repository, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command("git", "init", "--quiet", repository)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+	previousDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repository); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GLM_WORKER_ENV_ALLOWLIST", "GOPATH, ,GOFLAGS")
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"GOPATH", "GOFLAGS"}
+	if len(loaded.EnvAllowlist) != len(want) {
+		t.Fatalf("EnvAllowlist = %#v, want %#v", loaded.EnvAllowlist, want)
+	}
+	for index, key := range want {
+		if loaded.EnvAllowlist[index] != key {
+			t.Fatalf("EnvAllowlist[%d] = %q, want %q", index, loaded.EnvAllowlist[index], key)
+		}
+	}
+}
+
+func TestLoadLeavesEnvAllowlistNilByDefault(t *testing.T) {
+	t.Setenv("GLM_WORKER_ENV_ALLOWLIST", "")
+	if loaded, err := Load(); err != nil {
+		t.Fatal(err)
+	} else if loaded.EnvAllowlist != nil {
+		t.Fatalf("EnvAllowlist = %#v, want nil", loaded.EnvAllowlist)
 	}
 }

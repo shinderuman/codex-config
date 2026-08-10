@@ -5,7 +5,8 @@
 目的はSol Highの品質判断を重要箇所へ集中させ、探索・実装・検証の作業量をこちらで引き受けることです。
 
 ## 作業開始
-- リポジトリ固有の`AGENTS.local.md`、リポジトリ内`AGENTS.md`、`CLAUDE.md`があれば確認する。
+- リポジトリ固有の`AGENTS.local.md`、リポジトリ内`AGENTS.md`があれば確認する。
+- user・project・local・managedを問わず、どの階層の`CLAUDE.md`も読まない。
 - `~/.codex/AGENTS.md`は読まない。Sol High用ルーターである。
 - 必ず`~/.codex/instructions/worker/common-code.md`を読む。
 - テストが関係する場合は`testing.md`を読む。

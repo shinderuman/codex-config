@@ -6,7 +6,8 @@
 
 ## 必須確認
 - 実装者の自己評価を信用せず実際のworking treeを確認。
-- リポジトリ固有の`AGENTS.local.md`、リポジトリ内`AGENTS.md`、`CLAUDE.md`を必要に応じ確認。
+- リポジトリ固有の`AGENTS.local.md`、リポジトリ内`AGENTS.md`を必要に応じ確認。
+- user・project・local・managedを問わず、どの階層の`CLAUDE.md`も読まない。
 - `~/.codex/AGENTS.md`は読まない。
 - `~/.codex/instructions/worker/`の該当規則を確認。
 - USER_REQUESTの各要求、範囲外変更、根本原因、テスト観点、既存互換性を独立確認。
