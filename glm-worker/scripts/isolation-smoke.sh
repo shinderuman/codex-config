@@ -7,7 +7,7 @@
 # を実際に遮断し、glm-worker明示prompt markerだけ応答へ残すことを1回の実claude起動で検証する。
 #
 # 【注意】このscriptは外部ネットワーク(Z.ai API)へ通信する。go test / 通常のoffline
-# smokeへは統合せず、手動または專用stepでのみ実行する。再実行可能。
+# smokeへは統合せず、手動または専用stepでのみ実行する。再実行可能。
 #
 # 使い方:
 #   CLAUDE_BIN=/path/to/claude glm-worker/scripts/isolation-smoke.sh
@@ -15,7 +15,7 @@
 #    allowlist分だけ抽出して子process envへ注入する。secretをstdoutへは出さない。)
 #
 # 終了code: 0=隔離OK(明示markerあり/poisonなし), 1=poison検出または明示marker不在,
-#           2=前提エター(Z.ai設定不在・claude起動失敗等)
+#           2=前提エラー(Z.ai設定不在・claude起動失敗等)
 set -euo pipefail
 
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
