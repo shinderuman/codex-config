@@ -115,7 +115,6 @@ PACKET_BEGINを最初の物理行、PACKET_ENDを最後の物理行にし、前�
 `, reason)
 }
 
-// resumePromptは5h上限中断タスクの同一session再開用の指示を組み立てる。
 func resumePrompt(checkpoint state.ResumeCheckpoint) string {
 	originalPrompt := checkpoint.OriginalPrompt
 	if originalPrompt == "" {

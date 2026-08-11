@@ -11,12 +11,10 @@ import (
 
 const artifactDirectoryName = "artifacts"
 
-// ArtifactDirは指定タスクの大容量成果物保存先を返す。
 func (s *StateStore) ArtifactDir(taskID string) string {
 	return s.Path(filepath.Join(artifactDirectoryName, taskID))
 }
 
-// PrepareArtifactDirは現在タスク専用の成果物保存先を作成する。
 func (s *StateStore) PrepareArtifactDir() (string, error) {
 	taskID, err := s.TaskID()
 	if err != nil {

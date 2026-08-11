@@ -13,7 +13,6 @@ import (
 	"github.com/shinderuman/codex-config/glm-worker/internal/workflow"
 )
 
-// CommandModeはコマンドの種別を表す。
 type CommandMode int
 
 const (
@@ -26,13 +25,11 @@ const (
 	ModeReset
 )
 
-// Commandは解析済みのコマンドを表す。
 type Command struct {
 	Mode    CommandMode
 	Payload string
 }
 
-// ParseCommandはargsからCommandを解析する。
 func ParseCommand(args []string) (Command, error) {
 	if len(args) == 0 {
 		return Command{}, fmt.Errorf("usage: glm-worker <instruction> | --decision <decision> | --fix <instruction> | --resume | --status | --stats | --reset")
@@ -81,14 +78,13 @@ func payloadCommand(mode CommandMode, args []string, usage string) (Command, err
 	return Command{Mode: mode, Payload: payload}, nil
 }
 
-// RunnerFactoryはconfigとstateからModelRunnerを構築する。テストで差し替える。
+// テストでModelRunnerを差し替えるためのfactory。
 type RunnerFactory func(cfg config.AppConfig, st *state.StateStore) workflow.ModelRunner
 
 func defaultRunnerFactory(cfg config.AppConfig, st *state.StateStore) workflow.ModelRunner {
 	return runner.NewClaudeRunner(cfg, st)
 }
 
-// Runは本番エントリポイント。argsを解析し設定を読み込んでExecuteへ渡す。
 func Run(args []string) error {
 	return run(args, config.Load, defaultRunnerFactory, os.Stdout, os.Stderr)
 }

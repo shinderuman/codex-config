@@ -22,7 +22,6 @@ func AcquireRepoLock(path string) (*RepoLock, error) {
 	return &RepoLock{path: path}, nil
 }
 
-// Closeはロックファイルを削除してロックを解放する。
 func (l *RepoLock) Close() error {
 	if l == nil {
 		return nil

@@ -12,10 +12,8 @@ import (
 	"github.com/shinderuman/codex-config/glm-worker/internal/config"
 )
 
-// SessionRoleはworker/reviewerの役割を区別する。
 type SessionRole string
 
-// TaskStatusはタスクの状態遷移を表す。
 type TaskStatus string
 
 const (
@@ -29,12 +27,10 @@ const (
 	TaskStatusRateLimited      TaskStatus = "rate-limited"
 )
 
-// StateStoreはリポジトリ別stateディレクトリへのアクセスを提供する。
 type StateStore struct {
 	dir string
 }
 
-// NewStateStoreはconfigからstateディレクトリを構築し初期化する。
 func NewStateStore(config config.AppConfig) (*StateStore, error) {
 	dir := filepath.Join(config.StateBase, config.RepoHash)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -48,17 +44,14 @@ func NewStateStore(config config.AppConfig) (*StateStore, error) {
 	return state, nil
 }
 
-// Pathはstate配下のファイルパスを返す。
 func (s *StateStore) Path(name string) string {
 	return filepath.Join(s.dir, name)
 }
 
-// LockPathはプロセス間ロック用ファイルパスを返す。
 func (s *StateStore) LockPath() string {
 	return s.Path("lock")
 }
 
-// Existsはstateファイルが存在するかを返す。
 func (s *StateStore) Exists(name string) bool {
 	_, err := os.Stat(s.Path(name))
 	return err == nil
@@ -106,7 +99,6 @@ func (s *StateStore) Remove(names ...string) error {
 	return nil
 }
 
-// StartNewTaskは現在タスクをアーカイブし新規タスク状態へ初期化する。
 func (s *StateStore) StartNewTask() (string, error) {
 	s.ArchiveCurrentStats()
 	if err := s.Remove(
@@ -181,12 +173,10 @@ func (s *StateStore) SessionID(role SessionRole) (string, bool, error) {
 	return id, false, nil
 }
 
-// MarkReadyは役割別sessionをready状態へ遷移させる。
 func (s *StateStore) MarkReady(role SessionRole) error {
 	return s.Touch(string(role) + ".ready")
 }
 
-// RemoveUnreadySessionはreadyでないsession IDを削除する。
 func (s *StateStore) RemoveUnreadySession(role SessionRole) error {
 	if s.Exists(string(role) + ".ready") {
 		return nil
@@ -208,12 +198,10 @@ func (s *StateStore) ResetSessionsForPolicy(currentPolicy string) error {
 	)
 }
 
-// IsolationPolicyはsession採番時に記録したClaude起動の隔離policy versionを返す。
 func (s *StateStore) IsolationPolicy() string {
 	return s.ReadOr("isolation.policy", "")
 }
 
-// SetIsolationPolicyは現行の隔離policy versionを記録する。
 func (s *StateStore) SetIsolationPolicy(version string) error {
 	return s.Write("isolation.policy", version)
 }

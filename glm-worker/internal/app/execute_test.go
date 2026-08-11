@@ -20,7 +20,6 @@ type fakeStep struct {
 	runErr error
 }
 
-// fakeRunnerはExecute経由の統合テスト用のModelRunner偽装実装。
 type fakeRunner struct {
 	steps   []fakeStep
 	prompts []string

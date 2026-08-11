@@ -16,13 +16,11 @@ const (
 
 var zaiResetPattern = regexp.MustCompile(`Your limit will reset at ([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})`)
 
-// ZaiFiveHourLimitはZ.ai GLM Coding Planの5h上限到達情報を表す。
 type ZaiFiveHourLimit struct {
 	ResetAtCST     string
 	ResetAtRFC3339 string
 }
 
-// DetectZaiFiveHourLimitは出力ログからZ.ai 5h上限到達を検出する。
 func DetectZaiFiveHourLimit(path string) (ZaiFiveHourLimit, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -62,7 +60,6 @@ func DetectZaiFiveHourLimit(path string) (ZaiFiveHourLimit, bool) {
 	return limit, true
 }
 
-// ZaiRateLimitErrorは5h上限到達を呼び出し元へ伝達する業務エラー。
 type ZaiRateLimitError struct {
 	Phase           string
 	Limit           ZaiFiveHourLimit

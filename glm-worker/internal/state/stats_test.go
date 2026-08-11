@@ -8,7 +8,6 @@ import (
 	"testing"
 )
 
-// captureStatsWarningsはstatsWarnOutを一時的に置き換え、警告文字列を返す。
 func captureStatsWarnings(t *testing.T) (*bytes.Buffer, func()) {
 	t.Helper()
 	var buf bytes.Buffer

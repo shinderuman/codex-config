@@ -36,7 +36,6 @@ func CaptureGitBaseline(cfg config.AppConfig, state *StateStore) error {
 	return nil
 }
 
-// BaselineDescriptionはreviewerへ示すbaseline情報を返す。
 func (s *StateStore) BaselineDescription() string {
 	if !s.Exists("baseline-status") {
 		return "none"

@@ -12,7 +12,6 @@ import (
 	"strings"
 )
 
-// AppConfigはglm-worker全体で共有される設定。
 type AppConfig struct {
 	RepoRoot  string
 	RepoHash  string
@@ -35,7 +34,6 @@ type AppConfig struct {
 	TelemetryContent      bool
 }
 
-// Loadは環境変数とgitからAppConfigを構築する。
 func Load() (AppConfig, error) {
 	repoRoot, err := resolveRepoRoot()
 	if err != nil {
@@ -82,7 +80,6 @@ func Load() (AppConfig, error) {
 	}, nil
 }
 
-// resolveRepoRootはgitのtop-levelを優先し、失敗時はcwdを解決する。
 func resolveRepoRoot() (string, error) {
 	command := exec.Command("git", "rev-parse", "--show-toplevel")
 	output, err := command.Output()
@@ -111,7 +108,6 @@ func envOrDefault(name string, defaultValue string) string {
 	return defaultValue
 }
 
-// splitEnvListはカンマ区切りのenv valueを空要素を除いたkey列へ分割する。
 func splitEnvList(raw string) []string {
 	if raw == "" {
 		return nil

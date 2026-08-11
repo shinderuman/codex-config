@@ -27,7 +27,6 @@ func newUUID() (string, error) {
 	), nil
 }
 
-// writeFileAtomicは一時ファイルへ書き込みrenameで原子的に置換する。
 func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err

@@ -595,7 +595,6 @@ func TestClaudeRunnerReMintSessionOnStaleIsolationPolicy(t *testing.T) {
 	}
 }
 
-// isolationMigrationFixtureは隔離policy移行の回帰test共通の構築物を返す。
 // 呼出しごとに連番ファイルへ引数を記録し常に成功するfake claudeを用意する。
 type isolationMigrationFixture struct {
 	runner  *ClaudeRunner
@@ -644,7 +643,6 @@ func (f isolationMigrationFixture) invocationArgs(t *testing.T, invocation int) 
 	return readLines(t, filepath.Join(f.argsDir, fmt.Sprintf("run-%d", invocation)))
 }
 
-// seedStaleReadyRoleはroleのid/readyを旧値で書きpolicyをstaleにする。
 func seedStaleReadyRole(t *testing.T, st *state.StateStore, role state.SessionRole, id string) {
 	t.Helper()
 	if err := st.Write(string(role)+".id", id); err != nil {
@@ -658,8 +656,6 @@ func seedStaleReadyRole(t *testing.T, st *state.StateStore, role state.SessionRo
 	}
 }
 
-// TestIsolationMigrationWorkerFirstClearsReviewerSessionは旧policyで両roleがreadyのtaskで
-// workerを先に呼んだ際、reviewerの旧sessionも破棄されて新session採番されることを検証する。
 // 呼出しroleだけresetして成功後にtask共通markerを更新すると、reviewerの旧sessionが
 // readyのまま残りmarker一致としてresumeされる回帰を防ぐ。
 func TestIsolationMigrationWorkerFirstClearsReviewerSession(t *testing.T) {
@@ -695,7 +691,6 @@ func TestIsolationMigrationWorkerFirstClearsReviewerSession(t *testing.T) {
 	}
 }
 
-// TestIsolationMigrationReviewerFirstClearsWorkerSessionはreviewer先行の対称ケース。
 func TestIsolationMigrationReviewerFirstClearsWorkerSession(t *testing.T) {
 	f := newIsolationMigrationFixture(t)
 	seedStaleReadyRole(t, f.state, state.WorkerRole, "stale-worker")
@@ -726,9 +721,7 @@ func TestIsolationMigrationReviewerFirstClearsWorkerSession(t *testing.T) {
 	}
 }
 
-// TestIsolationMigrationClearsNonCallingReadyRoleはworkerだけready(旧policy)のtaskで
-// reviewerを呼んだ際、呼出し対象でないworkerの旧ready sessionも破棄されることを検証する。
-// これが残ると次回worker呼出しがmarker一致で旧worker sessionをresumeする。
+// 呼出し対象でないworkerの旧readyが残ると、次回worker呼出しがmarker一致で旧sessionをresumeする回帰を防ぐ。
 func TestIsolationMigrationClearsNonCallingReadyRole(t *testing.T) {
 	f := newIsolationMigrationFixture(t)
 	seedStaleReadyRole(t, f.state, state.WorkerRole, "stale-worker")
@@ -759,9 +752,7 @@ func TestIsolationMigrationClearsNonCallingReadyRole(t *testing.T) {
 	}
 }
 
-// TestIsolationMigrationFailureKeepsStalePolicyForRetryは旧policy session破棄後にClaude起動が
-// 失敗した場合、policyを更新せず次回呼出しで再びsessionを破棄して新sessionを採番することを
-// 検証する。失敗時にmarkerを更新すると旧sessionがstaleのまま次回resumeされてしまう。
+// 失敗時にmarkerを更新すると旧sessionがstaleのまま次回resumeされてしまうため、失敗時はpolicyを更新しない。
 func TestIsolationMigrationFailureKeepsStalePolicyForRetry(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixtureはUnix系環境向け")
@@ -830,9 +821,7 @@ func TestIsolationMigrationFailureKeepsStalePolicyForRetry(t *testing.T) {
 	}
 }
 
-// assertFullIsolationArgsはworker/reviewer・新規/resumeの全経路で同じ隔離arg setが
-// 渡ることを検証する共有helper。一経路でも欠ければ全sessionで隔離が崩れるため、
-// 個別testではなくここへ集約する。
+// 一経路でも欠ければ全sessionで隔離が崩れるため、個別testではなくここへ集約する共有helper。
 func assertFullIsolationArgs(t *testing.T, args []string, claudeConfigDir string, expectReviewerAgentBlock bool) {
 	t.Helper()
 	if !containsArgument(args, "--safe-mode") {
@@ -895,9 +884,7 @@ func assertFullIsolationArgs(t *testing.T, args []string, claudeConfigDir string
 	}
 }
 
-// TestIsolationArgsIdenticalAcrossRoleAndResumeはworker/reviewer × 新規/resume の
-// 全4経路で同一の隔離arg setが渡ることを、1つのfake claudeへ4回連続呼び出しした
-// 引数記録で検証する。resume経路で隔離flagが落ちる回帰を防ぐ。
+// resume経路で隔離flagが落ちる回帰を防ぐ。
 func TestIsolationArgsIdenticalAcrossRoleAndResume(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixtureはUnix系環境向け")

@@ -23,7 +23,6 @@ import (
 // resumeせず新sessionへ切り替える。
 const isolationPolicyVersion = "claude-isolation-1"
 
-// ClaudeRunnerはClaude Code CLIを実際に起動するrunner実装。
 type ClaudeRunner struct {
 	config config.AppConfig
 	state  *state.StateStore
@@ -75,7 +74,6 @@ type claudeJSONResult struct {
 	ModelUsage    map[string]ModelUsage `json:"modelUsage"`
 }
 
-// NewClaudeRunnerはClaudeRunnerを構築する。
 func NewClaudeRunner(cfg config.AppConfig, st *state.StateStore) *ClaudeRunner {
 	return &ClaudeRunner{config: cfg, state: st}
 }
@@ -360,7 +358,6 @@ var osEssentialEnvKeys = []string{
 // buildChildEnvは隔離されたchild process環境を構築する。
 // OS必須keyとextraAllowだけを親envから取り出し、settingEnv(Z.ai)とadditionsで
 // 上書き注入する。暗黙の入力経路となるenvは親から引き継がない。
-// 同一環境になるようkeyを整列して返す。
 func buildChildEnv(extraAllow []string, settingEnv, additions map[string]string) []string {
 	allowed := make(map[string]struct{}, len(osEssentialEnvKeys)+len(extraAllow))
 	for _, key := range osEssentialEnvKeys {
@@ -399,7 +396,6 @@ func buildChildEnv(extraAllow []string, settingEnv, additions map[string]string)
 	return result
 }
 
-// resolveClaudeConfigDirは空値を既定~/.claudeへ解決する。
 func resolveClaudeConfigDir(claudeConfigDir string) (string, error) {
 	if claudeConfigDir != "" {
 		return claudeConfigDir, nil

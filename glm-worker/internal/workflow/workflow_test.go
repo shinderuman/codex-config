@@ -14,14 +14,12 @@ import (
 	"github.com/shinderuman/codex-config/glm-worker/internal/state"
 )
 
-// runnerStepはscriptedRunnerの1呼出分の振る舞いを表す。
 type runnerStep struct {
 	output string
 	runErr error
 	result runner.RunResult
 }
 
-// scriptedRunnerはmodelRunnerのテスト用偽装実装で、stepsを順に消費する。
 type scriptedRunner struct {
 	steps   []runnerStep
 	prompts []string

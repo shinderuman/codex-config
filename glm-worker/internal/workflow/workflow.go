@@ -16,13 +16,11 @@ import (
 	"github.com/shinderuman/codex-config/glm-worker/internal/state"
 )
 
-// ModelRunnerはworkflowが必要とするモデル実行機能を表す。
 // interfaceは実装側ではなく利用側に置き、テストでは偽装実装へ差し替える。
 type ModelRunner interface {
 	Run(role state.SessionRole, model string, readOnly bool, effort string, prompt string, outputPath string) (runner.RunResult, error)
 }
 
-// Workflowはコマンド毎のworker/reviewer/auto-fix調停を行う。
 type Workflow struct {
 	config config.AppConfig
 	state  *state.StateStore
@@ -31,12 +29,10 @@ type Workflow struct {
 	temp   string
 }
 
-// NewWorkflowは依存を注入してWorkflowを構築する。
 func NewWorkflow(cfg config.AppConfig, st *state.StateStore, r ModelRunner, output io.Writer) *Workflow {
 	return &Workflow{config: cfg, state: st, runner: r, output: output}
 }
 
-// withTempはコマンド専用の一時ディレクトリを確立し終了時に破棄する。
 func (w *Workflow) withTemp(fn func() error) error {
 	temp, err := os.MkdirTemp("", "glm-worker-*")
 	if err != nil {
@@ -47,7 +43,6 @@ func (w *Workflow) withTemp(fn func() error) error {
 	return fn()
 }
 
-// ExecuteNewTaskは新規タスクを開始しworker→reviewを走らせる。
 func (w *Workflow) ExecuteNewTask(request string) error {
 	return w.withTemp(func() error {
 		if w.state.Exists("pending-decision") {
@@ -92,7 +87,6 @@ func (w *Workflow) ExecuteNewTask(request string) error {
 	})
 }
 
-// ExecuteDecisionは保留中のSol判断を受けて同一タスクを継続する。
 func (w *Workflow) ExecuteDecision(decision string) error {
 	return w.withTemp(func() error {
 		if w.state.TaskStatus() != state.TaskStatusWaitingDecision || !w.state.Exists("pending-decision") {
@@ -133,7 +127,6 @@ func (w *Workflow) ExecuteDecision(decision string) error {
 	})
 }
 
-// ExecuteExplicitFixはNEEDS_SOL_REVIEW後の明示修正指示を処理する。
 func (w *Workflow) ExecuteExplicitFix(instruction string) error {
 	return w.withTemp(func() error {
 		if w.state.Exists("pending-decision") {
@@ -176,7 +169,6 @@ func (w *Workflow) ExecuteExplicitFix(instruction string) error {
 	})
 }
 
-// ExecuteResumeはZ.ai 5h上限で中断したタスクを同一sessionから再開する。
 func (w *Workflow) ExecuteResume() error {
 	return w.withTemp(func() error {
 		checkpoint, err := w.state.LoadResumeCheckpoint()

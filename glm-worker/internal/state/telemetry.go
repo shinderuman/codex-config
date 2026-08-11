@@ -11,7 +11,6 @@ import (
 
 const modelCallLogVersion = 2
 
-// TokenUsageは1回のmodel呼出し全体のtoken使用量。
 type TokenUsage struct {
 	InputTokens              int64 `json:"input_tokens"`
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
@@ -19,7 +18,6 @@ type TokenUsage struct {
 	OutputTokens             int64 `json:"output_tokens"`
 }
 
-// ResolvedModelUsageはClaude CLIが報告した実モデル別使用量。
 type ResolvedModelUsage struct {
 	InputTokens              int64   `json:"input_tokens"`
 	CacheCreationInputTokens int64   `json:"cache_creation_input_tokens"`
@@ -163,12 +161,10 @@ func addInt64(values *map[string]int64, key string, value int64) {
 	(*values)[key] += value
 }
 
-// ModelCallLogPathはタスク別詳細ログの保存先を返す。
 func (s *StateStore) ModelCallLogPath(taskID string) string {
 	return s.Path(filepath.Join("telemetry", taskID+".jsonl"))
 }
 
-// ReadModelCallLogsは指定タスクの詳細ログを読み込む。
 func (s *StateStore) ReadModelCallLogs(taskID string) ([]ModelCallLog, error) {
 	file, err := os.Open(s.ModelCallLogPath(taskID))
 	if err != nil {

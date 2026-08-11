@@ -8,7 +8,6 @@ import (
 	"syscall"
 )
 
-// RepoLockはリポジトリ別のプロセス間ロック。
 type RepoLock struct {
 	file *os.File
 }
@@ -32,7 +31,6 @@ func AcquireRepoLock(path string) (*RepoLock, error) {
 	return &RepoLock{file: file}, nil
 }
 
-// Closeはロックを解放する。
 func (l *RepoLock) Close() error {
 	if l == nil || l.file == nil {
 		return nil

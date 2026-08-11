@@ -12,7 +12,6 @@ const (
 	resumeStateVersion = 2
 )
 
-// ResumeStageは中断再開の復元段階を表す。
 type ResumeStage string
 
 const (
@@ -43,7 +42,6 @@ type ResumeCheckpoint struct {
 	PacketCompacted bool        `json:"packet_compacted,omitempty"`
 }
 
-// SaveResumeCheckpointは中断再開用状態を原子的に書き込む。
 func (s *StateStore) SaveResumeCheckpoint(checkpoint ResumeCheckpoint) error {
 	if checkpoint.Model == "" {
 		return fmt.Errorf("resume state model is required")
@@ -60,7 +58,6 @@ func (s *StateStore) SaveResumeCheckpoint(checkpoint ResumeCheckpoint) error {
 	return nil
 }
 
-// LoadResumeCheckpointは中断再開用状態を読み込む。
 func (s *StateStore) LoadResumeCheckpoint() (ResumeCheckpoint, error) {
 	data, err := os.ReadFile(s.Path(resumeStateFile))
 	if err != nil {
@@ -83,7 +80,6 @@ func (s *StateStore) LoadResumeCheckpoint() (ResumeCheckpoint, error) {
 	return checkpoint, nil
 }
 
-// ClearResumeCheckpointは中断再開用状態を削除する。
 func (s *StateStore) ClearResumeCheckpoint() error {
 	return s.Remove(resumeStateFile)
 }

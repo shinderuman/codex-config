@@ -18,7 +18,6 @@ const (
 	MaxDiagnosticBytes = 6 * 1024
 )
 
-// constraintErrorはPACKETの行数・サイズ・必須fieldなどの契約違反を表す。
 type constraintError struct {
 	reason string
 }
@@ -27,7 +26,6 @@ func (e *constraintError) Error() string {
 	return e.reason
 }
 
-// IsConstraintErrorはerrがPACKET契約違反によるものかを返す。
 func IsConstraintError(err error) bool {
 	var target *constraintError
 	return errors.As(err, &target)
@@ -39,7 +37,6 @@ type Packet struct {
 	Fields map[string]string
 }
 
-// FromLinesは行集合からfield mapを構築したPacketを返す。
 func FromLines(lines []string) Packet {
 	fields := make(map[string]string)
 	for _, line := range lines {

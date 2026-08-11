@@ -9,7 +9,6 @@ import (
 	"github.com/shinderuman/codex-config/glm-worker/internal/state"
 )
 
-// printStatusは--statusの人間向けレポートを出力する。
 func printStatus(st *state.StateStore, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "REPO: %s\n", st.ReadOr("repo-root", "unknown"))
 	taskID := st.ReadOr("task.id", "none")
@@ -42,7 +41,6 @@ func printStatus(st *state.StateStore, stdout io.Writer) error {
 	return nil
 }
 
-// printStatsは--statsの集計レポートを出力する。
 func printStats(st *state.StateStore, stdout io.Writer) error {
 	all, err := st.AllTaskStats()
 	if err != nil {
@@ -175,7 +173,6 @@ func sumInt64Maps(values ...map[string]int64) map[string]int64 {
 	return result
 }
 
-// resetStateは状態をクリアし完了レポートを出力する。
 func resetState(st *state.StateStore, stdout io.Writer) error {
 	if err := st.Reset(); err != nil {
 		return err
