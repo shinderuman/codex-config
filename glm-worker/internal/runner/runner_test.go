@@ -595,7 +595,6 @@ func TestClaudeRunnerReMintSessionOnStaleIsolationPolicy(t *testing.T) {
 	}
 }
 
-// 呼出しごとに連番ファイルへ引数を記録し常に成功するfake claudeを用意する。
 type isolationMigrationFixture struct {
 	runner  *ClaudeRunner
 	state   *state.StateStore
@@ -769,7 +768,6 @@ func TestIsolationPolicyPersistedBeforeExecutionOnFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	commandPath := filepath.Join(t.TempDir(), "fake-claude")
-	// 1回目は失敗し、2回目は成功する。
 	commandScript := "#!/bin/sh\nn=$(cat \"$GLM_ARGS_DIR/count\" 2>/dev/null || echo 0)\nn=$((n+1))\nprintf '%s\\n' \"$n\" >\"$GLM_ARGS_DIR/count\"\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_DIR/run-$n\"\nif [ \"$n\" -eq 1 ]; then\n  printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"error\",\"is_error\":true,\"result\":\"boom\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n  exit 1\nfi\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
 	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
 		t.Fatal(err)
@@ -824,9 +822,6 @@ func TestIsolationPolicyPersistedBeforeExecutionOnFailure(t *testing.T) {
 	}
 }
 
-// newFiveHourLimitResumeFixtureはZ.ai 5h上限で中断したsessionが次回Runで同一session IDへ
-// --resumeされる回帰を検証する。1回目のfake claudeは5h上限logを出力してexit 1し、
-// 2回目は成功JSONを返す。callArgsは呼出しごとに連番ファイルへ引数を記録する。
 // workflow.runModelは5h上限検出時にMarkReady(role)でsessionを保存するため、テストも
 // 1回目のRun後にMarkReadyを呼び出して本物の制御フローを再現する。
 func newFiveHourLimitResumeFixture(t *testing.T, role state.SessionRole) (*ClaudeRunner, *state.StateStore, string) {
@@ -845,7 +840,6 @@ func newFiveHourLimitResumeFixture(t *testing.T, role state.SessionRole) (*Claud
 		t.Fatal(err)
 	}
 	commandPath := filepath.Join(t.TempDir(), "fake-claude")
-	// 1回目: 5h上限logを出力してexit 1。2回目: 成功JSON。
 	commandScript := "#!/bin/sh\nn=$(cat \"$GLM_ARGS_DIR/count\" 2>/dev/null || echo 0)\nn=$((n+1))\nprintf '%s\\n' \"$n\" >\"$GLM_ARGS_DIR/count\"\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_DIR/run-$n\"\nif [ \"$n\" -eq 1 ]; then\n  printf '%s\\n' 'API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour. Your limit will reset at 2026-07-22 14:06:34]'\n  exit 1\nfi\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
 	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
 		t.Fatal(err)
@@ -942,9 +936,6 @@ func TestFirstReviewerRunFiveHourLimitResumesSameSession(t *testing.T) {
 	}
 }
 
-// isolation.policy永続化に失敗した場合はClaudeを実行せずerrorを返す。
-// session id永続化後にpolicy永続化だけが失敗する境界を、isolation.policy pathへ
-// directoryを置くことで再現する。
 func TestIsolationPolicyWriteFailureAbortsBeforeClaude(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixtureはUnix系環境向け")
@@ -955,7 +946,6 @@ func TestIsolationPolicyWriteFailureAbortsBeforeClaude(t *testing.T) {
 	}
 	invokedPath := filepath.Join(t.TempDir(), "claude-invoked")
 	commandPath := filepath.Join(t.TempDir(), "fake-claude")
-	// Claudeが呼ばれたらmarker fileを書く。policy永続化失敗時は呼ばれないはず。
 	commandScript := "#!/bin/sh\nprintf '1' >\"" + invokedPath + "\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
 	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
 		t.Fatal(err)
@@ -1113,7 +1103,6 @@ func TestIsolationArgsIdenticalAcrossRoleAndResume(t *testing.T) {
 			t.Fatalf("%s: prompt引数が記録されていません: %#v", step.name, args)
 		}
 		assertFullIsolationArgs(t, args, claudeConfigDir, step.expectReviewer)
-		// resume/new の区別も経路ごとに確認(新規=session-id, resume=resume)。
 		if strings.HasSuffix(step.name, "-new") {
 			if !containsArgument(args, "--session-id") || containsArgument(args, "--resume") {
 				t.Fatalf("%s: 新規session引数が不正: %#v", step.name, args)

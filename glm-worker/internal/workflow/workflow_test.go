@@ -939,7 +939,6 @@ func TestRunModelRejectsMissingModelBeforeRunnerCall(t *testing.T) {
 
 func TestReviewerFormatError(t *testing.T) {
 	st := newStateStoreT(t)
-	// reviewerが有効PACKETだがreviewerとして不正なSTATUSを返した場合。
 	r := &scriptedRunner{steps: []runnerStep{
 		{output: implementedPacket("done")},
 		{output: needsSolDecisionPacket()},
@@ -954,7 +953,6 @@ func TestReviewerFormatError(t *testing.T) {
 
 func TestReviewerUnknownStatusStopsAfterRecompact(t *testing.T) {
 	st := newStateStoreT(t)
-	// reviewerが未知STATUSを返し、packet再圧縮後も直らない場合。
 	r := &scriptedRunner{steps: []runnerStep{
 		{output: implementedPacket("done")},
 		{output: unknownStatusPacket()},

@@ -113,12 +113,6 @@ func (r *ClaudeRunner) Run(
 		return RunResult{}, err
 	}
 	result := RunResult{SessionID: sessionID, Resumed: ready}
-	// isolation.policyはAPI成功markerではなく「session IDをどの隔離policyで起動したか」を
-	// 表す。SessionIDが現行policy配下のsession起動を確定した時点(Claude実行前)に永続化し、
-	// session id永続化とpolicy永続化の間にwindowを作らない。これにより初回実行がZ.ai 5h上限で
-	// 中断してもpolicy未書込のままworkflowがsessionをready保存し、次回resumeのpolicy不一致で
-	// ResetSessionsForPolicyにsession IDを破棄される回帰を防ぐ。永続化失敗時はClaudeを実行せず
-	// errorを返す。
 	if err := r.state.SetIsolationPolicy(isolationPolicyVersion); err != nil {
 		return result, err
 	}
