@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -265,5 +266,19 @@ func TestResolveClaudeSettingsOverrideResolution(t *testing.T) {
 				t.Fatalf("got %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+// config.goはstdlibのみをimportしGo module pathを含まない。新名称(codex-worker-orchestrator)
+// が現れるのは端末local永続識別子(override path・env変数)の回帰のみであり、ここで検出する。
+func TestConfigSourceRetainsLegacyOverrideIdentifiers(t *testing.T) {
+	source, err := os.ReadFile("config.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"codex-worker-orchestrator", "CODEX_WORKER_ORCHESTRATOR"} {
+		if strings.Contains(string(source), forbidden) {
+			t.Fatalf("config.go must not reference renamed persistent identifier %q", forbidden)
+		}
 	}
 }

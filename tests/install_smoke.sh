@@ -2,13 +2,26 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-test_root=$(mktemp -d "${TMPDIR:-/tmp}/codex-config-install-test.XXXXXX")
+test_root=$(mktemp -d "${TMPDIR:-/tmp}/codex-worker-orchestrator-install-test.XXXXXX")
 
 cleanup() {
     chmod -R u+w "$test_root" 2>/dev/null || true
     rm -rf "$test_root"
 }
 trap cleanup EXIT HUP INT TERM
+
+# install.shはmktemp prefix等の非永続表示に新名称を使うが、端末local永続識別子
+# (override path/env/sidecar/manifest)は旧codex-config名前空間を維持する。
+for forbidden in \
+    'CODEX_WORKER_ORCHESTRATOR_CLAUDE_SETTINGS_OVERRIDE' \
+    'codex-worker-orchestrator/claude-settings.local.json' \
+    '.codex-worker-orchestrator-claude-env-state.json' \
+    '.codex-worker-orchestrator-managed-files'; do
+    if grep -Fq "$forbidden" "$repo_root/install.sh"; then
+        printf '%s\n' "install.sh must not reference renamed persistent identifier: $forbidden" >&2
+        exit 1
+    fi
+done
 
 copy_source() {
     destination=$1

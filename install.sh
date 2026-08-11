@@ -63,7 +63,7 @@ install_codex_files() {
         : >"$previous_manifest"
     fi
 
-    # 前回codex-configが配置したファイルのうち、
+    # 前回codex-worker-orchestratorが配置したファイルのうち、
     # 今回の配布元から消えたものだけを削除する。
     # manifestにないローカルファイルには触れない。
     while IFS= read -r relative_path; do
@@ -122,7 +122,7 @@ merge_codex_config() {
         exit 1
     fi
 
-    tmp=$(mktemp "${TMPDIR:-/tmp}/codex-config.XXXXXX")
+    tmp=$(mktemp "${TMPDIR:-/tmp}/codex-worker-orchestrator.XXXXXX")
     trap 'rm -f "$tmp"' EXIT HUP INT TERM
 
     if [ -f "$config_file" ]; then
@@ -201,7 +201,7 @@ build_glm_worker() {
 }
 
 preflight() {
-    build_dir=$(mktemp -d "${TMPDIR:-/tmp}/codex-config-preflight.XXXXXX")
+    build_dir=$(mktemp -d "${TMPDIR:-/tmp}/codex-worker-orchestrator-preflight.XXXXXX")
 
     if ! (
         cd "$repo_root/glm-worker"

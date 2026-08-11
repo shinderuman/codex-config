@@ -10,7 +10,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/shinderuman/codex-config/glm-worker/internal/packet"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/packet"
 )
 
 const (

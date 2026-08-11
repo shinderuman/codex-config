@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/shinderuman/codex-config/glm-worker/internal/packet"
-	"github.com/shinderuman/codex-config/glm-worker/internal/state"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/packet"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
 )
 
 const artifactPromptMarker = "REPORT_ARTIFACT_DIR:"

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/shinderuman/codex-config/glm-worker/internal/app"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/app"
 )
 
 func main() {

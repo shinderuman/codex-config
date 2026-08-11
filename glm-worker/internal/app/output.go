@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/shinderuman/codex-config/glm-worker/internal/state"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
 )
 
 func printStatus(st *state.StateStore, stdout io.Writer) error {

@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/shinderuman/codex-config/glm-worker/internal/config"
-	"github.com/shinderuman/codex-config/glm-worker/internal/packet"
-	"github.com/shinderuman/codex-config/glm-worker/internal/runner"
-	"github.com/shinderuman/codex-config/glm-worker/internal/state"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/config"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/packet"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/runner"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
 )
 
 // interfaceは実装側ではなく利用側に置き、テストでは偽装実装へ差し替える。

@@ -1,12 +1,12 @@
-# codex-config
+# codex-worker-orchestrator
 
 Codex + GLM worker環境の配布元。
 
 ## 初回
 
 ```sh
-git clone https://github.com/shinderuman/codex-config.git
-cd codex-config
+git clone https://github.com/shinderuman/codex-worker-orchestrator.git
+cd codex-worker-orchestrator
 ./install.sh
 ```
 
@@ -56,6 +56,8 @@ ${XDG_CONFIG_HOME:-$HOME/.config}/codex-config/claude-settings.local.json
 
 `CODEX_CONFIG_CLAUDE_SETTINGS_OVERRIDE`でpathを変更できる。
 
+GitHub repo名(`codex-worker-orchestrator`)とlocal設定namespace(`codex-config`)は意図的に異なる。repo名はrename可能だが、override path・env変数・sidecar・manifestは公開済みで各端末の既存状態を指すため、rename対象外として`codex-config`を恒久維持する。
+
 形式はClaude settingsの`env`だけを対象としたJSON:
 
 ```json
@@ -80,12 +82,12 @@ Z.ai向けの`ANTHROPIC_BASE_URL`・`ANTHROPIC_DEFAULT_*_MODEL`を`null`で削�
 
 ### 運用
 
-overrideを追加・変更・削除したときは、必ず`install.sh`を再実行する。install.shはsettings.jsonと同じdirectory(`~/.claude/`)のGit管理外sidecar `.codex-config-claude-env-state.json` に、overrideが所有する各env keyの適用前baseline(schema version 1)を記録する。各installは、前回stateの全所有keyを元値または不存在へ復元→managed defaultsをdeep merge→今回overrideの全keyのbaselineをsnapshot→set/null patchを適用、の順に実行する。これによりoverrideから外したkeyやoverrideファイル削除後の再installで、managed Z.ai keyはdefault・override追加keyは不存在・上書きやnull削除した既存local keyは元値へ確実に戻る。overrideなしは現行mergeと同じ結果になる。stateは0600・atomic writeでOAuth等の認証情報には触れず、repoやinstaller manifest対象外。壊れたoverride・state・未対応形式はsettings/stateを書き換える前にfail closedする(復旧はsidecar削除で安全に初期化できる)。glm-worker起動時にも同じoverrideを読みchild envへset/deleteを再適用するが、stateは読まない。趣味PCなどoverride不要な端末では本ファイルを作成せず、既定のZ.ai接続を維持する。
+overrideを追加・変更・削除したときは、必ず`install.sh`を再実行する。install.shはsettings.jsonと同じdirectory(`~/.claude/`)のGit管理外sidecar `.codex-config-claude-env-state.json` に、overrideが所有する各env keyの適用前baseline(schema version 1)を記録する。各installは、前回stateの全所有keyを元値または不存在へ復元→managed defaultsをdeep merge→今回overrideの全keyのbaselineをsnapshot→set/null patchを適用、の順に実行する。これによりoverrideから外したkeyやoverrideファイル削除後の再installで、managed Z.ai keyはdefault・override追加keyは不存在・上書きやnull削除した既存local keyは元値へ確実に戻る。overrideなしは現行mergeと同じ結果になる。stateは0600・atomic writeでOAuth等の認証情報には触れず、repoやinstaller manifest対象外。壊れたoverride・state・未対応形式はsettings/stateを書き換える前にfail closedする。override適用中にsidecarだけを単体削除してはならない。baselineが失われ、現在のsettings.json値が新たなbaselineとして固定され、以降のoverride解除で元値へ復元できなくなる。復旧にはsettings.jsonとsidecarを整合した既知状態へ一緒に復元するか、overrideが所有する各keyを手動で正しいbaselineへ戻すことが必要である。glm-worker起動時にも同じoverrideを読みchild envへset/deleteを再適用するが、stateは読まない。趣味PCなどoverride不要な端末では本ファイルを作成せず、既定のZ.ai接続を維持する。
 
 ## 構成
 
 ```text
-codex-config/
+codex-worker-orchestrator/
 ├── install.sh
 ├── codex/
 │   ├── AGENTS.md
@@ -251,3 +253,7 @@ go build -o /dev/null ./cmd/glm-worker
 cd ..
 ./tests/install_smoke.sh
 ```
+
+## ライセンス
+
+本リポジトリはMIT Licenseの下で配布する。詳細は[LICENSE](LICENSE)を参照。

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shinderuman/codex-config/glm-worker/internal/config"
-	"github.com/shinderuman/codex-config/glm-worker/internal/state"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/config"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
 )
 
 func newTestStateStore(t *testing.T) *state.StateStore {

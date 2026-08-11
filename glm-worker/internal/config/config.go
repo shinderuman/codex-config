@@ -67,22 +67,22 @@ func Load() (AppConfig, error) {
 	}
 
 	return AppConfig{
-		RepoRoot:              repoRoot,
-		RepoHash:              repoHashString,
-		RepoShort:             repoHashString[:12],
-		StateBase:             filepath.Join(stateHome, "sessions"),
-		PromptDir:             promptDir,
-		ClaudeBin:             envOrDefault("GLM_WORKER_CLAUDE_BIN", "claude"),
-		ClaudeConfigDir:       claudeConfigDir,
+		RepoRoot:               repoRoot,
+		RepoHash:               repoHashString,
+		RepoShort:              repoHashString[:12],
+		StateBase:              filepath.Join(stateHome, "sessions"),
+		PromptDir:              promptDir,
+		ClaudeBin:              envOrDefault("GLM_WORKER_CLAUDE_BIN", "claude"),
+		ClaudeConfigDir:        claudeConfigDir,
 		ClaudeSettingsOverride: claudeSettingsOverride,
-		EnvAllowlist:          envAllowlist,
-		WorkerModel:           envOrDefault("GLM_WORKER_WORKER_MODEL", "opus"),
-		ReviewerModel:         envOrDefault("GLM_WORKER_REVIEWER_MODEL", "haiku"),
-		HighRiskReviewerModel: envOrDefault("GLM_WORKER_HIGH_RISK_REVIEWER_MODEL", "sonnet"),
-		RoutineEffort:         envOrDefault("GLM_WORKER_EFFORT", "high"),
-		EscalatedEffort:       envOrDefault("GLM_WORKER_ESCALATED_EFFORT", "max"),
-		MaxAutoFixRounds:      rounds,
-		TelemetryContent:      telemetryContent,
+		EnvAllowlist:           envAllowlist,
+		WorkerModel:            envOrDefault("GLM_WORKER_WORKER_MODEL", "opus"),
+		ReviewerModel:          envOrDefault("GLM_WORKER_REVIEWER_MODEL", "haiku"),
+		HighRiskReviewerModel:  envOrDefault("GLM_WORKER_HIGH_RISK_REVIEWER_MODEL", "sonnet"),
+		RoutineEffort:          envOrDefault("GLM_WORKER_EFFORT", "high"),
+		EscalatedEffort:        envOrDefault("GLM_WORKER_ESCALATED_EFFORT", "max"),
+		MaxAutoFixRounds:       rounds,
+		TelemetryContent:       telemetryContent,
 	}, nil
 }
 

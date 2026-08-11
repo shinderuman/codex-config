@@ -1,3 +1,3 @@
-module github.com/shinderuman/codex-config/tools/merge-json
+module github.com/shinderuman/codex-worker-orchestrator/tools/merge-json
 
 go 1.22

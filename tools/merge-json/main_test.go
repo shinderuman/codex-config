@@ -574,6 +574,18 @@ func TestMergeFilesOverrideStateIsPrivateAndAtomic(t *testing.T) {
 	}
 }
 
+// main.goはstdlibのみをimportしGo module pathを含まない。新名称が現れるのは
+// sidecar名等の端末local永続識別子の回帰のみであり、ここで検出する。
+func TestMainSourceRetainsLegacySidecarIdentifier(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(source), "codex-worker-orchestrator") {
+		t.Fatalf("main.go must not reference renamed persistent identifier")
+	}
+}
+
 func TestEnsureEnvMapHandlesAbsentAndNonMap(t *testing.T) {
 	existing := map[string]any{"env": map[string]any{"K": "v"}}
 	if got := ensureEnvMap(existing); got["K"] != "v" {

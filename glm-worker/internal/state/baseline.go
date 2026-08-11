@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/shinderuman/codex-config/glm-worker/internal/config"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/config"
 )
 
 // CaptureGitBaselineはタスク開始前のgit状態をstateへ保存する。

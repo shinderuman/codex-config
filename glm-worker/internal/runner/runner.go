@@ -13,8 +13,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/shinderuman/codex-config/glm-worker/internal/config"
-	"github.com/shinderuman/codex-config/glm-worker/internal/state"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/config"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
 )
 
 // isolationPolicyVersionはworker/reviewer起動の隔離構成を識別する。

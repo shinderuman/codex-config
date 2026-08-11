@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/shinderuman/codex-config/glm-worker/internal/config"
-	"github.com/shinderuman/codex-config/glm-worker/internal/runner"
-	"github.com/shinderuman/codex-config/glm-worker/internal/state"
-	"github.com/shinderuman/codex-config/glm-worker/internal/workflow"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/config"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/runner"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/workflow"
 )
 
 type CommandMode int
