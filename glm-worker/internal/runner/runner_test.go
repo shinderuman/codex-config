@@ -2,7 +2,6 @@ package runner
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -596,6 +595,241 @@ func TestClaudeRunnerReMintSessionOnStaleIsolationPolicy(t *testing.T) {
 	}
 }
 
+// isolationMigrationFixtureは隔離policy移行の回帰test共通の構築物を返す。
+// 呼出しごとに連番ファイルへ引数を記録し常に成功するfake claudeを用意する。
+type isolationMigrationFixture struct {
+	runner  *ClaudeRunner
+	state   *state.StateStore
+	argsDir string
+}
+
+func newIsolationMigrationFixture(t *testing.T) isolationMigrationFixture {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixtureはUnix系環境向け")
+	}
+	promptDir := t.TempDir()
+	for _, name := range []string{"WORKER.md", "REVIEWER.md"} {
+		if err := os.WriteFile(filepath.Join(promptDir, name), []byte("system"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	argsDir := filepath.Join(t.TempDir(), "args")
+	if err := os.MkdirAll(argsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	commandPath := filepath.Join(t.TempDir(), "fake-claude")
+	commandScript := "#!/bin/sh\nn=$(cat \"$GLM_ARGS_DIR/count\" 2>/dev/null || echo 0)\nn=$((n+1))\nprintf '%s\\n' \"$n\" >\"$GLM_ARGS_DIR/count\"\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_DIR/run-$n\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
+	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GLM_ARGS_DIR", argsDir)
+
+	st := newTestStateStore(t)
+	if err := st.Write("task.id", "12345678-aaaa-bbbb-cccc-dddddddddddd"); err != nil {
+		t.Fatal(err)
+	}
+	r := NewClaudeRunner(config.AppConfig{
+		RepoRoot:        t.TempDir(),
+		PromptDir:       promptDir,
+		ClaudeBin:       commandPath,
+		ClaudeConfigDir: filepath.Join(t.TempDir(), "claude-home"),
+		EnvAllowlist:    []string{"GLM_ARGS_DIR"},
+	}, st)
+	return isolationMigrationFixture{runner: r, state: st, argsDir: argsDir}
+}
+
+func (f isolationMigrationFixture) invocationArgs(t *testing.T, invocation int) []string {
+	t.Helper()
+	return readLines(t, filepath.Join(f.argsDir, fmt.Sprintf("run-%d", invocation)))
+}
+
+// seedStaleReadyRoleはroleのid/readyを旧値で書きpolicyをstaleにする。
+func seedStaleReadyRole(t *testing.T, st *state.StateStore, role state.SessionRole, id string) {
+	t.Helper()
+	if err := st.Write(string(role)+".id", id); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkReady(role); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetIsolationPolicy("claude-isolation-stale"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestIsolationMigrationWorkerFirstClearsReviewerSessionは旧policyで両roleがreadyのtaskで
+// workerを先に呼んだ際、reviewerの旧sessionも破棄されて新session採番されることを検証する。
+// 呼出しroleだけresetして成功後にtask共通markerを更新すると、reviewerの旧sessionが
+// readyのまま残りmarker一致としてresumeされる回帰を防ぐ。
+func TestIsolationMigrationWorkerFirstClearsReviewerSession(t *testing.T) {
+	f := newIsolationMigrationFixture(t)
+	seedStaleReadyRole(t, f.state, state.WorkerRole, "stale-worker")
+	seedStaleReadyRole(t, f.state, state.ReviewerRole, "stale-reviewer")
+
+	if _, err := f.runner.Run(state.WorkerRole, "worker-model", false, "high", "worker prompt",
+		filepath.Join(t.TempDir(), "worker.log")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.runner.Run(state.ReviewerRole, "reviewer-model", true, "high", "reviewer prompt",
+		filepath.Join(t.TempDir(), "reviewer.log")); err != nil {
+		t.Fatal(err)
+	}
+
+	workerArgs := f.invocationArgs(t, 1)
+	reviewerArgs := f.invocationArgs(t, 2)
+	if containsArgument(workerArgs, "--resume") || containsArgument(workerArgs, "stale-worker") {
+		t.Fatalf("workerが旧sessionをresume/再利用: %#v", workerArgs)
+	}
+	if !containsArgument(workerArgs, "--session-id") {
+		t.Fatalf("workerの新session採番がありません: %#v", workerArgs)
+	}
+	if containsArgument(reviewerArgs, "--resume") || containsArgument(reviewerArgs, "stale-reviewer") {
+		t.Fatalf("reviewerが旧sessionをresume/再利用: %#v", reviewerArgs)
+	}
+	if !containsArgument(reviewerArgs, "--session-id") {
+		t.Fatalf("reviewerの新session採番がありません: %#v", reviewerArgs)
+	}
+	if policy := f.state.IsolationPolicy(); policy != isolationPolicyVersion {
+		t.Fatalf("policy = %q, want %q", policy, isolationPolicyVersion)
+	}
+}
+
+// TestIsolationMigrationReviewerFirstClearsWorkerSessionはreviewer先行の対称ケース。
+func TestIsolationMigrationReviewerFirstClearsWorkerSession(t *testing.T) {
+	f := newIsolationMigrationFixture(t)
+	seedStaleReadyRole(t, f.state, state.WorkerRole, "stale-worker")
+	seedStaleReadyRole(t, f.state, state.ReviewerRole, "stale-reviewer")
+
+	if _, err := f.runner.Run(state.ReviewerRole, "reviewer-model", true, "high", "reviewer prompt",
+		filepath.Join(t.TempDir(), "reviewer.log")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.runner.Run(state.WorkerRole, "worker-model", false, "high", "worker prompt",
+		filepath.Join(t.TempDir(), "worker.log")); err != nil {
+		t.Fatal(err)
+	}
+
+	reviewerArgs := f.invocationArgs(t, 1)
+	workerArgs := f.invocationArgs(t, 2)
+	if containsArgument(reviewerArgs, "--resume") || containsArgument(reviewerArgs, "stale-reviewer") {
+		t.Fatalf("reviewerが旧sessionをresume/再利用: %#v", reviewerArgs)
+	}
+	if !containsArgument(reviewerArgs, "--session-id") {
+		t.Fatalf("reviewerの新session採番がありません: %#v", reviewerArgs)
+	}
+	if containsArgument(workerArgs, "--resume") || containsArgument(workerArgs, "stale-worker") {
+		t.Fatalf("workerが旧sessionをresume/再利用: %#v", workerArgs)
+	}
+	if !containsArgument(workerArgs, "--session-id") {
+		t.Fatalf("workerの新session採番がありません: %#v", workerArgs)
+	}
+}
+
+// TestIsolationMigrationClearsNonCallingReadyRoleはworkerだけready(旧policy)のtaskで
+// reviewerを呼んだ際、呼出し対象でないworkerの旧ready sessionも破棄されることを検証する。
+// これが残ると次回worker呼出しがmarker一致で旧worker sessionをresumeする。
+func TestIsolationMigrationClearsNonCallingReadyRole(t *testing.T) {
+	f := newIsolationMigrationFixture(t)
+	seedStaleReadyRole(t, f.state, state.WorkerRole, "stale-worker")
+	// reviewerはid発行済みだが未成功(readyなし)。
+	if err := f.state.Write("reviewer.id", "stale-reviewer"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.runner.Run(state.ReviewerRole, "reviewer-model", true, "high", "reviewer prompt",
+		filepath.Join(t.TempDir(), "reviewer.log")); err != nil {
+		t.Fatal(err)
+	}
+
+	if f.state.Exists("worker.ready") {
+		t.Fatal("呼出し対象でないworkerの旧readyが残っています")
+	}
+	if _, err := f.runner.Run(state.WorkerRole, "worker-model", false, "high", "worker prompt",
+		filepath.Join(t.TempDir(), "worker.log")); err != nil {
+		t.Fatal(err)
+	}
+
+	workerArgs := f.invocationArgs(t, 2)
+	if containsArgument(workerArgs, "--resume") || containsArgument(workerArgs, "stale-worker") {
+		t.Fatalf("workerが旧sessionをresume/再利用: %#v", workerArgs)
+	}
+	if !containsArgument(workerArgs, "--session-id") {
+		t.Fatalf("workerの新session採番がありません: %#v", workerArgs)
+	}
+}
+
+// TestIsolationMigrationFailureKeepsStalePolicyForRetryは旧policy session破棄後にClaude起動が
+// 失敗した場合、policyを更新せず次回呼出しで再びsessionを破棄して新sessionを採番することを
+// 検証する。失敗時にmarkerを更新すると旧sessionがstaleのまま次回resumeされてしまう。
+func TestIsolationMigrationFailureKeepsStalePolicyForRetry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixtureはUnix系環境向け")
+	}
+	promptDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(promptDir, "WORKER.md"), []byte("system"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	argsDir := filepath.Join(t.TempDir(), "args")
+	if err := os.MkdirAll(argsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	commandPath := filepath.Join(t.TempDir(), "fake-claude")
+	// 1回目は失敗し、2回目は成功する。
+	commandScript := "#!/bin/sh\nn=$(cat \"$GLM_ARGS_DIR/count\" 2>/dev/null || echo 0)\nn=$((n+1))\nprintf '%s\\n' \"$n\" >\"$GLM_ARGS_DIR/count\"\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_DIR/run-$n\"\nif [ \"$n\" -eq 1 ]; then\n  printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"error\",\"is_error\":true,\"result\":\"boom\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n  exit 1\nfi\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
+	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GLM_ARGS_DIR", argsDir)
+
+	st := newTestStateStore(t)
+	if err := st.Write("task.id", "12345678-aaaa-bbbb-cccc-dddddddddddd"); err != nil {
+		t.Fatal(err)
+	}
+	r := NewClaudeRunner(config.AppConfig{
+		RepoRoot:        t.TempDir(),
+		PromptDir:       promptDir,
+		ClaudeBin:       commandPath,
+		ClaudeConfigDir: filepath.Join(t.TempDir(), "claude-home"),
+		EnvAllowlist:    []string{"GLM_ARGS_DIR"},
+	}, st)
+	seedStaleReadyRole(t, st, state.WorkerRole, "stale-worker")
+
+	if _, err := r.Run(state.WorkerRole, "worker-model", false, "high", "first prompt",
+		filepath.Join(t.TempDir(), "first.log")); err == nil {
+		t.Fatal("1回目は失敗する必要があります")
+	}
+	if policy := st.IsolationPolicy(); policy == isolationPolicyVersion {
+		t.Fatalf("失敗時にpolicyを更新してはいけません: %q", policy)
+	}
+	if st.Exists("worker.ready") {
+		t.Fatal("失敗時にworker.readyを書いてはいけません")
+	}
+	failedSessionID, err := st.Read("worker.id")
+	if err != nil {
+		t.Fatalf("失敗時のsession idを読めません: %v", err)
+	}
+
+	if _, err := r.Run(state.WorkerRole, "worker-model", false, "high", "retry prompt",
+		filepath.Join(t.TempDir(), "retry.log")); err != nil {
+		t.Fatal(err)
+	}
+
+	retryArgs := readLines(t, filepath.Join(argsDir, "run-2"))
+	if containsArgument(retryArgs, "--resume") {
+		t.Fatalf("失敗sessionをresumeしました: %#v", retryArgs)
+	}
+	if containsArgument(retryArgs, failedSessionID) {
+		t.Fatalf("失敗時のsession idを再利用しました: %#v", retryArgs)
+	}
+	if !containsArgument(retryArgs, "--session-id") {
+		t.Fatalf("再採番がありません: %#v", retryArgs)
+	}
+	if policy := st.IsolationPolicy(); policy != isolationPolicyVersion {
+		t.Fatalf("成功後policy = %q, want %q", policy, isolationPolicyVersion)
+	}
+}
+
 // assertFullIsolationArgsはworker/reviewer・新規/resumeの全経路で同じ隔離arg setが
 // 渡ることを検証する共有helper。一経路でも欠ければ全sessionで隔離が崩れるため、
 // 個別testではなくここへ集約する。
@@ -736,220 +970,5 @@ func TestIsolationArgsIdenticalAcrossRoleAndResume(t *testing.T) {
 				t.Fatalf("%s: resume引数が不正: %#v", step.name, args)
 			}
 		}
-	}
-}
-
-func TestManagedSettingsBasesReturnsOSCandidates(t *testing.T) {
-	bases := managedSettingsBases()
-	if len(bases) == 0 {
-		t.Fatalf("managed base候補がありません: %#v", bases)
-	}
-	// 重複なし
-	seen := map[string]bool{}
-	for _, base := range bases {
-		if seen[base] {
-			t.Fatalf("managed base候補に重複: %q", base)
-		}
-		seen[base] = true
-	}
-	// darwinはdocsとbinaryの両候補をcoverするため2候補
-	if runtime.GOOS == "darwin" && len(bases) < 2 {
-		t.Fatalf("darwinは2候補以上が必要(docs/binary差をcover): %#v", bases)
-	}
-}
-
-func TestDetectManagedInstructionMemoryFailsClosedOnClaudeMd(t *testing.T) {
-	base := t.TempDir()
-	if err := os.WriteFile(filepath.Join(base, "managed-settings.json"), []byte(`{"claudeMd":"Always run lint"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	err := detectUnavoidableManagedInstructionMemory([]string{base})
-	if err == nil || !strings.Contains(err.Error(), "claudeMd") {
-		t.Fatalf("claudeMd検出時はfail closedが必要: %v", err)
-	}
-}
-
-func TestDetectManagedInstructionMemoryAllowsPurePolicy(t *testing.T) {
-	base := t.TempDir()
-	if err := os.WriteFile(filepath.Join(base, "managed-settings.json"), []byte(`{"permissions":{"allow":["Bash(git *)"]},"env":{"COMPANY":"acme"}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := detectUnavoidableManagedInstructionMemory([]string{base}); err != nil {
-		t.Fatalf("純policy(命令memoryなし)は迂回せず通す必要があります: %v", err)
-	}
-}
-
-func TestDetectManagedInstructionMemoryFailsClosedOnDropIn(t *testing.T) {
-	base := t.TempDir()
-	dropIn := filepath.Join(base, "managed-settings.d")
-	if err := os.Mkdir(dropIn, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dropIn, "10-policy.json"), []byte(`{"claudeMd":"injected via drop-in"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// .json以外は無視されること
-	if err := os.WriteFile(filepath.Join(dropIn, "README.txt"), []byte("noise"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	err := detectUnavoidableManagedInstructionMemory([]string{base})
-	if err == nil || !strings.Contains(err.Error(), "10-policy.json") {
-		t.Fatalf("drop-inのclaudeMdを検出する必要があります: %v", err)
-	}
-}
-
-func TestDetectManagedInstructionMemoryFailsClosedOnManagedClaudeMd(t *testing.T) {
-	base := t.TempDir()
-	if err := os.WriteFile(filepath.Join(base, "CLAUDE.md"), []byte("# org policy\nAlways deploy on Friday."), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	err := detectUnavoidableManagedInstructionMemory([]string{base})
-	if err == nil || !strings.Contains(err.Error(), "CLAUDE.md") {
-		t.Fatalf("managed CLAUDE.md検出時はfail closedが必要: %v", err)
-	}
-}
-
-func TestDetectManagedInstructionMemoryFailsClosedOnManagedRules(t *testing.T) {
-	base := t.TempDir()
-	rulesDir := filepath.Join(base, ".claude", "rules")
-	if err := os.MkdirAll(rulesDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(rulesDir, "org.md"), []byte("org rule content"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	err := detectUnavoidableManagedInstructionMemory([]string{base})
-	if err == nil || !strings.Contains(err.Error(), "org.md") {
-		t.Fatalf("managed rules検出時はfail closedが必要: %v", err)
-	}
-}
-
-func TestDetectManagedInstructionMemoryFailsClosedOnUnparseable(t *testing.T) {
-	base := t.TempDir()
-	if err := os.WriteFile(filepath.Join(base, "managed-settings.json"), []byte("{not json"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	err := detectUnavoidableManagedInstructionMemory([]string{base})
-	if err == nil || !strings.Contains(err.Error(), "解析できません") {
-		t.Fatalf("解析不能時はfail closedが必要: %v", err)
-	}
-}
-
-func TestDetectManagedInstructionMemoryNoErrorWhenAbsent(t *testing.T) {
-	if err := detectUnavoidableManagedInstructionMemory(nil); err != nil {
-		t.Fatalf("baseなしはerrorなし: %v", err)
-	}
-	if err := detectUnavoidableManagedInstructionMemory([]string{t.TempDir()}); err != nil {
-		t.Fatalf("空baseはerrorなし: %v", err)
-	}
-	if err := detectUnavoidableManagedInstructionMemory([]string{filepath.Join(t.TempDir(), "absent")}); err != nil {
-		t.Fatalf("不在baseはerrorなし: %v", err)
-	}
-}
-
-func TestDetectManagedInstructionMemoryIgnoresEmptyManagedFile(t *testing.T) {
-	base := t.TempDir()
-	// 空のmanaged CLAUDE.mdと空rulesは命令memoryではないため通す
-	if err := os.WriteFile(filepath.Join(base, "CLAUDE.md"), []byte("   \n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := detectUnavoidableManagedInstructionMemory([]string{base}); err != nil {
-		t.Fatalf("空のmanaged fileは通す必要があります: %v", err)
-	}
-}
-
-// withPlistToJSONはplistToJSON hookをtest用へ差し替え、test終了で復元する。
-func withPlistToJSON(t *testing.T, fn func(string) ([]byte, error)) {
-	t.Helper()
-	orig := plistToJSON
-	plistToJSON = fn
-	t.Cleanup(func() { plistToJSON = orig })
-}
-
-// writeDummyPlistは存在確認(os.Stat)が成功する空のdummy plistを置く。
-// 中身はplistToJSON hookで差し替えるため実内容は問わない。
-func writeDummyPlist(t *testing.T) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "com.anthropic.claudecode.plist")
-	if err := os.WriteFile(path, []byte("dummy"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
-func TestManagedMDMPlistPathsReturnsDarwinCandidates(t *testing.T) {
-	paths := managedMDMPlistPaths()
-	if runtime.GOOS != "darwin" {
-		if len(paths) != 0 {
-			t.Fatalf("非darwinではMDM plist候補は空である必要があります: %#v", paths)
-		}
-		return
-	}
-	if len(paths) < 2 {
-		t.Fatalf("darwinはdevice-level+per-userの2候補が必要: %#v", paths)
-	}
-	for _, path := range paths {
-		if !strings.Contains(path, "Managed Preferences") || !strings.Contains(path, "com.anthropic.claudecode.plist") {
-			t.Fatalf("想定外のMDM plist path: %q", path)
-		}
-	}
-}
-
-func TestDetectManagedMDMNoErrorWhenAbsent(t *testing.T) {
-	// plist不在は通常動作を変えない(fail closedしない)。
-	if err := detectManagedMDMInstructionMemory(nil); err != nil {
-		t.Fatalf("pathなしはerrorなし: %v", err)
-	}
-	missing := filepath.Join(t.TempDir(), "absent.plist")
-	// hookは呼ばれないはだが、呼ばれたら即failする安全策を仕込む。
-	withPlistToJSON(t, func(string) ([]byte, error) {
-		t.Fatal("不在plistでplistToJSONが呼ばれました")
-		return nil, nil
-	})
-	if err := detectManagedMDMInstructionMemory([]string{missing}); err != nil {
-		t.Fatalf("不在plistはerrorなし: %v", err)
-	}
-}
-
-func TestDetectManagedMDMFailsClosedOnClaudeMd(t *testing.T) {
-	plist := writeDummyPlist(t)
-	withPlistToJSON(t, func(string) ([]byte, error) {
-		return []byte(`{"claudeMd":"org managed instruction via MDM"}`), nil
-	})
-	err := detectManagedMDMInstructionMemory([]string{plist})
-	if err == nil || !strings.Contains(err.Error(), "claudeMd") {
-		t.Fatalf("MDM plistのclaudeMd検出時はfail closedが必要: %v", err)
-	}
-}
-
-func TestDetectManagedMDMAllowsPurePolicy(t *testing.T) {
-	plist := writeDummyPlist(t)
-	withPlistToJSON(t, func(string) ([]byte, error) {
-		return []byte(`{"permissions":{"allow":["Bash"]},"env":{"COMPANY":"acme"}}`), nil
-	})
-	if err := detectManagedMDMInstructionMemory([]string{plist}); err != nil {
-		t.Fatalf("MDM plistの純policy(命令memoryなし)は迂回せず通す必要があります: %v", err)
-	}
-}
-
-func TestDetectManagedMDMFailsClosedOnConvertError(t *testing.T) {
-	plist := writeDummyPlist(t)
-	withPlistToJSON(t, func(string) ([]byte, error) {
-		return nil, errors.New("plutil: unreadable or not a plist")
-	})
-	err := detectManagedMDMInstructionMemory([]string{plist})
-	if err == nil || !strings.Contains(err.Error(), "変換/読込できません") {
-		t.Fatalf("plist変換/読込異常時はfail closedが必要: %v", err)
-	}
-}
-
-func TestDetectManagedMDMFailsClosedOnUnparseableJSON(t *testing.T) {
-	plist := writeDummyPlist(t)
-	withPlistToJSON(t, func(string) ([]byte, error) {
-		return []byte("{not json"), nil
-	})
-	err := detectManagedMDMInstructionMemory([]string{plist})
-	if err == nil || !strings.Contains(err.Error(), "解析できません") {
-		t.Fatalf("plist解析不能時はfail closedが必要: %v", err)
 	}
 }

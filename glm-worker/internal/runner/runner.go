@@ -9,9 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 
@@ -84,12 +82,14 @@ func NewClaudeRunner(cfg config.AppConfig, st *state.StateStore) *ClaudeRunner {
 
 // Runはrole/effort/promptでClaude Codeを起動し出力をoutputPathへ書き出す。
 // 初回起動時は新規sessionを採番し、2回目以降は同一sessionへresumeする。
-// 起動は全入力経路を隔離する: --safe-modeでcustomizationを一括無効化し、
-// --setting-sources ""でfilesystem settingsを読まず、Z.ai接続・model aliasは
-// settings.jsonからallowlist抽出した最小envを明示注入する。CLAUDE.md/auto memory/
-// hooks/MCP/skills等はinline --settingsとflagで追加遮断する。組込みsystem promptと
-// managed/policy設定だけは遮断不可能な残余として残る。現行の隔離policyと一致しない
-// 旧sessionは暗黙入力が混入しているためresumeせず新sessionへ切り替える。
+// 起動は全入力経路を隔離する: --safe-modeでcustomization・managed CLAUDE.md・
+// managed skills/plugins・policy-configured MCPを一括無効化し、--setting-sources ""
+// でfilesystem settingsを読まず、Z.ai接続・model aliasはsettings.jsonからallowlist
+// 抽出した最小envを明示注入する。CLAUDE.md/auto memory/hooks/MCP/skills等はinline
+// --settingsとflagで追加遮断する。組込みsystem promptとmanaged settings policy
+// （認証・権限等の組織policy）だけは遮断不可能な残余として残る。現行の隔離policyと
+// 一致しない旧sessionは暗黙入力が混入しているためresumeせず新sessionへ切り替える。
+// isolation.policyはtask共通なのでpolicy不一致時はworker/reviewer両roleのsessionを破棄する。
 func (r *ClaudeRunner) Run(
 	role state.SessionRole,
 	model string,
@@ -105,24 +105,12 @@ func (r *ClaudeRunner) Run(
 	if err != nil {
 		return RunResult{}, err
 	}
-	if err := detectUnavoidableManagedInstructionMemory(managedSettingsBases()); err != nil {
-		return RunResult{}, err
-	}
-	if err := detectManagedMDMInstructionMemory(managedMDMPlistPaths()); err != nil {
+	if err := r.state.ResetSessionsForPolicy(isolationPolicyVersion); err != nil {
 		return RunResult{}, err
 	}
 	sessionID, ready, err := r.state.SessionID(role)
 	if err != nil {
 		return RunResult{}, err
-	}
-	if ready && r.state.IsolationPolicy() != isolationPolicyVersion {
-		if err := r.state.ResetRoleSession(role); err != nil {
-			return RunResult{}, err
-		}
-		sessionID, ready, err = r.state.SessionID(role)
-		if err != nil {
-			return RunResult{}, err
-		}
 	}
 	result := RunResult{SessionID: sessionID, Resumed: ready}
 
@@ -289,7 +277,8 @@ func writeResultOutput(outputPath string, response string, rawOutputPath string,
 // claudeMdExcludesで全階層のCLAUDE.mdを、autoMemoryEnabledでauto memoryを、
 // disableAllHooks/disableBundledSkills/disableWorkflowsで各customizationを無効化する。
 // これらはmemory・customization読込経路だけへ作用し、auth(Z.ai env)・model・
-// 組込みsystem prompt・権限へは影響しない。managed/policy設定は除外・無効化できない。
+// 組込みsystem prompt・権限へは影響しない。managed settings policy（認証・権限等の
+// 組織policy）は--safe-modeでも残存する唯一の残余であり、この関数では除去しない。
 //
 // claudeMdExcludesは user/project/local memory だけへ効き絶対pathとglobの両方を
 // 持たせる: `**/CLAUDE.md`/`**/CLAUDE.local.md` で cwd 配下の全階層を捕捉し、
@@ -420,216 +409,6 @@ func resolveClaudeConfigDir(claudeConfigDir string) (string, error) {
 		return "", fmt.Errorf("ホームディレクトリを取得できません: %w", err)
 	}
 	return filepath.Join(home, ".claude"), nil
-}
-
-// managedSettingsBasesは現行CLI仕様(claude 2.1.226)のadmin-managed/policy settingsの
-// 標準base directory候補をOS別に返す。これら配下のmemoryは --safe-mode でも
-// claudeMdExcludesでも無効化できず必ず適用される。本関数はpath計算だけ行いIOしない。
-//
-// macOSはpublished docs(/Library/Application Support/ClaudeCode)とCLI binaryの挙動
-// (/etc/claude-code へのfall-through)が一致しないため、fail closedを優先し両候補を調べる。
-// 各baseは次のmanaged memoryを持ち得る(全て --safe-mode で残存):
-//   - managed-settings.json と managed-settings.d/*.json の `claudeMd` key
-//   - <base>/CLAUDE.md (dedicated managed memory)
-//   - <base>/.claude/rules/*.md (dedicated managed rules)
-//
-// macOS MDM plist(/Library/Managed Preferences[/USER]/com.anthropic.claudecode.plist)は
-// detectManagedMDMInstructionMemory で別途検出する。Windows GroupPolicy registryも同じ
-// policy layerへ配信されるが現platform対象外のためdocs注記へ残す(検出残差)。
-func managedSettingsBases() []string {
-	switch runtime.GOOS {
-	case "darwin":
-		return []string{
-			"/Library/Application Support/ClaudeCode",
-			"/etc/claude-code",
-		}
-	case "windows":
-		return []string{`C:\Program Files\ClaudeCode`}
-	default:
-		return []string{"/etc/claude-code"}
-	}
-}
-
-// detectUnavoidableManagedInstructionMemoryはmanaged/policy settingsの標準base配下を
-// 調べ、除外不能な命令memory(claudeMd key・managed CLAUDE.md・managed rules)が一つでも
-// 存在すればerrorでfail closedする。これらは --safe-mode・claudeMdExcludes いちらでも
-// 除外できないため、混入を黙認せず起動前に中止する。pureなpermissions/env policy
-// (命令memoryなし)は組織policyなので迂回せずそのまま適用させ、不可避性は出力/docsへ明示。
-// 読めない・解析できない場合も隔離保証できないためfail closedする。
-func detectUnavoidableManagedInstructionMemory(bases []string) error {
-	for _, base := range bases {
-		if err := detectManagedMemoryInBase(base); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// managedMDMPlistPathsは現行CLI(claude 2.1.226)が参照するmacOS MDM managed preferences
-// plistの標準pathを返す。device-level(/Library/Managed Preferences/com.anthropic.claudecode.plist)
-// とper-user(同 <user>/...)の両方。非darwinでは空(対象外)。user取得失敗時はdevice-levelのみ。
-func managedMDMPlistPaths() []string {
-	if runtime.GOOS != "darwin" {
-		return nil
-	}
-	const name = "com.anthropic.claudecode.plist"
-	paths := []string{filepath.Join("/Library/Managed Preferences", name)}
-	if currentUser, err := user.Current(); err == nil && currentUser.Username != "" {
-		paths = append(paths, filepath.Join("/Library/Managed Preferences", currentUser.Username, name))
-	}
-	return paths
-}
-
-// plistToJSONはplistファイルをJSON byte列へ変換する。plutilはmacOS標準toolで確実に
-// 変換できるためclaudeMd命令memoryの有無を安全に判別できる。testで差し替え可能。
-var plistToJSON = defaultPlistToJSON
-
-func defaultPlistToJSON(path string) ([]byte, error) {
-	return exec.Command("plutil", "-convert", "json", "-o", "-", path).Output()
-}
-
-// detectManagedMDMInstructionMemoryはmacOS MDM plist配下のmanaged settingsを調べ、
-// claudeMd命令memoryが存在すればfail closedする。plutilで確実にJSON化できるため命令memory
-// の有無で判定し、純permissions/env policy(命令memoryなし)は組織policyとして迂回せず通す。
-// plistの読めない・変換/解析不能な場合も隔離保証できないためfail closedする。
-func detectManagedMDMInstructionMemory(paths []string) error {
-	for _, path := range paths {
-		info, err := os.Stat(path)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return fmt.Errorf("managed MDM plist %sを確認できません(隔離を保証できません): %w", path, err)
-		}
-		if info.IsDir() {
-			return fmt.Errorf("managed MDM plist %sがdirectoryです(隔離を保証できません)", path)
-		}
-		jsonBytes, err := plistToJSON(path)
-		if err != nil {
-			return fmt.Errorf("managed MDM plist %sを変換/読込できません(隔離を保証できません): %w", path, err)
-		}
-		if err := failOnClaudeMdInstructionMemory(jsonBytes, "managed MDM plist "+path); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// failOnClaudeMdInstructionMemoryはJSON化されたmanaged settings/policyを調べ、非空の
-// claudeMd命令memoryがあればfail closedする。解析不能もfail closed。空なら通す。
-func failOnClaudeMdInstructionMemory(data []byte, label string) error {
-	var parsed struct {
-		ClaudeMd string `json:"claudeMd"`
-	}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		return fmt.Errorf("%sを解析できません(隔離を保証できません): %w", label, err)
-	}
-	if strings.TrimSpace(parsed.ClaudeMd) != "" {
-		return fmt.Errorf(
-			"%sにclaudeMd命令memoryが存在し、--safe-modeでも除外できません(隔離を保証できないため起動を中止)",
-			label,
-		)
-	}
-	return nil
-}
-
-// detectManagedMemoryInBaseは単一base配下のmanaged memoryを検査する。
-func detectManagedMemoryInBase(base string) error {
-	settingsCandidates := []string{
-		filepath.Join(base, "managed-settings.json"),
-		filepath.Join(base, "managed-settings.d"),
-	}
-	settingsFiles, err := expandJSONFiles(settingsCandidates)
-	if err != nil {
-		return err
-	}
-	for _, path := range settingsFiles {
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return fmt.Errorf("managed settings %sを読み込めません(隔離を保証できません): %w", path, readErr)
-		}
-		if err := failOnClaudeMdInstructionMemory(data, "managed settings "+path); err != nil {
-			return err
-		}
-	}
-
-	if err := detectNonEmptyManagedFile(filepath.Join(base, "CLAUDE.md")); err != nil {
-		return err
-	}
-
-	rulesDir := filepath.Join(base, ".claude", "rules")
-	rules, err := expandMarkdownFiles(rulesDir)
-	if err != nil {
-		return err
-	}
-	for _, path := range rules {
-		if err := detectNonEmptyManagedFile(path); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// detectNonEmptyManagedFileはpathが存在し非空の場合、除外不能なmanaged memoryとして
-// fail closedする。空(内容が空白のみ)なら通す。読めなければfail closed。
-func detectNonEmptyManagedFile(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("managed memory %sを読み込めません(隔離を保証できません): %w", path, err)
-	}
-	if strings.TrimSpace(string(data)) == "" {
-		return nil
-	}
-	return fmt.Errorf(
-		"managed memory %sが存在し、--safe-modeでも除外できません(隔離を保証できないため起動を中止)",
-		path,
-	)
-}
-
-// expandJSONFilesはpath列中の *.json ファイルとdirectory配下の *.json を展開して返す。
-// 不在のpathは除外する。
-func expandJSONFiles(paths []string) ([]string, error) {
-	return expandFiles(paths, ".json")
-}
-
-// expandMarkdownFilesはdirectory配下の *.md ファイルを返す。directory不在なら空。
-func expandMarkdownFiles(dir string) ([]string, error) {
-	files, err := expandFiles([]string{dir}, ".md")
-	if err != nil {
-		return nil, fmt.Errorf("managed rules %sを読めません: %w", dir, err)
-	}
-	return files, nil
-}
-
-func expandFiles(paths []string, suffix string) ([]string, error) {
-	var files []string
-	for _, basePath := range paths {
-		info, err := os.Stat(basePath)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return nil, fmt.Errorf("%sを確認できません: %w", basePath, err)
-		}
-		if info.IsDir() {
-			entries, err := os.ReadDir(basePath)
-			if err != nil {
-				return nil, fmt.Errorf("%sを読めません: %w", basePath, err)
-			}
-			for _, entry := range entries {
-				if entry.IsDir() || !strings.HasSuffix(entry.Name(), suffix) {
-					continue
-				}
-				files = append(files, filepath.Join(basePath, entry.Name()))
-			}
-		} else if strings.HasSuffix(basePath, suffix) {
-			files = append(files, basePath)
-		}
-	}
-	return files, nil
 }
 
 func promptFileName(role state.SessionRole) string {

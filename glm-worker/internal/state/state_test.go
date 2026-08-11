@@ -239,19 +239,84 @@ func TestIsolationPolicyRoundTripAndDefaultEmpty(t *testing.T) {
 	}
 }
 
-func TestResetRoleSessionClearsIDAndReady(t *testing.T) {
+func TestResetSessionsForPolicyIsNoOpWhenCurrent(t *testing.T) {
 	st := &StateStore{dir: t.TempDir()}
-	if _, _, err := st.SessionID(WorkerRole); err != nil {
+	if err := st.Write("worker.id", "worker-1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.MarkReady(WorkerRole); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.ResetRoleSession(WorkerRole); err != nil {
+	if err := st.Write("reviewer.id", "reviewer-1"); err != nil {
 		t.Fatal(err)
 	}
-	if st.Exists("worker.id") || st.Exists("worker.ready") {
-		t.Fatal("ResetRoleSessionがid/readyを残しています")
+	if err := st.MarkReady(ReviewerRole); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetIsolationPolicy("claude-isolation-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.ResetSessionsForPolicy("claude-isolation-1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"worker.id", "worker.ready", "reviewer.id", "reviewer.ready"} {
+		if !st.Exists(name) {
+			t.Fatalf("policy一致時は%sを保持する必要があります", name)
+		}
+	}
+}
+
+func TestResetSessionsForPolicyClearsBothRolesOnStalePolicy(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	if err := st.Write("worker.id", "worker-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkReady(WorkerRole); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Write("reviewer.id", "reviewer-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkReady(ReviewerRole); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetIsolationPolicy("claude-isolation-stale"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.ResetSessionsForPolicy("claude-isolation-1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"worker.id", "worker.ready", "reviewer.id", "reviewer.ready"} {
+		if st.Exists(name) {
+			t.Fatalf("policy不一致時は%sを破棄する必要があります", name)
+		}
+	}
+}
+
+func TestResetSessionsForPolicyClearsBothRolesOnMissingMarker(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	if err := st.Write("worker.id", "worker-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkReady(WorkerRole); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Write("reviewer.id", "reviewer-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkReady(ReviewerRole); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.ResetSessionsForPolicy("claude-isolation-1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"worker.id", "worker.ready", "reviewer.id", "reviewer.ready"} {
+		if st.Exists(name) {
+			t.Fatalf("marker欠落時は%sを破棄する必要があります", name)
+		}
 	}
 }
 

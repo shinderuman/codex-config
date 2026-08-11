@@ -194,10 +194,18 @@ func (s *StateStore) RemoveUnreadySession(role SessionRole) error {
 	return s.Remove(string(role) + ".id")
 }
 
-// ResetRoleSessionは役割別sessionを採番し直せるようidとreadyを削除する。
-// 現行の隔離policyと一致しない旧sessionのresumeを拒否して新sessionへ切り替える際に使う。
-func (s *StateStore) ResetRoleSession(role SessionRole) error {
-	return s.Remove(string(role)+".id", string(role)+".ready")
+// ResetSessionsForPolicyは現行の隔離policyと一致しないとき両roleのsessionを破棄する。
+// isolation.policyはtask共通のため、policy不一致時は呼出しroleによらずworker/reviewer
+// 両方のidとreadyを破棄する。呼出しroleだけresetすると成功時にtask共通markerが更新され、
+// 残るもう一方の旧sessionが次回marker一致としてresumeされてしまう。
+func (s *StateStore) ResetSessionsForPolicy(currentPolicy string) error {
+	if s.IsolationPolicy() == currentPolicy {
+		return nil
+	}
+	return s.Remove(
+		"worker.id", "worker.ready",
+		"reviewer.id", "reviewer.ready",
+	)
 }
 
 // IsolationPolicyはsession採番時に記録したClaude起動の隔離policy versionを返す。
