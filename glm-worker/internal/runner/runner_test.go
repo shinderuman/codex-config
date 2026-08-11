@@ -752,8 +752,11 @@ func TestIsolationMigrationClearsNonCallingReadyRole(t *testing.T) {
 	}
 }
 
-// 失敗時にmarkerを更新すると旧sessionがstaleのまま次回resumeされてしまうため、失敗時はpolicyを更新しない。
-func TestIsolationMigrationFailureKeepsStalePolicyForRetry(t *testing.T) {
+// isolation.policyは成功markerではなくsession IDの起動policyを表すため、Claude実行前に
+// 永続化される。通常失敗時はpolicyがcurrentになったままでも、worker.readyが付かないため
+// 失敗sessionが--resumeされることはない。失敗session idの破棄はworkflow層の
+// RemoveUnreadySessionが担い、runner層は永続化したidを保持する。
+func TestIsolationPolicyPersistedBeforeExecutionOnFailure(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixtureはUnix系環境向け")
 	}
@@ -790,8 +793,8 @@ func TestIsolationMigrationFailureKeepsStalePolicyForRetry(t *testing.T) {
 		filepath.Join(t.TempDir(), "first.log")); err == nil {
 		t.Fatal("1回目は失敗する必要があります")
 	}
-	if policy := st.IsolationPolicy(); policy == isolationPolicyVersion {
-		t.Fatalf("失敗時にpolicyを更新してはいけません: %q", policy)
+	if policy := st.IsolationPolicy(); policy != isolationPolicyVersion {
+		t.Fatalf("実行前永続化により失敗時もpolicy = %qが期待: %q", isolationPolicyVersion, policy)
 	}
 	if st.Exists("worker.ready") {
 		t.Fatal("失敗時にworker.readyを書いてはいけません")
@@ -808,16 +811,179 @@ func TestIsolationMigrationFailureKeepsStalePolicyForRetry(t *testing.T) {
 
 	retryArgs := readLines(t, filepath.Join(argsDir, "run-2"))
 	if containsArgument(retryArgs, "--resume") {
-		t.Fatalf("失敗sessionをresumeしました: %#v", retryArgs)
-	}
-	if containsArgument(retryArgs, failedSessionID) {
-		t.Fatalf("失敗時のsession idを再利用しました: %#v", retryArgs)
+		t.Fatalf("未readyの失敗sessionをresumeしました: %#v", retryArgs)
 	}
 	if !containsArgument(retryArgs, "--session-id") {
-		t.Fatalf("再採番がありません: %#v", retryArgs)
+		t.Fatalf("session id指定がありません: %#v", retryArgs)
+	}
+	if !containsArgument(retryArgs, failedSessionID) {
+		t.Fatalf("runner層は失敗session idを保持する必要があります(runner破棄はworkflow層): %#v", retryArgs)
 	}
 	if policy := st.IsolationPolicy(); policy != isolationPolicyVersion {
 		t.Fatalf("成功後policy = %q, want %q", policy, isolationPolicyVersion)
+	}
+}
+
+// newFiveHourLimitResumeFixtureはZ.ai 5h上限で中断したsessionが次回Runで同一session IDへ
+// --resumeされる回帰を検証する。1回目のfake claudeは5h上限logを出力してexit 1し、
+// 2回目は成功JSONを返す。callArgsは呼出しごとに連番ファイルへ引数を記録する。
+// workflow.runModelは5h上限検出時にMarkReady(role)でsessionを保存するため、テストも
+// 1回目のRun後にMarkReadyを呼び出して本物の制御フローを再現する。
+func newFiveHourLimitResumeFixture(t *testing.T, role state.SessionRole) (*ClaudeRunner, *state.StateStore, string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixtureはUnix系環境向け")
+	}
+	promptDir := t.TempDir()
+	for _, name := range []string{"WORKER.md", "REVIEWER.md"} {
+		if err := os.WriteFile(filepath.Join(promptDir, name), []byte("system"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	argsDir := filepath.Join(t.TempDir(), "args")
+	if err := os.MkdirAll(argsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	commandPath := filepath.Join(t.TempDir(), "fake-claude")
+	// 1回目: 5h上限logを出力してexit 1。2回目: 成功JSON。
+	commandScript := "#!/bin/sh\nn=$(cat \"$GLM_ARGS_DIR/count\" 2>/dev/null || echo 0)\nn=$((n+1))\nprintf '%s\\n' \"$n\" >\"$GLM_ARGS_DIR/count\"\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_DIR/run-$n\"\nif [ \"$n\" -eq 1 ]; then\n  printf '%s\\n' 'API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour. Your limit will reset at 2026-07-22 14:06:34]'\n  exit 1\nfi\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
+	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GLM_ARGS_DIR", argsDir)
+
+	st := newTestStateStore(t)
+	if _, err := st.StartNewTask(); err != nil {
+		t.Fatal(err)
+	}
+	r := NewClaudeRunner(config.AppConfig{
+		RepoRoot:        t.TempDir(),
+		RepoShort:       "testrepo1234",
+		PromptDir:       promptDir,
+		ClaudeBin:       commandPath,
+		ClaudeConfigDir: filepath.Join(t.TempDir(), "claude-home"),
+		EnvAllowlist:    []string{"GLM_ARGS_DIR"},
+	}, st)
+	if role == state.ReviewerRole {
+		// reviewer実行にはworkerの完了packet(last-review等)は不要だが、reviewer modelを設定。
+		r.config.ReviewerModel = "reviewer-model"
+	}
+	return r, st, argsDir
+}
+
+// 初回worker呼出しがZ.ai 5h上限へ到達しても、workflowのMarkReady後に同一session IDへ
+// --resumeされる回帰。policy未書込のままresumeされてResetSessionsForPolicyにsession IDを
+// 破棄される元のバグを防ぐ。
+func TestFirstWorkerRunFiveHourLimitResumesSameSession(t *testing.T) {
+	r, st, argsDir := newFiveHourLimitResumeFixture(t, state.WorkerRole)
+
+	if _, err := r.Run(state.WorkerRole, "worker-model", false, "high", "first prompt",
+		filepath.Join(t.TempDir(), "first.log")); err == nil {
+		t.Fatal("5h上限はerrorを返す必要があります")
+	}
+	// workflow.runModelは5h上限検出時にsessionをready保存する。
+	if err := st.MarkReady(state.WorkerRole); err != nil {
+		t.Fatal(err)
+	}
+	if policy := st.IsolationPolicy(); policy != isolationPolicyVersion {
+		t.Fatalf("5h上限後policy = %q, want %q (実行前永続化で破棄を防ぐ)", policy, isolationPolicyVersion)
+	}
+
+	firstArgs := readLines(t, filepath.Join(argsDir, "run-1"))
+	firstSessionID := argumentAfter(firstArgs, "--session-id")
+	if firstSessionID == "" || containsArgument(firstArgs, "--resume") {
+		t.Fatalf("初回は新session採番が必要: %#v", firstArgs)
+	}
+
+	if _, err := r.Run(state.WorkerRole, "worker-model", false, "high", "resume prompt",
+		filepath.Join(t.TempDir(), "resume.log")); err != nil {
+		t.Fatal(err)
+	}
+	resumeArgs := readLines(t, filepath.Join(argsDir, "run-2"))
+	if !containsArgument(resumeArgs, "--resume") || containsArgument(resumeArgs, "--session-id") {
+		t.Fatalf("resume呼出しは--resumeで同一sessionへ戻る必要があります: %#v", resumeArgs)
+	}
+	if got := argumentAfter(resumeArgs, "--resume"); got != firstSessionID {
+		t.Fatalf("resume session ID = %q, want %q (同一sessionへ継続)", got, firstSessionID)
+	}
+}
+
+// reviewer roleでもworkerと同様に5h上限後に同一session IDへ--resumeされる。
+func TestFirstReviewerRunFiveHourLimitResumesSameSession(t *testing.T) {
+	r, st, argsDir := newFiveHourLimitResumeFixture(t, state.ReviewerRole)
+
+	if _, err := r.Run(state.ReviewerRole, "reviewer-model", true, "high", "first review prompt",
+		filepath.Join(t.TempDir(), "first.log")); err == nil {
+		t.Fatal("5h上限はerrorを返す必要があります")
+	}
+	if err := st.MarkReady(state.ReviewerRole); err != nil {
+		t.Fatal(err)
+	}
+	if policy := st.IsolationPolicy(); policy != isolationPolicyVersion {
+		t.Fatalf("5h上限後policy = %q, want %q", policy, isolationPolicyVersion)
+	}
+
+	firstArgs := readLines(t, filepath.Join(argsDir, "run-1"))
+	firstSessionID := argumentAfter(firstArgs, "--session-id")
+	if firstSessionID == "" || containsArgument(firstArgs, "--resume") {
+		t.Fatalf("初回は新session採番が必要: %#v", firstArgs)
+	}
+
+	if _, err := r.Run(state.ReviewerRole, "reviewer-model", true, "high", "resume review prompt",
+		filepath.Join(t.TempDir(), "resume.log")); err != nil {
+		t.Fatal(err)
+	}
+	resumeArgs := readLines(t, filepath.Join(argsDir, "run-2"))
+	if !containsArgument(resumeArgs, "--resume") || containsArgument(resumeArgs, "--session-id") {
+		t.Fatalf("resume呼出しは--resumeで同一sessionへ戻る必要があります: %#v", resumeArgs)
+	}
+	if got := argumentAfter(resumeArgs, "--resume"); got != firstSessionID {
+		t.Fatalf("resume session ID = %q, want %q", got, firstSessionID)
+	}
+}
+
+// isolation.policy永続化に失敗した場合はClaudeを実行せずerrorを返す。
+// session id永続化後にpolicy永続化だけが失敗する境界を、isolation.policy pathへ
+// directoryを置くことで再現する。
+func TestIsolationPolicyWriteFailureAbortsBeforeClaude(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixtureはUnix系環境向け")
+	}
+	promptDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(promptDir, "WORKER.md"), []byte("system"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	invokedPath := filepath.Join(t.TempDir(), "claude-invoked")
+	commandPath := filepath.Join(t.TempDir(), "fake-claude")
+	// Claudeが呼ばれたらmarker fileを書く。policy永続化失敗時は呼ばれないはず。
+	commandScript := "#!/bin/sh\nprintf '1' >\"" + invokedPath + "\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
+	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	st := newTestStateStore(t)
+	if _, err := st.StartNewTask(); err != nil {
+		t.Fatal(err)
+	}
+	// isolation.policy pathへdirectoryを置き、SetIsolationPolicyのrenameだけを失敗させる。
+	// SessionIDのworker.id書き込みは別pathなので成功し、policy永続化のみ境界を再現する。
+	if err := os.MkdirAll(st.Path("isolation.policy"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	r := NewClaudeRunner(config.AppConfig{
+		RepoRoot:        t.TempDir(),
+		PromptDir:       promptDir,
+		ClaudeBin:       commandPath,
+		ClaudeConfigDir: filepath.Join(t.TempDir(), "claude-home"),
+	}, st)
+
+	_, err := r.Run(state.WorkerRole, "worker-model", false, "high", "prompt",
+		filepath.Join(t.TempDir(), "out.log"))
+	if err == nil {
+		t.Fatal("policy永続化失敗時はerrorを返す必要があります")
+	}
+	if _, statErr := os.Stat(invokedPath); statErr == nil {
+		t.Fatal("policy永続化失敗時にClaudeを実行しました")
 	}
 }
 

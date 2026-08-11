@@ -88,6 +88,8 @@ func NewClaudeRunner(cfg config.AppConfig, st *state.StateStore) *ClaudeRunner {
 // （認証・権限等の組織policy）だけは遮断不可能な残余として残る。現行の隔離policyと
 // 一致しない旧sessionは暗黙入力が混入しているためresumeせず新sessionへ切り替える。
 // isolation.policyはtask共通なのでpolicy不一致時はworker/reviewer両roleのsessionを破棄する。
+// isolation.policyは成功markerではなくsession IDの起動policyを表すため、SessionID確定時点
+// (Claude実行前)に永続化し、5h上限中断後に同一sessionへresume可能な状態を保つ。
 func (r *ClaudeRunner) Run(
 	role state.SessionRole,
 	model string,
@@ -111,6 +113,15 @@ func (r *ClaudeRunner) Run(
 		return RunResult{}, err
 	}
 	result := RunResult{SessionID: sessionID, Resumed: ready}
+	// isolation.policyはAPI成功markerではなく「session IDをどの隔離policyで起動したか」を
+	// 表す。SessionIDが現行policy配下のsession起動を確定した時点(Claude実行前)に永続化し、
+	// session id永続化とpolicy永続化の間にwindowを作らない。これにより初回実行がZ.ai 5h上限で
+	// 中断してもpolicy未書込のままworkflowがsessionをready保存し、次回resumeのpolicy不一致で
+	// ResetSessionsForPolicyにsession IDを破棄される回帰を防ぐ。永続化失敗時はClaudeを実行せず
+	// errorを返す。
+	if err := r.state.SetIsolationPolicy(isolationPolicyVersion); err != nil {
+		return result, err
+	}
 
 	systemFile := filepath.Join(r.config.PromptDir, promptFileName(role))
 	systemPrompt, err := os.ReadFile(systemFile)
@@ -227,9 +238,6 @@ func (r *ClaudeRunner) Run(
 	}
 
 	if err := r.state.MarkReady(role); err != nil {
-		return result, err
-	}
-	if err := r.state.SetIsolationPolicy(isolationPolicyVersion); err != nil {
 		return result, err
 	}
 	return result, nil
