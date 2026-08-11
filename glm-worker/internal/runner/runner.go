@@ -131,7 +131,7 @@ func (r *ClaudeRunner) Run(
 	if err != nil {
 		return result, err
 	}
-	settingEnv, err := loadSettingEnv(r.config.ClaudeConfigDir)
+	settingEnv, envDeletes, err := loadSettingEnv(r.config.ClaudeConfigDir, r.config.ClaudeSettingsOverride)
 	if err != nil {
 		return result, err
 	}
@@ -194,7 +194,7 @@ func (r *ClaudeRunner) Run(
 		"CLAUDE_CONFIG_DIR":                r.config.ClaudeConfigDir,
 		"CLAUDE_CODE_AUTO_COMPACT_WINDOW":  "500000",
 		"CLAUDE_CODE_ALWAYS_ENABLE_EFFORT": "1",
-	})
+	}, envDeletes)
 
 	runErr := command.Run()
 	outputCloseErr := output.Close()
@@ -322,32 +322,44 @@ var essentialSettingEnvKeys = []string{
 }
 
 // loadSettingEnvはsettings.jsonのenv blockからessentialSettingEnvKeysに一致する
-// 値だけを返す。ファイル不在時は空map(Z.ai未設定ならclaudeがauth errorを返す)。
-func loadSettingEnv(claudeConfigDir string) (map[string]string, error) {
+// 値だけを取り出し、続けて端末local overrideのset/deleteを再適用する。
+// 戻り値のdeletesはoverrideのnull key(tombstone)で、buildChildEnvへ渡して
+// 親envのOS必須・extraAllow経由での再流入も遮断する。
+// overrideで明示setした任意keyはessential key以外でも子envへ許可する。
+func loadSettingEnv(claudeConfigDir string, overridePath string) (map[string]string, []string, error) {
 	configDir, err := resolveClaudeConfigDir(claudeConfigDir)
 	if err != nil {
-		return nil, err
-	}
-	data, err := os.ReadFile(filepath.Join(configDir, "settings.json"))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return map[string]string{}, nil
-		}
-		return nil, fmt.Errorf("Claude settings.jsonを読み込めません: %w", err)
-	}
-	var parsed struct {
-		Env map[string]string `json:"env"`
-	}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		return nil, fmt.Errorf("Claude settings.jsonを解析できません: %w", err)
+		return nil, nil, err
 	}
 	result := make(map[string]string)
-	for _, key := range essentialSettingEnvKeys {
-		if value, ok := parsed.Env[key]; ok && value != "" {
-			result[key] = value
+	data, err := os.ReadFile(filepath.Join(configDir, "settings.json"))
+	if err == nil {
+		var parsed struct {
+			Env map[string]string `json:"env"`
 		}
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			return nil, nil, fmt.Errorf("Claude settings.jsonを解析できません: %w", err)
+		}
+		for _, key := range essentialSettingEnvKeys {
+			if value, ok := parsed.Env[key]; ok && value != "" {
+				result[key] = value
+			}
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, nil, fmt.Errorf("Claude settings.jsonを読み込めません: %w", err)
 	}
-	return result, nil
+
+	override, err := parseClaudeEnvOverride(overridePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("env override: %w", err)
+	}
+	for _, key := range override.deletes {
+		delete(result, key)
+	}
+	for key, value := range override.sets {
+		result[key] = value
+	}
+	return result, override.deletes, nil
 }
 
 // osEssentialEnvKeysは親process環境から受け継ぐ実行必須key。
@@ -358,15 +370,20 @@ var osEssentialEnvKeys = []string{
 }
 
 // buildChildEnvは隔離されたchild process環境を構築する。
-// OS必須keyとextraAllowだけを親envから取り出し、settingEnv(Z.ai)とadditionsで
-// 上書き注入する。暗黙の入力経路となるenvは親から引き継がない。
-func buildChildEnv(extraAllow []string, settingEnv, additions map[string]string) []string {
+// OS必須keyとextraAllowだけを親envから取り出すが、deletes(overrideのtombstone)は
+// この経路からも除外し親envへの再流入を防ぐ。続けてsettingEnvとadditionsで上書き注入する。
+// 暗黙の入力経路となるenvは親から引き継がない。
+func buildChildEnv(extraAllow []string, settingEnv, additions map[string]string, deletes []string) []string {
 	allowed := make(map[string]struct{}, len(osEssentialEnvKeys)+len(extraAllow))
 	for _, key := range osEssentialEnvKeys {
 		allowed[key] = struct{}{}
 	}
 	for _, key := range extraAllow {
 		allowed[key] = struct{}{}
+	}
+	denied := make(map[string]struct{}, len(deletes))
+	for _, key := range deletes {
+		denied[key] = struct{}{}
 	}
 
 	child := make(map[string]string)
@@ -375,9 +392,13 @@ func buildChildEnv(extraAllow []string, settingEnv, additions map[string]string)
 		if !ok {
 			continue
 		}
-		if _, ok := allowed[key]; ok {
-			child[key] = value
+		if _, ok := allowed[key]; !ok {
+			continue
 		}
+		if _, deny := denied[key]; deny {
+			continue
+		}
+		child[key] = value
 	}
 	for key, value := range settingEnv {
 		child[key] = value

@@ -22,6 +22,10 @@ type AppConfig struct {
 	// ClaudeConfigDirはClaude CLIのconfig dir(CLAUDE_CONFIG_DIR, 既定~/.claude)。
 	// user global memory(<dir>/CLAUDE.md, <dir>/rules/**)の除外path解決に使う。
 	ClaudeConfigDir string
+	// ClaudeSettingsOverrideはGit管理外の端末local override JSONのpath。
+	// 既定で ${XDG_CONFIG_HOME:-$HOME/.config}/codex-config/claude-settings.local.json。
+	// install.shと同じpath規則・JSON意味論でsettings.json envへset/deleteを適用する。
+	ClaudeSettingsOverride string
 	// EnvAllowlistは親process環境からworkerへ追加で受け渡すenv key。
 	// OS必須・Z.ai必須keyは常に渡り、それ以外はここへ指定したkeyだけ追加される。
 	EnvAllowlist          []string
@@ -51,6 +55,7 @@ func Load() (AppConfig, error) {
 	stateHome := envOrDefault("GLM_WORKER_HOME", filepath.Join(home, ".glm-worker"))
 	promptDir := envOrDefault("GLM_WORKER_PROMPT_DIR", filepath.Join(home, ".codex", "glm-worker", "prompts"))
 	claudeConfigDir := envOrDefault("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	claudeSettingsOverride := resolveClaudeSettingsOverride(home)
 	envAllowlist := splitEnvList(os.Getenv("GLM_WORKER_ENV_ALLOWLIST"))
 	rounds, err := intEnv("GLM_WORKER_MAX_AUTO_FIX_ROUNDS", 2)
 	if err != nil {
@@ -69,6 +74,7 @@ func Load() (AppConfig, error) {
 		PromptDir:             promptDir,
 		ClaudeBin:             envOrDefault("GLM_WORKER_CLAUDE_BIN", "claude"),
 		ClaudeConfigDir:       claudeConfigDir,
+		ClaudeSettingsOverride: claudeSettingsOverride,
 		EnvAllowlist:          envAllowlist,
 		WorkerModel:           envOrDefault("GLM_WORKER_WORKER_MODEL", "opus"),
 		ReviewerModel:         envOrDefault("GLM_WORKER_REVIEWER_MODEL", "haiku"),
@@ -106,6 +112,20 @@ func envOrDefault(name string, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// resolveClaudeSettingsOverrideはinstall.shのmerge_claude_settings内の
+// override_path解決(CODEX_CONFIG_CLAUDE_SETTINGS_OVERRIDE優先、未設定時はXDG_CONFIG_HOME配下)
+// と同じ規則でなければならない。
+func resolveClaudeSettingsOverride(home string) string {
+	if value := os.Getenv("CODEX_CONFIG_CLAUDE_SETTINGS_OVERRIDE"); value != "" {
+		return value
+	}
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		base = filepath.Join(home, ".config")
+	}
+	return filepath.Join(base, "codex-config", "claude-settings.local.json")
 }
 
 func splitEnvList(raw string) []string {

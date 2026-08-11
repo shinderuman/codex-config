@@ -302,6 +302,7 @@ func TestBuildChildEnvDropsInjectionChannelsAndKeepsEssentials(t *testing.T) {
 		nil,
 		map[string]string{"ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic"},
 		map[string]string{"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "500000"},
+		nil,
 	)
 	joined := strings.Join(result, "\n")
 	if !strings.Contains(joined, "PATH=/bin:/usr/bin") || !strings.Contains(joined, "HOME=/tmp/child-home") {
@@ -326,6 +327,7 @@ func TestBuildChildEnvHonorsExtraAllowlist(t *testing.T) {
 		[]string{"GOPATH"},
 		nil,
 		nil,
+		nil,
 	)
 	joined := strings.Join(result, "\n")
 	if !strings.Contains(joined, "GOPATH=/custom/go") {
@@ -342,6 +344,7 @@ func TestBuildChildEnvSettingEnvOverridesParent(t *testing.T) {
 	result := buildChildEnv(
 		nil,
 		map[string]string{"ANTHROPIC_AUTH_TOKEN": "settings-token"},
+		nil,
 		nil,
 	)
 	joined := strings.Join(result, "\n")
@@ -510,7 +513,7 @@ func TestLoadSettingEnvExtractsOnlyAllowlistedKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := loadSettingEnv(claudeConfigDir)
+	result, _, err := loadSettingEnv(claudeConfigDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +531,7 @@ func TestLoadSettingEnvExtractsOnlyAllowlistedKeys(t *testing.T) {
 }
 
 func TestLoadSettingEnvToleratesMissingFile(t *testing.T) {
-	result, err := loadSettingEnv(t.TempDir())
+	result, _, err := loadSettingEnv(t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("settings.json不在時は空mapが期待: %v", err)
 	}

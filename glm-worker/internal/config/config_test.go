@@ -240,3 +240,30 @@ func TestLoadLeavesEnvAllowlistNilByDefault(t *testing.T) {
 		t.Fatalf("EnvAllowlist = %#v, want nil", loaded.EnvAllowlist)
 	}
 }
+
+func TestResolveClaudeSettingsOverrideResolution(t *testing.T) {
+	tests := []struct {
+		name string
+		home string
+		env  map[string]string
+		want string
+	}{
+		{name: "default", home: "/h", want: "/h/.config/codex-config/claude-settings.local.json"},
+		{name: "xdg", home: "/h", env: map[string]string{"XDG_CONFIG_HOME": "/xdg"}, want: "/xdg/codex-config/claude-settings.local.json"},
+		{name: "explicit override", home: "/h", env: map[string]string{"CODEX_CONFIG_CLAUDE_SETTINGS_OVERRIDE": "/custom/o.json"}, want: "/custom/o.json"},
+		{name: "explicit overrides xdg", home: "/h", env: map[string]string{"XDG_CONFIG_HOME": "/xdg", "CODEX_CONFIG_CLAUDE_SETTINGS_OVERRIDE": "/c/o.json"}, want: "/c/o.json"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", "")
+			t.Setenv("CODEX_CONFIG_CLAUDE_SETTINGS_OVERRIDE", "")
+			for key, value := range test.env {
+				t.Setenv(key, value)
+			}
+			got := resolveClaudeSettingsOverride(test.home)
+			if got != test.want {
+				t.Fatalf("got %q, want %q", got, test.want)
+			}
+		})
+	}
+}

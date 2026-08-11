@@ -222,12 +222,24 @@ preflight() {
 merge_claude_settings() {
     mkdir -p "$(dirname "$claude_settings")"
 
-    result=$(
-        cd "$repo_root/tools/merge-json"
-        go run . \
-            -target "$claude_settings" \
-            -fragment "$repo_root/claude/settings-managed.json"
-    )
+    override_path="${CODEX_CONFIG_CLAUDE_SETTINGS_OVERRIDE:-${XDG_CONFIG_HOME:-$HOME/.config}/codex-config/claude-settings.local.json}"
+
+    if [ -f "$override_path" ]; then
+        result=$(
+            cd "$repo_root/tools/merge-json"
+            go run . \
+                -target "$claude_settings" \
+                -fragment "$repo_root/claude/settings-managed.json" \
+                -env-override "$override_path"
+        )
+    else
+        result=$(
+            cd "$repo_root/tools/merge-json"
+            go run . \
+                -target "$claude_settings" \
+                -fragment "$repo_root/claude/settings-managed.json"
+        )
+    fi
 
     printf 'claude settings: %s\n' "$result"
 }

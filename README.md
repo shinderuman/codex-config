@@ -42,6 +42,46 @@ git pull --ff-only
 ./install.sh
 ```
 
+## Claude接続先の端末local override
+
+端末ごとにClaude Codeの接続先・model設定だけをoverrideできる。同一repo/install.sh/Go sourceのままで、業務PCなどでAnthropic Claude Teamへ切替える用途を想定する。overrideはGit管理外で、installer共通動作・既存local fileには影響しない。
+
+### 配置場所と形式
+
+既定のpath:
+
+```text
+${XDG_CONFIG_HOME:-$HOME/.config}/codex-config/claude-settings.local.json
+```
+
+`CODEX_CONFIG_CLAUDE_SETTINGS_OVERRIDE`でpathを変更できる。
+
+形式はClaude settingsの`env`だけを対象としたJSON:
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": null,
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": null,
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": null,
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": null
+  }
+}
+```
+
+- string値は追加・上書き
+- `null`はunset(targetのenvから実際に削除し、親processや`~/.claude/settings.json`から再流入させない)
+- 空文字は文字列値扱いでありunsetではない
+- top-levelはobjectのみ、top-level keyは`env`のみ、env値はstringか`null`のみ。`null`(top-level)・`{"env":null}`・空object・`{"env":{}}`以外の壊れたJSON・未対応形式はinstall・runnerともfail closedになる。空objectと`{"env":{}}`は有効な空patch
+
+### 業務PCでのClaude Team切替え例
+
+Z.ai向けの`ANTHROPIC_BASE_URL`・`ANTHROPIC_DEFAULT_*_MODEL`を`null`で削除する。認証はClaude Code自身のOAuth等を使い、本機構はOAuth等の認証情報を読み出し・コピー・上書きしない。glm-workerのmodel alias(`opus`/`haiku`/`sonnet`)はそのままで、`ANTHROPIC_DEFAULT_*_MODEL`の削除によって実モデルへ解決される。
+
+### 運用
+
+overrideを追加・変更・削除したときは、必ず`install.sh`を再実行する。install.shはsettings.jsonと同じdirectory(`~/.claude/`)のGit管理外sidecar `.codex-config-claude-env-state.json` に、overrideが所有する各env keyの適用前baseline(schema version 1)を記録する。各installは、前回stateの全所有keyを元値または不存在へ復元→managed defaultsをdeep merge→今回overrideの全keyのbaselineをsnapshot→set/null patchを適用、の順に実行する。これによりoverrideから外したkeyやoverrideファイル削除後の再installで、managed Z.ai keyはdefault・override追加keyは不存在・上書きやnull削除した既存local keyは元値へ確実に戻る。overrideなしは現行mergeと同じ結果になる。stateは0600・atomic writeでOAuth等の認証情報には触れず、repoやinstaller manifest対象外。壊れたoverride・state・未対応形式はsettings/stateを書き換える前にfail closedする(復旧はsidecar削除で安全に初期化できる)。glm-worker起動時にも同じoverrideを読みchild envへset/deleteを再適用するが、stateは読まない。趣味PCなどoverride不要な端末では本ファイルを作成せず、既定のZ.ai接続を維持する。
+
 ## 構成
 
 ```text

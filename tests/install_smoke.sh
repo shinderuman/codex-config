@@ -98,4 +98,196 @@ fi
 test "$(sed -n '1p' "$failure_case/codex/AGENTS.md")" = 'preflight-sentinel'
 test ! -e "$failure_case/bin/glm-worker"
 
+override_source="$test_root/override-source"
+override_case="$test_root/override-case"
+copy_source "$override_source"
+
+mkdir -p "$override_case/codex/rules" "$override_case/claude" "$override_case/xdg/codex-config"
+printf '%s\n' '{"env":{"ANTHROPIC_BASE_URL":null,"ANTHROPIC_CUSTOM":"set-by-override"}}' \
+    >"$override_case/xdg/codex-config/claude-settings.local.json"
+
+HOME="$override_case/home" \
+CODEX_CONFIG_DIR="$override_case/codex" \
+GLM_WORKER_BIN_DIR="$override_case/bin" \
+GLM_WORKER_HOME="$override_case/glm-home" \
+CLAUDE_SETTINGS_FILE="$override_case/claude/settings.json" \
+XDG_CONFIG_HOME="$override_case/xdg" \
+    "$override_source/install.sh" >/dev/null
+
+grep -Fq '"ANTHROPIC_CUSTOM": "set-by-override"' "$override_case/claude/settings.json"
+if grep -Fq '"ANTHROPIC_BASE_URL"' "$override_case/claude/settings.json"; then
+    printf '%s\n' 'override null should delete ANTHROPIC_BASE_URL' >&2
+    exit 1
+fi
+grep -Fq '"ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2"' "$override_case/claude/settings.json"
+
+cp "$override_case/claude/settings.json" "$override_case/first.json"
+HOME="$override_case/home" \
+CODEX_CONFIG_DIR="$override_case/codex" \
+GLM_WORKER_BIN_DIR="$override_case/bin" \
+GLM_WORKER_HOME="$override_case/glm-home" \
+CLAUDE_SETTINGS_FILE="$override_case/claude/settings.json" \
+XDG_CONFIG_HOME="$override_case/xdg" \
+    "$override_source/install.sh" >/dev/null
+if ! cmp -s "$override_case/first.json" "$override_case/claude/settings.json"; then
+    printf '%s\n' 'override install is not idempotent' >&2
+    exit 1
+fi
+
+override_delete_source="$test_root/override-delete-source"
+override_delete_case="$test_root/override-delete-case"
+copy_source "$override_delete_source"
+mkdir -p "$override_delete_case/claude"
+
+HOME="$override_delete_case/home" \
+CODEX_CONFIG_DIR="$override_delete_case/codex" \
+GLM_WORKER_BIN_DIR="$override_delete_case/bin" \
+GLM_WORKER_HOME="$override_delete_case/glm-home" \
+CLAUDE_SETTINGS_FILE="$override_delete_case/claude/settings.json" \
+XDG_CONFIG_HOME="$override_delete_case/xdg" \
+    "$override_delete_source/install.sh" >/dev/null
+
+grep -Fq '"ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic"' "$override_delete_case/claude/settings.json"
+
+# override削除後に再installでmanaged Z.ai defaultsが復元され、override追加keyは不存在へ戻る
+rm "$override_case/xdg/codex-config/claude-settings.local.json"
+HOME="$override_case/home" \
+CODEX_CONFIG_DIR="$override_case/codex" \
+GLM_WORKER_BIN_DIR="$override_case/bin" \
+GLM_WORKER_HOME="$override_case/glm-home" \
+CLAUDE_SETTINGS_FILE="$override_case/claude/settings.json" \
+XDG_CONFIG_HOME="$override_case/xdg" \
+    "$override_source/install.sh" >/dev/null
+grep -Fq '"ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic"' "$override_case/claude/settings.json"
+if grep -Fq '"ANTHROPIC_CUSTOM"' "$override_case/claude/settings.json"; then
+    printf '%s\n' 'override削除後にoverride追加key ANTHROPIC_CUSTOMが残っています' >&2
+    exit 1
+fi
+
+bad_override_source="$test_root/bad-override-source"
+bad_override_case="$test_root/bad-override-case"
+copy_source "$bad_override_source"
+mkdir -p "$bad_override_case/claude" "$bad_override_case/xdg/codex-config"
+printf '%s\n' '{"env":{"BAD":[1,2]}}' >"$bad_override_case/xdg/codex-config/claude-settings.local.json"
+printf '%s\n' '{"existing":"keep"}' >"$bad_override_case/claude/settings.json"
+cp "$bad_override_case/claude/settings.json" "$bad_override_case/original.json"
+
+if HOME="$bad_override_case/home" \
+    CODEX_CONFIG_DIR="$bad_override_case/codex" \
+    GLM_WORKER_BIN_DIR="$bad_override_case/bin" \
+    GLM_WORKER_HOME="$bad_override_case/glm-home" \
+    CLAUDE_SETTINGS_FILE="$bad_override_case/claude/settings.json" \
+    XDG_CONFIG_HOME="$bad_override_case/xdg" \
+    "$bad_override_source/install.sh" >/dev/null 2>&1; then
+    printf '%s\n' 'malformed override should fail install' >&2
+    exit 1
+fi
+
+if ! cmp -s "$bad_override_case/original.json" "$bad_override_case/claude/settings.json"; then
+    printf '%s\n' 'malformed override must not modify settings.json (fail closed)' >&2
+    exit 1
+fi
+
+# top-level null / env null overrideはinstallをfail closedさせsettings.jsonを書き換えない
+for null_case in 'null' '{"env":null}'; do
+    null_source="$test_root/null-override-source"
+    null_case_dir="$test_root/null-override-case"
+    copy_source "$null_source"
+    mkdir -p "$null_case_dir/claude" "$null_case_dir/xdg/codex-config"
+    printf '%s\n' "$null_case" >"$null_case_dir/xdg/codex-config/claude-settings.local.json"
+    printf '%s\n' '{"existing":"keep"}' >"$null_case_dir/claude/settings.json"
+    cp "$null_case_dir/claude/settings.json" "$null_case_dir/original.json"
+
+    if HOME="$null_case_dir/home" \
+        CODEX_CONFIG_DIR="$null_case_dir/codex" \
+        GLM_WORKER_BIN_DIR="$null_case_dir/bin" \
+        GLM_WORKER_HOME="$null_case_dir/glm-home" \
+        CLAUDE_SETTINGS_FILE="$null_case_dir/claude/settings.json" \
+        XDG_CONFIG_HOME="$null_case_dir/xdg" \
+        "$null_source/install.sh" >/dev/null 2>&1; then
+        printf '%s\n' "null override ($null_case) should fail install" >&2
+        exit 1
+    fi
+
+    if ! cmp -s "$null_case_dir/original.json" "$null_case_dir/claude/settings.json"; then
+        printf '%s\n' "null override ($null_case) must not modify settings.json" >&2
+        exit 1
+    fi
+done
+
+# 既存local keyの上書き/null削除をoverride解除で元値へ復元するinstaller統合確認
+restore_source="$test_root/restore-source"
+restore_case="$test_root/restore-case"
+copy_source "$restore_source"
+mkdir -p "$restore_case/claude" "$restore_case/xdg/codex-config"
+printf '%s\n' '{"env":{"LOCAL_OVERWRITE":"orig","LOCAL_DELETE":"orig"}}' >"$restore_case/claude/settings.json"
+printf '%s\n' '{"env":{"LOCAL_OVERWRITE":"new","LOCAL_DELETE":null}}' \
+    >"$restore_case/xdg/codex-config/claude-settings.local.json"
+
+HOME="$restore_case/home" \
+CODEX_CONFIG_DIR="$restore_case/codex" \
+GLM_WORKER_BIN_DIR="$restore_case/bin" \
+GLM_WORKER_HOME="$restore_case/glm-home" \
+CLAUDE_SETTINGS_FILE="$restore_case/claude/settings.json" \
+XDG_CONFIG_HOME="$restore_case/xdg" \
+    "$restore_source/install.sh" >/dev/null
+grep -Fq '"LOCAL_OVERWRITE": "new"' "$restore_case/claude/settings.json"
+if grep -Fq '"LOCAL_DELETE"' "$restore_case/claude/settings.json"; then
+    printf '%s\n' 'null override must delete LOCAL_DELETE' >&2
+    exit 1
+fi
+
+rm "$restore_case/xdg/codex-config/claude-settings.local.json"
+HOME="$restore_case/home" \
+CODEX_CONFIG_DIR="$restore_case/codex" \
+GLM_WORKER_BIN_DIR="$restore_case/bin" \
+GLM_WORKER_HOME="$restore_case/glm-home" \
+CLAUDE_SETTINGS_FILE="$restore_case/claude/settings.json" \
+XDG_CONFIG_HOME="$restore_case/xdg" \
+    "$restore_source/install.sh" >/dev/null
+grep -Fq '"LOCAL_OVERWRITE": "orig"' "$restore_case/claude/settings.json"
+grep -Fq '"LOCAL_DELETE": "orig"' "$restore_case/claude/settings.json"
+
+# 壊れたstate sidecarはinstallをfail closedさせtarget/stateとも書き換えない
+broken_state_source="$test_root/broken-state-source"
+broken_state_case="$test_root/broken-state-case"
+copy_source "$broken_state_source"
+mkdir -p "$broken_state_case/claude" "$broken_state_case/xdg/codex-config"
+printf '%s\n' '{"env":{"EXISTING":"keep"}}' >"$broken_state_case/claude/settings.json"
+printf '%s\n' '{"env":{"EXTRA":"set"}}' \
+    >"$broken_state_case/xdg/codex-config/claude-settings.local.json"
+
+HOME="$broken_state_case/home" \
+CODEX_CONFIG_DIR="$broken_state_case/codex" \
+GLM_WORKER_BIN_DIR="$broken_state_case/bin" \
+GLM_WORKER_HOME="$broken_state_case/glm-home" \
+CLAUDE_SETTINGS_FILE="$broken_state_case/claude/settings.json" \
+XDG_CONFIG_HOME="$broken_state_case/xdg" \
+    "$broken_state_source/install.sh" >/dev/null
+
+state_file="$broken_state_case/claude/.codex-config-claude-env-state.json"
+test -f "$state_file"
+printf '%s\n' '{broken state' >"$state_file"
+cp "$broken_state_case/claude/settings.json" "$broken_state_case/settings-before.json"
+cp "$state_file" "$broken_state_case/state-before.json"
+
+if HOME="$broken_state_case/home" \
+    CODEX_CONFIG_DIR="$broken_state_case/codex" \
+    GLM_WORKER_BIN_DIR="$broken_state_case/bin" \
+    GLM_WORKER_HOME="$broken_state_case/glm-home" \
+    CLAUDE_SETTINGS_FILE="$broken_state_case/claude/settings.json" \
+    XDG_CONFIG_HOME="$broken_state_case/xdg" \
+    "$broken_state_source/install.sh" >/dev/null 2>&1; then
+    printf '%s\n' 'broken state should fail install' >&2
+    exit 1
+fi
+if ! cmp -s "$broken_state_case/settings-before.json" "$broken_state_case/claude/settings.json"; then
+    printf '%s\n' 'broken state must not modify settings.json' >&2
+    exit 1
+fi
+if ! cmp -s "$broken_state_case/state-before.json" "$state_file"; then
+    printf '%s\n' 'broken state must not modify state sidecar' >&2
+    exit 1
+fi
+
 printf '%s\n' 'install smoke: PASS'
