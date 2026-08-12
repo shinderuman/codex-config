@@ -125,6 +125,9 @@ func newWorkflowT(t *testing.T, st *state.StateStore, r *scriptedRunner) *Workfl
 	w.captureSnapshot = func(string) (state.GitSnapshot, error) {
 		return fixedSnapshot, nil
 	}
+	w.collectChangedPaths = func(string, string) ([]string, error) {
+		return nil, nil
+	}
 	return w
 }
 

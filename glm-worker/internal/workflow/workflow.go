@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/config"
@@ -22,21 +23,23 @@ type ModelRunner interface {
 }
 
 type Workflow struct {
-	config          config.AppConfig
-	state           *state.StateStore
-	runner          ModelRunner
-	output          io.Writer
-	temp            string
-	captureSnapshot func(repoRoot string) (state.GitSnapshot, error)
+	config              config.AppConfig
+	state               *state.StateStore
+	runner              ModelRunner
+	output              io.Writer
+	temp                string
+	captureSnapshot     func(repoRoot string) (state.GitSnapshot, error)
+	collectChangedPaths func(repoRoot, baselineHead string) ([]string, error)
 }
 
 func NewWorkflow(cfg config.AppConfig, st *state.StateStore, r ModelRunner, output io.Writer) *Workflow {
 	return &Workflow{
-		config:          cfg,
-		state:           st,
-		runner:          r,
-		output:          output,
-		captureSnapshot: state.CaptureGitSnapshot,
+		config:              cfg,
+		state:               st,
+		runner:              r,
+		output:              output,
+		captureSnapshot:     state.CaptureGitSnapshot,
+		collectChangedPaths: collectChangedPaths,
 	}
 }
 
@@ -236,12 +239,7 @@ func (w *Workflow) ExecuteResume() error {
 					checkpoint.AutoFixes,
 				)
 			}
-			highRiskFloor := reviewNeedsHighRiskFloor(
-				workerPacket,
-				checkpoint.AutoFixes,
-				w.state.Exists("last-decision"),
-				w.state.Exists("last-review"),
-			)
+			highRiskFloor := w.resolveReviewResumeRisk(workerPacket, checkpoint).high
 			reviewPacket, err := w.enforceRiskFloor(
 				checkpoint.Request,
 				workerPacket,
@@ -323,7 +321,7 @@ func (w *Workflow) reviewUntilStable(
 
 	decision := w.state.ReadOr("last-decision", "none")
 	hasDecision := w.state.Exists("last-decision")
-	highRiskFloor := reviewNeedsHighRiskFloor(workerPacket, autoFixes, hasDecision, w.state.Exists("last-review"))
+	risk := w.computeEffectiveRisk(workerPacket, autoFixes, hasDecision, w.state.Exists("last-review"))
 	prompt := reviewerPrompt(
 		request,
 		decision,
@@ -332,19 +330,21 @@ func (w *Workflow) reviewUntilStable(
 		w.state.BaselineDescription(),
 	)
 	checkpoint := state.ResumeCheckpoint{
-		Stage:          state.ResumeStageReview,
-		Phase:          fmt.Sprintf("reviewer-%d", reviewNumber),
-		Role:           state.ReviewerRole,
-		Model:          w.reviewerModel(workerPacket, autoFixes, hasDecision, w.state.Exists("last-review")),
-		ReadOnly:       true,
-		Effort:         w.config.RoutineEffort,
-		Prompt:         prompt,
-		OriginalPrompt: prompt,
-		Request:        request,
-		Decision:       decision,
-		WorkerPacket:   append([]string(nil), workerPacket.Lines...),
-		ReviewNumber:   reviewNumber,
-		AutoFixes:      autoFixes,
+		Stage:               state.ResumeStageReview,
+		Phase:               fmt.Sprintf("reviewer-%d", reviewNumber),
+		Role:                state.ReviewerRole,
+		Model:               w.reviewerModel(risk),
+		ReadOnly:            true,
+		Effort:              w.config.RoutineEffort,
+		Prompt:              prompt,
+		OriginalPrompt:      prompt,
+		Request:             request,
+		Decision:            decision,
+		WorkerPacket:        append([]string(nil), workerPacket.Lines...),
+		ReviewNumber:        reviewNumber,
+		AutoFixes:           autoFixes,
+		EffectiveRisk:       riskLabel(risk.high),
+		EffectiveRiskSource: risk.source,
 	}
 
 	if stopped, err := w.verifyReviewStartSnapshot(); err != nil {
@@ -363,7 +363,7 @@ func (w *Workflow) reviewUntilStable(
 		reviewNumber,
 		autoFixes,
 		decision,
-		highRiskFloor,
+		risk.high,
 		reviewPacket,
 	)
 	if err != nil {
@@ -450,8 +450,68 @@ func reviewNeedsHighRiskFloor(workerPacket packet.Packet, autoFixes int, hasDeci
 	return workerPacket.Risk() == "HIGH" || autoFixes > 0 || hasDecision || hasPriorReview
 }
 
-func (w *Workflow) reviewerModel(workerPacket packet.Packet, autoFixes int, hasDecision bool, hasPriorReview bool) string {
-	if reviewNeedsHighRiskFloor(workerPacket, autoFixes, hasDecision, hasPriorReview) {
+// effectiveRiskはworker原文risk・既存floor信号(auto-fix/decision/prior-review)・自己保護を統合したwrapperの実効risk。
+// workerのLOW自己申告を実際の変更対象でHIGHへ昇格できる。
+type effectiveRisk struct {
+	high   bool
+	source string
+}
+
+func riskLabel(high bool) string {
+	if high {
+		return "HIGH"
+	}
+	return "LOW"
+}
+
+func (w *Workflow) computeEffectiveRisk(workerPacket packet.Packet, autoFixes int, hasDecision bool, hasPriorReview bool) effectiveRisk {
+	sp := w.selfProtectionNow()
+	if !reviewNeedsHighRiskFloor(workerPacket, autoFixes, hasDecision, hasPriorReview) && !sp.High {
+		return effectiveRisk{high: false}
+	}
+	var sources []string
+	if workerPacket.Risk() == "HIGH" {
+		sources = append(sources, "worker-declared")
+	}
+	if autoFixes > 0 {
+		sources = append(sources, "auto-fix")
+	}
+	if hasDecision {
+		sources = append(sources, "decision")
+	}
+	if hasPriorReview {
+		sources = append(sources, "prior-review")
+	}
+	if sp.High {
+		sources = append(sources, "self-protection:"+sp.Source)
+	}
+	return effectiveRisk{high: true, source: strings.Join(sources, ";")}
+}
+
+// selfProtectionNowはpath取得失敗時をclassify-error HIGHへ倒し、silent LOWによるfail-openを防ぐ。
+func (w *Workflow) selfProtectionNow() selfProtectionDecision {
+	baselineHead, _ := w.state.Read("baseline-head")
+	paths, err := w.collectChangedPaths(w.config.RepoRoot, baselineHead)
+	if err != nil {
+		return selfProtectionDecision{High: true, Source: "classify-error", HitPath: err.Error()}
+	}
+	return classifySelfProtection(paths)
+}
+
+// resolveReviewResumeRiskはresume時の実効riskを決定する。保存HIGHはfloor保持のため無条件で維持し、
+// 保存LOW・未計算(旧checkpoint)は現在の自己保護を再評価してHIGHへ昇格できる。これによりpolicy更新後に
+// 保存LOWがcritical変更をLOWへ固定するfail-openを防ぐ。永続policy versionは持たず、LOW再評価が常に
+// 現行policyへ照合するためversion陳腐化は起きない。
+func (w *Workflow) resolveReviewResumeRisk(workerPacket packet.Packet, checkpoint state.ResumeCheckpoint) effectiveRisk {
+	if checkpoint.EffectiveRisk == "HIGH" {
+		return effectiveRisk{high: true, source: checkpoint.EffectiveRiskSource}
+	}
+	hasDecision := w.state.Exists("last-decision")
+	return w.computeEffectiveRisk(workerPacket, checkpoint.AutoFixes, hasDecision, w.state.Exists("last-review"))
+}
+
+func (w *Workflow) reviewerModel(risk effectiveRisk) string {
+	if risk.high {
 		return w.config.HighRiskReviewerModel
 	}
 	return w.config.ReviewerModel
@@ -742,10 +802,10 @@ func (w *Workflow) enforceRiskFloor(
 	reviewNumber int,
 	autoFixes int,
 	decision string,
-	highRiskFloor bool,
+	effectiveHigh bool,
 	reviewPacket packet.Packet,
 ) (packet.Packet, error) {
-	if !highRiskFloor || reviewPacket.Status() != "PASS" {
+	if !effectiveHigh || reviewPacket.Status() != "PASS" {
 		return reviewPacket, nil
 	}
 	return w.riskFloorReemit(request, workerPacket, reviewNumber, autoFixes, decision)

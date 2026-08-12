@@ -42,6 +42,10 @@ type ResumeCheckpoint struct {
 	PacketCompacted bool        `json:"packet_compacted,omitempty"`
 	// RiskFloorReemitは同一reviewer sessionへNEEDS_SOL_REVIEW/HIGH再出力を依頼中の工程を表す。
 	RiskFloorReemit bool `json:"risk_floor_reemit,omitempty"`
+	// EffectiveRiskはwrapperがworker原文riskと区別して決定した実効risk("HIGH"/"LOW")。
+	// 空文字は旧checkpointなど未計算を表し、resume時に現在stateから安全側へ決定論的に再構成する。
+	EffectiveRisk       string `json:"effective_risk,omitempty"`
+	EffectiveRiskSource string `json:"effective_risk_source,omitempty"`
 }
 
 func (s *StateStore) SaveResumeCheckpoint(checkpoint ResumeCheckpoint) error {
