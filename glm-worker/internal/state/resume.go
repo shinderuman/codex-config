@@ -40,6 +40,8 @@ type ResumeCheckpoint struct {
 	ResetAtCST      string      `json:"reset_at_cst,omitempty"`
 	ResetAtRFC3339  string      `json:"reset_at_rfc3339,omitempty"`
 	PacketCompacted bool        `json:"packet_compacted,omitempty"`
+	// RiskFloorReemitは同一reviewer sessionへNEEDS_SOL_REVIEW/HIGH再出力を依頼中の工程を表す。
+	RiskFloorReemit bool `json:"risk_floor_reemit,omitempty"`
 }
 
 func (s *StateStore) SaveResumeCheckpoint(checkpoint ResumeCheckpoint) error {

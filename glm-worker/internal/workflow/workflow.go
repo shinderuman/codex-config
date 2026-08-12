@@ -207,13 +207,45 @@ func (w *Workflow) ExecuteResume() error {
 			return w.handleWorkerResult(checkpoint.Request, result)
 		case state.ResumeStageReview:
 			workerPacket := packet.FromLines(checkpoint.WorkerPacket)
-			if err := w.state.Write("last-review", result.String()); err != nil {
+			decision := w.state.ReadOr("last-decision", "none")
+			if checkpoint.RiskFloorReemit {
+				reviewPacket := resolveRiskFloorReemit(result)
+				if err := w.state.Write("last-review", reviewPacket.String()); err != nil {
+					return err
+				}
+				return w.handleReviewResult(
+					checkpoint.Request,
+					workerPacket,
+					reviewPacket,
+					checkpoint.ReviewNumber,
+					checkpoint.AutoFixes,
+				)
+			}
+			highRiskFloor := reviewNeedsHighRiskFloor(
+				workerPacket,
+				checkpoint.AutoFixes,
+				w.state.Exists("last-decision"),
+				w.state.Exists("last-review"),
+			)
+			reviewPacket, err := w.enforceRiskFloor(
+				checkpoint.Request,
+				workerPacket,
+				checkpoint.ReviewNumber,
+				checkpoint.AutoFixes,
+				decision,
+				highRiskFloor,
+				result,
+			)
+			if err != nil {
+				return err
+			}
+			if err := w.state.Write("last-review", reviewPacket.String()); err != nil {
 				return err
 			}
 			return w.handleReviewResult(
 				checkpoint.Request,
 				workerPacket,
-				result,
+				reviewPacket,
 				checkpoint.ReviewNumber,
 				checkpoint.AutoFixes,
 			)
@@ -269,6 +301,8 @@ func (w *Workflow) reviewUntilStable(
 	autoFixes int,
 ) error {
 	decision := w.state.ReadOr("last-decision", "none")
+	hasDecision := w.state.Exists("last-decision")
+	highRiskFloor := reviewNeedsHighRiskFloor(workerPacket, autoFixes, hasDecision, w.state.Exists("last-review"))
 	prompt := reviewerPrompt(
 		request,
 		decision,
@@ -280,7 +314,7 @@ func (w *Workflow) reviewUntilStable(
 		Stage:          state.ResumeStageReview,
 		Phase:          fmt.Sprintf("reviewer-%d", reviewNumber),
 		Role:           state.ReviewerRole,
-		Model:          w.reviewerModel(workerPacket, autoFixes, w.state.Exists("last-decision"), w.state.Exists("last-review")),
+		Model:          w.reviewerModel(workerPacket, autoFixes, hasDecision, w.state.Exists("last-review")),
 		ReadOnly:       true,
 		Effort:         w.config.RoutineEffort,
 		Prompt:         prompt,
@@ -293,6 +327,18 @@ func (w *Workflow) reviewUntilStable(
 	}
 
 	reviewPacket, err := w.runModel(checkpoint)
+	if err != nil {
+		return err
+	}
+	reviewPacket, err = w.enforceRiskFloor(
+		request,
+		workerPacket,
+		reviewNumber,
+		autoFixes,
+		decision,
+		highRiskFloor,
+		reviewPacket,
+	)
 	if err != nil {
 		return err
 	}
@@ -373,8 +419,12 @@ func (w *Workflow) handleReviewResult(
 	}
 }
 
+func reviewNeedsHighRiskFloor(workerPacket packet.Packet, autoFixes int, hasDecision bool, hasPriorReview bool) bool {
+	return workerPacket.Risk() == "HIGH" || autoFixes > 0 || hasDecision || hasPriorReview
+}
+
 func (w *Workflow) reviewerModel(workerPacket packet.Packet, autoFixes int, hasDecision bool, hasPriorReview bool) string {
-	if workerPacket.Risk() == "HIGH" || autoFixes > 0 || hasDecision || hasPriorReview {
+	if reviewNeedsHighRiskFloor(workerPacket, autoFixes, hasDecision, hasPriorReview) {
 		return w.config.HighRiskReviewerModel
 	}
 	return w.config.ReviewerModel
@@ -657,6 +707,75 @@ func (w *Workflow) emitPacket(value packet.Packet) error {
 	w.state.RecordSolPacket(value)
 	fmt.Fprintln(w.output, value.String())
 	return nil
+}
+
+func (w *Workflow) enforceRiskFloor(
+	request string,
+	workerPacket packet.Packet,
+	reviewNumber int,
+	autoFixes int,
+	decision string,
+	highRiskFloor bool,
+	reviewPacket packet.Packet,
+) (packet.Packet, error) {
+	if !highRiskFloor || reviewPacket.Status() != "PASS" {
+		return reviewPacket, nil
+	}
+	return w.riskFloorReemit(request, workerPacket, reviewNumber, autoFixes, decision)
+}
+
+func (w *Workflow) riskFloorReemit(
+	request string,
+	workerPacket packet.Packet,
+	reviewNumber int,
+	autoFixes int,
+	decision string,
+) (packet.Packet, error) {
+	prompt := riskFloorReemitPrompt()
+	checkpoint := state.ResumeCheckpoint{
+		Stage:           state.ResumeStageReview,
+		Phase:           fmt.Sprintf("reviewer-%d-risk-floor", reviewNumber),
+		Role:            state.ReviewerRole,
+		Model:           w.config.HighRiskReviewerModel,
+		ReadOnly:        true,
+		Effort:          w.config.RoutineEffort,
+		Prompt:          prompt,
+		OriginalPrompt:  prompt,
+		Request:         request,
+		Decision:        decision,
+		WorkerPacket:    append([]string(nil), workerPacket.Lines...),
+		ReviewNumber:    reviewNumber,
+		AutoFixes:       autoFixes,
+		RiskFloorReemit: true,
+	}
+	reemitPacket, err := w.runModel(checkpoint)
+	if err != nil {
+		return packet.Packet{}, err
+	}
+	return resolveRiskFloorReemit(reemitPacket), nil
+}
+
+func resolveRiskFloorReemit(reemitPacket packet.Packet) packet.Packet {
+	if reemitPacket.Status() == "NEEDS_SOL_REVIEW" {
+		return reemitPacket
+	}
+	return riskFloorFailClosedPacket(reemitPacket)
+}
+
+func riskFloorFailClosedPacket(reemitPacket packet.Packet) packet.Packet {
+	return packet.FromLines([]string{
+		"STATUS: NEEDS_SOL_REVIEW",
+		"RISK: HIGH",
+		fmt.Sprintf("SUMMARY: reviewerがrisk floor再出力要求へ従わず%sを返したためSol確認へ昇格", reemitPacket.Status()),
+		"REQUIREMENT_COVERAGE: reviewer再出力が非準拠のためSolが直接確認する必要あり",
+		"INVARIANTS: wrapper risk floorはHIGH RISK経路のreviewer PASSを許容しない",
+		"TEST_EVIDENCE: reviewer同一sessionへNEEDS_SOL_REVIEW/HIGH再出力を依頼済み",
+		fmt.Sprintf("ISSUES: reviewer再出力が非許容STATUS(%s)を返却", reemitPacket.Status()),
+		"RESIDUAL_RISK: reviewer判断だけでHIGH RISK経路を完了扱いできない",
+		"TARGETS: 直近reviewer出力と最終diff",
+		fmt.Sprintf("ARTIFACTS: %s", reemitPacket.Fields["ARTIFACTS"]),
+		"SOL_QUESTION: reviewer非準拠時の最終確認・修正方針をSolが判断する",
+	})
 }
 
 func nonConvergedPacket(reviewPacket packet.Packet) packet.Packet {
