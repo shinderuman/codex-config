@@ -23,11 +23,19 @@ const (
 	ModeStatus
 	ModeStats
 	ModeReset
+	ModeVerifyAutoResume
 )
 
 type Command struct {
 	Mode    CommandMode
 	Payload string
+	Verify  VerifyArgs
+}
+
+type VerifyArgs struct {
+	Key      string
+	RFC3339  string
+	ThreadID string
 }
 
 func ParseCommand(args []string) (Command, error) {
@@ -60,6 +68,18 @@ func ParseCommand(args []string) (Command, error) {
 			return Command{}, fmt.Errorf("usage: glm-worker --reset")
 		}
 		return Command{Mode: ModeReset}, nil
+	case "--verify-auto-resume":
+		if len(args) != 4 {
+			return Command{}, fmt.Errorf("usage: glm-worker --verify-auto-resume <automation-key> <auto-resume-at-rfc3339> <thread-id>")
+		}
+		return Command{
+			Mode: ModeVerifyAutoResume,
+			Verify: VerifyArgs{
+				Key:      args[1],
+				RFC3339:  args[2],
+				ThreadID: args[3],
+			},
+		}, nil
 	default:
 		return Command{Mode: ModeNewTask, Payload: strings.Join(args, " ")}, nil
 	}
@@ -120,6 +140,8 @@ func Execute(cmd Command, cfg config.AppConfig, rf RunnerFactory, stdout, stderr
 		return printStatus(st, stdout)
 	case ModeStats:
 		return printStats(st, stdout)
+	case ModeVerifyAutoResume:
+		return printVerifyAutoResume(cmd, cfg, stdout)
 	}
 
 	lock, err := AcquireRepoLock(st.LockPath())

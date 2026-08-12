@@ -3,10 +3,13 @@ package app
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/autoresume"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/config"
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
 )
 
@@ -211,4 +214,32 @@ func resetState(st *state.StateStore, stdout io.Writer) error {
 	fmt.Fprintln(stdout, "STATUS: RESET")
 	fmt.Fprintf(stdout, "REPO: %s\n", st.ReadOr("repo-root", "unknown"))
 	return nil
+}
+
+func printVerifyAutoResume(cmd Command, cfg config.AppConfig, stdout io.Writer) error {
+	params := autoresume.Params{
+		AutomationKey:    cmd.Verify.Key,
+		ExpectedRFC3339:  cmd.Verify.RFC3339,
+		ExpectedThreadID: cmd.Verify.ThreadID,
+		AutomationsDir:   filepath.Join(cfg.CodexConfigDir, "automations"),
+		DBPath:           filepath.Join(cfg.CodexConfigDir, "sqlite", "codex-dev.db"),
+	}
+	result := autoresume.Verify(params, autoresume.ReadDBRowSqlite3)
+	autoresume.WriteResult(stdout, result)
+
+	if result.Outcome == autoresume.Pass {
+		return nil
+	}
+	return fmt.Errorf("verification %s: %s", outcomeLabel(result.Outcome), result.Reason)
+}
+
+func outcomeLabel(o autoresume.Outcome) string {
+	switch o {
+	case autoresume.Pass:
+		return "pass"
+	case autoresume.Fail:
+		return "fail"
+	default:
+		return "unavailable"
+	}
 }

@@ -29,6 +29,9 @@ type AppConfig struct {
 	// EnvAllowlistは親process環境からworkerへ追加で受け渡すenv key。
 	// OS必須・Z.ai必須keyは常に渡り、それ以外はここへ指定したkeyだけ追加される。
 	EnvAllowlist          []string
+	// CodexConfigDirはCodex appのconfig dir(CODEX_CONFIG_DIR, 既定~/.codex)。
+	// install.shと同じ規則で、--verify-auto-resumeがautomation TOMLとSQLiteを参照する。
+	CodexConfigDir        string
 	WorkerModel           string
 	ReviewerModel         string
 	HighRiskReviewerModel string
@@ -54,6 +57,7 @@ func Load() (AppConfig, error) {
 
 	stateHome := envOrDefault("GLM_WORKER_HOME", filepath.Join(home, ".glm-worker"))
 	promptDir := envOrDefault("GLM_WORKER_PROMPT_DIR", filepath.Join(home, ".codex", "glm-worker", "prompts"))
+	codexConfigDir := envOrDefault("CODEX_CONFIG_DIR", filepath.Join(home, ".codex"))
 	claudeConfigDir := envOrDefault("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
 	claudeSettingsOverride := resolveClaudeSettingsOverride(home)
 	envAllowlist := splitEnvList(os.Getenv("GLM_WORKER_ENV_ALLOWLIST"))
@@ -72,6 +76,7 @@ func Load() (AppConfig, error) {
 		RepoShort:              repoHashString[:12],
 		StateBase:              filepath.Join(stateHome, "sessions"),
 		PromptDir:              promptDir,
+		CodexConfigDir:         codexConfigDir,
 		ClaudeBin:              envOrDefault("GLM_WORKER_CLAUDE_BIN", "claude"),
 		ClaudeConfigDir:        claudeConfigDir,
 		ClaudeSettingsOverride: claudeSettingsOverride,

@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -83,6 +84,7 @@ func newAppConfig(t *testing.T) config.AppConfig {
 		WorkerModel:           "opus",
 		ReviewerModel:         "haiku",
 		HighRiskReviewerModel: "sonnet",
+		CodexConfigDir:        t.TempDir(),
 	}
 }
 
@@ -315,5 +317,87 @@ func TestRunStopsWhenConfigLoadFails(t *testing.T) {
 	)
 	if !errors.Is(err, want) {
 		t.Fatalf("config error = %v", err)
+	}
+}
+
+func TestExecuteVerifyAutoResumeFailsWhenTOMLMissing(t *testing.T) {
+	cfg := newAppConfig(t)
+	var out bytes.Buffer
+
+	err := Execute(Command{
+		Mode: ModeVerifyAutoResume,
+		Verify: VerifyArgs{
+			Key:      "glm-worker-resume-nonexist-00000000",
+			RFC3339:  "2026-08-12T20:01:20+09:00",
+			ThreadID: "019f88f8-0e70-7d53-a2a3-f0c61666827c",
+		},
+	}, cfg, nil, &out, io.Discard)
+
+	if err == nil {
+		t.Fatal("missing TOML should return error")
+	}
+	if !strings.Contains(out.String(), "VERIFICATION: FAIL") {
+		t.Fatalf("output = %q", out.String())
+	}
+}
+
+func TestExecuteVerifyAutoResumePassesWithValidTOMLAndDB(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 not installed")
+	}
+
+	cfg := newAppConfig(t)
+	key := "glm-worker-resume-appshort1234-abcd1234"
+	thread := "019f88f8-0e70-7d53-a2a3-f0c61666827c"
+	rfc3339 := "2026-08-12T20:01:20+09:00"
+
+	automationsDir := cfg.CodexConfigDir + "/automations/" + key
+	if err := os.MkdirAll(automationsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tomlContent := `version = 1
+id = "` + key + `"
+kind = "heartbeat"
+name = "` + key + `"
+prompt = "resume"
+status = "ACTIVE"
+rrule = "DTSTART:20260812T110120\nRRULE:FREQ=DAILY;COUNT=1"
+target_thread_id = "` + thread + `"
+created_at = 1
+`
+	if err := os.WriteFile(automationsDir+"/automation.toml", []byte(tomlContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dbDir := cfg.CodexConfigDir + "/sqlite"
+	if err := os.MkdirAll(dbDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := dbDir + "/codex-dev.db"
+	schema := `CREATE TABLE automations (id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'ACTIVE', next_run_at INTEGER, last_run_at INTEGER, cwds TEXT NOT NULL DEFAULT '[]', rrule TEXT NOT NULL, model TEXT, reasoning_effort TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, target_type TEXT, project_id TEXT);`
+	if err := exec.Command("sqlite3", dbPath, schema).Run(); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	expectedMS := time.Date(2026, 8, 12, 11, 1, 20, 0, time.UTC).UnixMilli()
+	insert := `INSERT INTO automations (id, name, prompt, status, next_run_at, cwds, rrule, created_at, updated_at) VALUES ('` + key + `', '` + key + `', 'p', 'ACTIVE', ` + fmt.Sprintf("%d", expectedMS) + `, '[]', 'DTSTART:20260812T110120' || char(10) || 'RRULE:FREQ=DAILY;COUNT=1', 1, 1);`
+	if err := exec.Command("sqlite3", dbPath, insert).Run(); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := Execute(Command{
+		Mode: ModeVerifyAutoResume,
+		Verify: VerifyArgs{
+			Key:      key,
+			RFC3339:  rfc3339,
+			ThreadID: thread,
+		},
+	}, cfg, nil, &out, io.Discard)
+
+	if err != nil {
+		t.Fatalf("expected pass, got error: %v output=%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "VERIFICATION: PASS") {
+		t.Fatalf("output = %q", out.String())
 	}
 }

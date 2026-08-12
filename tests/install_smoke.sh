@@ -68,6 +68,9 @@ test -f "$success_case/codex/instructions/glm-packets.md"
 grep -Fq 'DTSTART:YYYYMMDDTHHMMSS' "$success_case/codex/instructions/glm-auto-resume.md"
 grep -Fq 'DTSTART;TZID=Asia/Tokyo`は使わない' "$success_case/codex/instructions/glm-auto-resume.md"
 grep -Fq 'automations.next_run_at' "$success_case/codex/instructions/glm-auto-resume.md"
+grep -Fq 'verify-auto-resume' "$success_case/codex/instructions/glm-auto-resume.md"
+grep -Fq '返り値全体を文字列として必ず検査' "$success_case/codex/instructions/glm-auto-resume.md"
+grep -Fq '`suggested_create`を呼ばない' "$success_case/codex/instructions/glm-auto-resume.md"
 grep -Fq 'TELEMETRY_DIR' "$success_case/codex/instructions/glm-execution.md"
 grep -Fq '同じ責務・変更理由・検証単位' "$success_case/codex/instructions/glm-execution.md"
 grep -Fq 'REPORT_ARTIFACT_DIR' "$success_case/codex/instructions/glm-execution.md"
@@ -109,6 +112,9 @@ grep -Fq 'packetまたは`STATUS: WORKER_ERROR`を含む結果' "$success_case/c
         "$success_case/bin/glm-worker" --status \
         | grep -Fq 'ARTIFACT_DIR: none'
 )
+
+"$success_case/bin/glm-worker" --verify-auto-resume 2>&1 \
+    | grep -Fq 'usage: glm-worker --verify-auto-resume'
 
 failure_source="$test_root/failure-source"
 failure_case="$test_root/failure-case"
