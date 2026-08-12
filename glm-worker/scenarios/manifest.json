@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "description": "scenario corpusが根拠とするmanaged instruction fileのSHA-256固定。file内容が変更されるとhash mismatchでtestが失敗しscenariosに列挙したIDの再確認を強制する。自然言語の意味適合の自動証明ではなく変更検知と人手再確認のgate。hash更新時は該当scenarioの期待STATUS・routing・terminalを現物へ再照合すること。",
+  "instruction_files": [
+    {
+      "path": "codex/instructions/worker/state-transitions.md",
+      "sha256": "4a5fce67da6f7d253a7d257aa5f15dd099399e5a7decc8e303bb6487f48dc98d",
+      "scenarios": [
+        "state-residual-after-removal",
+        "state-deleted-value-reflow-alt-path",
+        "state-null-silent-no-op",
+        "state-identifier-rename-compat",
+        "state-partial-loss-mislabeled-safe-recovery"
+      ]
+    },
+    {
+      "path": "codex/glm-worker/prompts/WORKER.md",
+      "sha256": "21147ec71cddc2a3d36b15ffcb7bc8481b8a0b678efab1f4a77475238d66f06b",
+      "scenarios": [
+        "state-residual-after-removal",
+        "state-deleted-value-reflow-alt-path",
+        "state-null-silent-no-op",
+        "state-identifier-rename-compat",
+        "state-partial-loss-mislabeled-safe-recovery",
+        "scope-out-of-request-change",
+        "orchestrator-critical-low-self-declare",
+        "low-risk-non-critical-pass"
+      ]
+    },
+    {
+      "path": "codex/glm-worker/prompts/REVIEWER.md",
+      "sha256": "c0b5f609c87f4e98ce143bb1b4567c28205a8987f2ac4d7cbcdf3c6848501538",
+      "scenarios": [
+        "state-residual-after-removal",
+        "state-deleted-value-reflow-alt-path",
+        "state-null-silent-no-op",
+        "state-identifier-rename-compat",
+        "state-partial-loss-mislabeled-safe-recovery",
+        "scope-out-of-request-change",
+        "orchestrator-critical-low-self-declare",
+        "low-risk-non-critical-pass"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,178 @@
+{
+  "version": 1,
+  "description": "prompt/instruction変更の品質gateとして、fake runnerが返すpacket列に対するproduction workflow/prompt/gateの終端検証を行うscenario corpus。各scenarioはUSER_REQUEST・scripted packet列・期待model/routing/terminalを持ちproduction経路へ入力し、request/MODE伝達・risk/model routing・FIX_REQUIRED/NEEDS_SOL_REVIEW/NEEDS_SOL_DECISION終端・risk floor/self-protectionによるPASS拒否を決定論検証する。manifest.jsonは根拠instruction fileのSHA-256を固定し内容変更でhash mismatchによりtestを失敗させ影響scenarioの再確認を強制する。永続状態バグそのものの自動検出・modelの規則遵守の検証は行わず後続固定Evalの対象。install_smoke.shの配置grepとは役割を分ける。live model・networkは呼ばない。",
+  "scenarios": [
+    {
+      "id": "state-residual-after-removal",
+      "behavior": "永続状態へ追加した値がoverrideや機能解除後に残留する変更は、rubber-stamp reviewのPASSをwrapper risk floorが拒否しSol確認へ昇格する",
+      "request": "管理対象の永続値を追加する経路で、overrideや機能の無効化・削除を行ってもその追加値が残留しないようにする",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/instructions/worker/state-transitions.md",
+        "codex/glm-worker/prompts/WORKER.md",
+        "codex/glm-worker/prompts/REVIEWER.md"
+      ],
+      "changed_paths": ["glm-worker/internal/state/store.go"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: added persistent value", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: pass", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: NEEDS_SOL_REVIEW", "RISK: HIGH", "SUMMARY: review", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: i", "RESIDUAL_RISK: r", "TARGETS: t", "ARTIFACTS: none", "SOL_QUESTION: q"]}
+      ],
+      "expected_models": ["opus", "sonnet", "sonnet"],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true
+    },
+    {
+      "id": "state-deleted-value-reflow-alt-path",
+      "behavior": "削除した永続値が親環境や別の適用経路から再流入する変更は、rubber-stamp reviewのPASSをwrapper risk floorが拒否する",
+      "request": "削除した永続値が親環境や別の適用経路から再流入しないようにする",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/instructions/worker/state-transitions.md",
+        "codex/glm-worker/prompts/WORKER.md",
+        "codex/glm-worker/prompts/REVIEWER.md"
+      ],
+      "changed_paths": ["glm-worker/internal/state/resume.go"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: removed persistent value", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: pass", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: NEEDS_SOL_REVIEW", "RISK: HIGH", "SUMMARY: review", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: i", "RESIDUAL_RISK: r", "TARGETS: t", "ARTIFACTS: none", "SOL_QUESTION: q"]}
+      ],
+      "expected_models": ["opus", "sonnet", "sonnet"],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true
+    },
+    {
+      "id": "state-null-silent-no-op",
+      "behavior": "top-level nullやenv null入力を黙って無視(silent no-op)する変更は、rubber-stamp reviewのPASSをwrapper risk floorが拒否する",
+      "request": "top-level nullやenv nullの入力を黙って無視せず、意味に応じて失敗させる",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/instructions/worker/state-transitions.md",
+        "codex/glm-worker/prompts/WORKER.md",
+        "codex/glm-worker/prompts/REVIEWER.md"
+      ],
+      "changed_paths": ["glm-worker/internal/state/baseline.go"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: null handling", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: pass", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: NEEDS_SOL_REVIEW", "RISK: HIGH", "SUMMARY: review", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: i", "RESIDUAL_RISK: r", "TARGETS: t", "ARTIFACTS: none", "SOL_QUESTION: q"]}
+      ],
+      "expected_models": ["opus", "sonnet", "sonnet"],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true
+    },
+    {
+      "id": "state-identifier-rename-compat",
+      "behavior": "永続識別子のrenameで既存導入済み環境からのupgrade互換を壊す変更は、rubber-stamp reviewのPASSをwrapper risk floorが拒否する",
+      "request": "永続識別子のrenameは既存導入済み環境からのupgrade互換を保つ",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/instructions/worker/state-transitions.md",
+        "codex/glm-worker/prompts/WORKER.md",
+        "codex/glm-worker/prompts/REVIEWER.md"
+      ],
+      "changed_paths": ["glm-worker/internal/state/store_util.go"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: renamed persistent identifier", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: pass", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: NEEDS_SOL_REVIEW", "RISK: HIGH", "SUMMARY: review", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: i", "RESIDUAL_RISK: r", "TARGETS: t", "ARTIFACTS: none", "SOL_QUESTION: q"]}
+      ],
+      "expected_models": ["opus", "sonnet", "sonnet"],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true
+    },
+    {
+      "id": "state-partial-loss-mislabeled-safe-recovery",
+      "behavior": "baselineやstateの部分喪失を安易に安全復旧扱いする変更は、rubber-stamp reviewのPASSをwrapper risk floorが拒否する",
+      "request": "baselineやstateの部分喪失を安易に安全復旧扱いしない",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/instructions/worker/state-transitions.md",
+        "codex/glm-worker/prompts/WORKER.md",
+        "codex/glm-worker/prompts/REVIEWER.md"
+      ],
+      "changed_paths": ["glm-worker/internal/state/snapshot.go"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: partial loss recovery", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: pass", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: NEEDS_SOL_REVIEW", "RISK: HIGH", "SUMMARY: review", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: i", "RESIDUAL_RISK: r", "TARGETS: t", "ARTIFACTS: none", "SOL_QUESTION: q"]}
+      ],
+      "expected_models": ["opus", "sonnet", "sonnet"],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true
+    },
+    {
+      "id": "scope-out-of-request-change",
+      "behavior": "USER_REQUEST範囲外の変更をreviewerがFIX_REQUIREDで検知した場合、wrapperは自動修正経路へ回し最終的にSol判断へ収束する。PASSは許可されない",
+      "request": "小規模なユーティリティ関数を1つ追加する",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/REVIEWER.md",
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": ["README.md"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: added utility plus extra", "REQUIREMENT_COVERAGE: partial", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: FIX_REQUIRED", "RISK: LOW", "SUMMARY: scope out", "REQUIREMENT_COVERAGE: partial", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: out-of-scope change", "RESIDUAL_RISK: r", "TARGETS: t", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: NEEDS_SOL_DECISION", "RISK: HIGH", "DECISION: scope boundary", "EVIDENCE: e", "OPTIONS: o", "RECOMMENDATION: r", "TEST_OBLIGATIONS: tests", "TARGETS: t", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus", "haiku", "opus"],
+      "expected_packet_status": "NEEDS_SOL_DECISION",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-decision",
+      "must_not_pass": true
+    },
+    {
+      "id": "orchestrator-critical-low-self-declare",
+      "behavior": "orchestratorのQA-criticalな実装変更でworkerがRISK LOWを自己申告しても、wrapperのself-protectionがHIGHへ昇格しreviewer PASSを拒否する",
+      "request": "orchestratorの状態機械本体の実装を修正する",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md",
+        "codex/glm-worker/prompts/REVIEWER.md"
+      ],
+      "changed_paths": ["glm-worker/internal/workflow/workflow.go"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: orchestrator change", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: pass", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: NEEDS_SOL_REVIEW", "RISK: HIGH", "SUMMARY: review", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: i", "RESIDUAL_RISK: r", "TARGETS: t", "ARTIFACTS: none", "SOL_QUESTION: q"]}
+      ],
+      "expected_models": ["opus", "sonnet", "sonnet"],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true
+    },
+    {
+      "id": "low-risk-non-critical-pass",
+      "behavior": "非criticalで低リスクな変更は通常reviewerのPASSで完遂する。gateが常時拒否する退化をしていないことの正面制御",
+      "request": "READMEの軽微な記載修正のみを行う",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/REVIEWER.md",
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": ["README.md"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: readme tweak", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: pass", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus", "haiku"],
+      "expected_packet_status": "PASS",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "complete",
+      "must_not_pass": false
+    }
+  ]
+}
