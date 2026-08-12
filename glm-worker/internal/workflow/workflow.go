@@ -22,15 +22,22 @@ type ModelRunner interface {
 }
 
 type Workflow struct {
-	config config.AppConfig
-	state  *state.StateStore
-	runner ModelRunner
-	output io.Writer
-	temp   string
+	config          config.AppConfig
+	state           *state.StateStore
+	runner          ModelRunner
+	output          io.Writer
+	temp            string
+	captureSnapshot func(repoRoot string) (state.GitSnapshot, error)
 }
 
 func NewWorkflow(cfg config.AppConfig, st *state.StateStore, r ModelRunner, output io.Writer) *Workflow {
-	return &Workflow{config: cfg, state: st, runner: r, output: output}
+	return &Workflow{
+		config:          cfg,
+		state:           st,
+		runner:          r,
+		output:          output,
+		captureSnapshot: state.CaptureGitSnapshot,
+	}
 }
 
 func (w *Workflow) withTemp(fn func() error) error {
@@ -187,6 +194,14 @@ func (w *Workflow) ExecuteResume() error {
 			return err
 		}
 		w.state.RecordResume()
+		// review工程resume時は5h上限の時間経過を挟んでreview-start snapshotと現在状態を再照合する。
+		if checkpoint.Stage == state.ResumeStageReview {
+			if stopped, err := w.verifyReviewResumeSnapshot(); err != nil {
+				return err
+			} else if stopped {
+				return nil
+			}
+		}
 		checkpoint.Prompt = resumePrompt(checkpoint)
 		checkpoint.RateLimited = false
 		checkpoint.ResetAtCST = ""
@@ -300,6 +315,12 @@ func (w *Workflow) reviewUntilStable(
 	reviewNumber int,
 	autoFixes int,
 ) error {
+	if stopped, err := w.captureWorkerEndSnapshot(); err != nil {
+		return err
+	} else if stopped {
+		return nil
+	}
+
 	decision := w.state.ReadOr("last-decision", "none")
 	hasDecision := w.state.Exists("last-decision")
 	highRiskFloor := reviewNeedsHighRiskFloor(workerPacket, autoFixes, hasDecision, w.state.Exists("last-review"))
@@ -324,6 +345,12 @@ func (w *Workflow) reviewUntilStable(
 		WorkerPacket:   append([]string(nil), workerPacket.Lines...),
 		ReviewNumber:   reviewNumber,
 		AutoFixes:      autoFixes,
+	}
+
+	if stopped, err := w.verifyReviewStartSnapshot(); err != nil {
+		return err
+	} else if stopped {
+		return nil
 	}
 
 	reviewPacket, err := w.runModel(checkpoint)
@@ -775,6 +802,89 @@ func riskFloorFailClosedPacket(reemitPacket packet.Packet) packet.Packet {
 		"TARGETS: 直近reviewer出力と最終diff",
 		fmt.Sprintf("ARTIFACTS: %s", reemitPacket.Fields["ARTIFACTS"]),
 		"SOL_QUESTION: reviewer非準拠時の最終確認・修正方針をSolが判断する",
+	})
+}
+
+func (w *Workflow) captureWorkerEndSnapshot() (bool, error) {
+	workerEnd, err := w.captureSnapshot(w.config.RepoRoot)
+	if err != nil {
+		return true, w.failClosedSnapshot(state.SnapshotStageWorkerEnd, workerEnd, state.GitSnapshot{}, "worker-end snapshot取得失敗", err)
+	}
+	if err := w.state.SaveWorkerEndSnapshot(workerEnd); err != nil {
+		return true, w.failClosedSnapshot(state.SnapshotStageWorkerEnd, workerEnd, state.GitSnapshot{}, "worker-end snapshot保存失敗", err)
+	}
+	return false, nil
+}
+
+func (w *Workflow) verifyReviewStartSnapshot() (bool, error) {
+	workerEnd, err := w.state.LoadWorkerEndSnapshot()
+	if err != nil {
+		return true, w.failClosedSnapshot(state.SnapshotStageReviewStart, state.GitSnapshot{}, state.GitSnapshot{}, "worker-end snapshot読込失敗", err)
+	}
+	reviewStart, err := w.captureSnapshot(w.config.RepoRoot)
+	if err != nil {
+		return true, w.failClosedSnapshot(state.SnapshotStageReviewStart, workerEnd, state.GitSnapshot{}, "review-start snapshot取得失敗", err)
+	}
+	if err := w.state.SaveReviewStartSnapshot(reviewStart); err != nil {
+		return true, w.failClosedSnapshot(state.SnapshotStageReviewStart, workerEnd, reviewStart, "review-start snapshot保存失敗", err)
+	}
+	comparison := state.CompareGitSnapshot(workerEnd, reviewStart, state.SnapshotStageReviewStart, "")
+	if err := w.state.SaveSnapshotComparison(comparison); err != nil {
+		return true, w.failClosedSnapshot(state.SnapshotStageReviewStart, workerEnd, reviewStart, "snapshot comparison保存失敗", err)
+	}
+	if !comparison.Matched {
+		return true, w.failClosedSnapshot(state.SnapshotStageReviewStart, workerEnd, reviewStart, "worker終了状態とreview開始状態が一致しません", nil)
+	}
+	return false, nil
+}
+
+func (w *Workflow) verifyReviewResumeSnapshot() (bool, error) {
+	saved, err := w.state.LoadReviewStartSnapshot()
+	if err != nil {
+		return true, w.failClosedSnapshot(state.SnapshotStageReviewResume, state.GitSnapshot{}, state.GitSnapshot{}, "review-start snapshot読込失敗", err)
+	}
+	current, err := w.captureSnapshot(w.config.RepoRoot)
+	if err != nil {
+		return true, w.failClosedSnapshot(state.SnapshotStageReviewResume, saved, state.GitSnapshot{}, "resume時snapshot取得失敗", err)
+	}
+	comparison := state.CompareGitSnapshot(saved, current, state.SnapshotStageReviewResume, "")
+	if err := w.state.SaveSnapshotComparison(comparison); err != nil {
+		return true, w.failClosedSnapshot(state.SnapshotStageReviewResume, saved, current, "snapshot comparison保存失敗", err)
+	}
+	if !comparison.Matched {
+		return true, w.failClosedSnapshot(state.SnapshotStageReviewResume, saved, current, "review開始時から状態が変化しています", nil)
+	}
+	return false, nil
+}
+
+// checkpointを先に消すことでstatus更新失敗時もresumeさせず安全方向へ収束させ、
+// WaitingSolReview移行中に残存checkpointがresume復元情報と矛盾するのを防ぐ。
+func (w *Workflow) failClosedSnapshot(stage state.SnapshotStage, workerEnd, reviewStart state.GitSnapshot, reason string, cause error) error {
+	if err := w.state.ClearResumeCheckpoint(); err != nil {
+		return err
+	}
+	if err := w.state.SetTaskStatus(state.TaskStatusWaitingSolReview); err != nil {
+		return err
+	}
+	if cause != nil {
+		reason = fmt.Sprintf("%s: %v", reason, cause)
+	}
+	return w.emitPacket(snapshotFailClosedPacket(stage, workerEnd, reviewStart, reason))
+}
+
+func snapshotFailClosedPacket(stage state.SnapshotStage, workerEnd, reviewStart state.GitSnapshot, reason string) packet.Packet {
+	return packet.FromLines([]string{
+		"STATUS: NEEDS_SOL_REVIEW",
+		"RISK: HIGH",
+		fmt.Sprintf("SUMMARY: worker終了状態とreview開始状態の同一性確認に失敗しreviewerを呼ばずSol確認へ昇格(%s)", stage),
+		"REQUIREMENT_COVERAGE: reviewerへ状態を引き渡す前にSolが直接確認する必要あり",
+		"INVARIANTS: wrapperはworker-endとreview-start snapshotの3軸一致を確認するまでreviewerを呼ばない",
+		"TEST_EVIDENCE: HEAD/index/worktree snapshotの比較・取得結果で不一致または失敗を検出",
+		fmt.Sprintf("ISSUES: %s", reason),
+		"RESIDUAL_RISK: reviewerがworkerと別の状態をreviewする可能性を排除できなかった",
+		"TARGETS: repository HEAD/index/worktreeの現在状態と保存済みsnapshot state file",
+		"ARTIFACTS: none",
+		"SOL_QUESTION: worker終了状態とreview開始状態の差異・外部変更の有無をSolが判断する",
 	})
 }
 

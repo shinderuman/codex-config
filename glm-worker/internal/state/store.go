@@ -109,6 +109,9 @@ func (s *StateStore) StartNewTask() (string, error) {
 		"reviewer.ready",
 		"task.status",
 		"isolation.policy",
+		workerEndSnapshotFile,
+		reviewStartSnapshotFile,
+		snapshotComparisonFile,
 	); err != nil {
 		return "", err
 	}
@@ -125,6 +128,29 @@ func (s *StateStore) StartNewTask() (string, error) {
 		return "", err
 	}
 	return taskID, nil
+}
+
+func taskStateFileNames() []string {
+	return []string{
+		"task.id",
+		"worker.id",
+		"worker.ready",
+		"reviewer.id",
+		"reviewer.ready",
+		"task.status",
+		"isolation.policy",
+		"last-request",
+		"last-decision",
+		"pending-decision",
+		"last-review",
+		"baseline-status",
+		"baseline-worktree.patch",
+		"baseline-index.patch",
+		resumeStateFile,
+		workerEndSnapshotFile,
+		reviewStartSnapshotFile,
+		snapshotComparisonFile,
+	}
 }
 
 // TaskIDは現在タスクの必須IDを返す。

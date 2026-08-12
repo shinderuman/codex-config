@@ -288,25 +288,9 @@ func (s *StateStore) RecordSolPacket(value packet.Packet) {
 	})
 }
 
-// Resetは現在タスクの状態・session・baseline・resume checkpointをクリアし、
+// Resetは現在タスクの状態・session・baseline・resume checkpoint・snapshotをクリアし、
 // 現在mirrorをstats履歴へアーカイブする。出力は呼び出し側(app)の責務。
 func (s *StateStore) Reset() error {
 	s.ArchiveCurrentStats()
-	names := []string{
-		"task.id",
-		"task.status",
-		"worker.id",
-		"worker.ready",
-		"reviewer.id",
-		"reviewer.ready",
-		"last-request",
-		"last-decision",
-		"pending-decision",
-		"last-review",
-		"baseline-status",
-		"baseline-worktree.patch",
-		"baseline-index.patch",
-		resumeStateFile,
-	}
-	return s.Remove(names...)
+	return s.Remove(taskStateFileNames()...)
 }

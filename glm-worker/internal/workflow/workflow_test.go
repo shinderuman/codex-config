@@ -87,6 +87,15 @@ func unknownStatusPacket() string {
 
 const zaiFiveHourLog = "API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour. Your limit will reset at 2026-07-22 14:06:34]\n"
 
+var fixedSnapshot = state.GitSnapshot{Head: "test-head", IndexDigest: "test-index", WorktreeDigest: "test-worktree"}
+
+func seedReviewStartSnapshot(t *testing.T, st *state.StateStore) {
+	t.Helper()
+	if err := st.SaveReviewStartSnapshot(fixedSnapshot); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func newStateStoreT(t *testing.T) *state.StateStore {
 	t.Helper()
 	st, err := state.NewStateStore(config.AppConfig{
@@ -105,7 +114,7 @@ func newStateStoreT(t *testing.T) *state.StateStore {
 
 func newWorkflowT(t *testing.T, st *state.StateStore, r *scriptedRunner) *Workflow {
 	t.Helper()
-	return NewWorkflow(config.AppConfig{
+	w := NewWorkflow(config.AppConfig{
 		WorkerModel:           "opus",
 		ReviewerModel:         "haiku",
 		HighRiskReviewerModel: "sonnet",
@@ -113,6 +122,10 @@ func newWorkflowT(t *testing.T, st *state.StateStore, r *scriptedRunner) *Workfl
 		MaxAutoFixRounds:      2,
 		TelemetryContent:      true,
 	}, st, r, io.Discard)
+	w.captureSnapshot = func(string) (state.GitSnapshot, error) {
+		return fixedSnapshot, nil
+	}
+	return w
 }
 
 func TestRunModelRecordsPromptResponseAndUsage(t *testing.T) {
@@ -759,6 +772,7 @@ func TestExecuteResumeRestoresRateLimitedStatusAfterRunnerError(t *testing.T) {
 
 func TestExecuteResumeContinuesReviewerStage(t *testing.T) {
 	st := newStateStoreT(t)
+	seedReviewStartSnapshot(t, st)
 	if err := st.SaveResumeCheckpoint(state.ResumeCheckpoint{
 		Stage:          state.ResumeStageReview,
 		Phase:          "reviewer-1",
@@ -1205,6 +1219,7 @@ func TestRiskFloorRejectsPassAfterExplicitFix(t *testing.T) {
 
 func TestRiskFloorRejectsPassAfterResume(t *testing.T) {
 	st := newStateStoreT(t)
+	seedReviewStartSnapshot(t, st)
 	if err := st.Write("last-request", "req"); err != nil {
 		t.Fatal(err)
 	}
@@ -1317,6 +1332,7 @@ func TestRiskFloorReemitFailClosedOnRepeatedPass(t *testing.T) {
 
 func TestRiskFloorReemitResumeCompliant(t *testing.T) {
 	st := newStateStoreT(t)
+	seedReviewStartSnapshot(t, st)
 	if err := st.Write("last-request", "req"); err != nil {
 		t.Fatal(err)
 	}
@@ -1363,6 +1379,7 @@ func TestRiskFloorReemitResumeCompliant(t *testing.T) {
 
 func TestRiskFloorReemitResumeFailClosed(t *testing.T) {
 	st := newStateStoreT(t)
+	seedReviewStartSnapshot(t, st)
 	if err := st.Write("last-request", "req"); err != nil {
 		t.Fatal(err)
 	}

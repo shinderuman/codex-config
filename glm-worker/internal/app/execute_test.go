@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -63,7 +64,7 @@ func newAppConfig(t *testing.T) config.AppConfig {
 	return config.AppConfig{
 		StateBase:             t.TempDir(),
 		RepoHash:              "apphash",
-		RepoRoot:              "/repo",
+		RepoRoot:              initGitRepo(t),
 		RepoShort:             "appshort1234",
 		RoutineEffort:         "high",
 		MaxAutoFixRounds:      2,
@@ -71,6 +72,15 @@ func newAppConfig(t *testing.T) config.AppConfig {
 		ReviewerModel:         "haiku",
 		HighRiskReviewerModel: "sonnet",
 	}
+}
+
+func initGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "init", "--quiet", dir).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	return dir
 }
 
 func TestExecuteStatusReportsEmptyState(t *testing.T) {
