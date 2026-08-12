@@ -121,7 +121,12 @@ func resumePrompt(checkpoint state.ResumeCheckpoint) string {
 		originalPrompt = checkpoint.Prompt
 	}
 
-	return fmt.Sprintf(`前回のClaude Code呼び出しはZ.ai GLM Coding Planの5時間利用上限で中断しました。
+	reason := "Z.ai GLM Coding Planの5時間利用上限"
+	if checkpoint.ProviderUnavailable {
+		reason = "一時的なprovider障害"
+	}
+
+	return fmt.Sprintf(`前回のClaude Code呼び出しは%sで中断しました。
 
 同じタスク・同じsessionの中断箇所から作業を再開してください。
 現在のworking treeには前回の途中変更が残っている可能性があります。破棄せず、session文脈と照合して続行してください。
@@ -129,7 +134,7 @@ func resumePrompt(checkpoint state.ResumeCheckpoint) string {
 
 前回の指示:
 %s
-`, originalPrompt)
+`, reason, originalPrompt)
 }
 
 func riskFloorReemitPrompt() string {

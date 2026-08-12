@@ -58,6 +58,8 @@ type TaskStats struct {
 	RateLimits                              int              `json:"rate_limits"`
 	PacketCompactions                       int              `json:"packet_compactions"`
 	SolPacketBytes                          int              `json:"sol_packet_bytes"`
+	ProviderUnavailable                     int              `json:"provider_unavailable"`
+	ProviderUnavailableByAlias              map[string]int   `json:"provider_unavailable_by_alias,omitempty"`
 }
 
 func warnStatsFailure(operation string, err error) {
@@ -265,6 +267,16 @@ func (s *StateStore) RecordRateLimit(model string) {
 			stats.RateLimitsByAlias = make(map[string]int)
 		}
 		stats.RateLimitsByAlias[model]++
+	})
+}
+
+func (s *StateStore) RecordProviderUnavailable(model string) {
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		stats.ProviderUnavailable++
+		if stats.ProviderUnavailableByAlias == nil {
+			stats.ProviderUnavailableByAlias = make(map[string]int)
+		}
+		stats.ProviderUnavailableByAlias[model]++
 	})
 }
 

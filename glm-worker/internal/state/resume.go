@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 )
 
 const (
@@ -46,6 +47,13 @@ type ResumeCheckpoint struct {
 	// 空文字は旧checkpointなど未計算を表し、resume時に現在stateから安全側へ決定論的に再構成する。
 	EffectiveRisk       string `json:"effective_risk,omitempty"`
 	EffectiveRiskSource string `json:"effective_risk_source,omitempty"`
+	// ProviderUnavailableは一時provider障害の回復がprobe上限・deadlineに到達し、
+	// WORKER_ERROR/RATE_LIMITEDとは独立した再開可能停止状態になったことを表す。
+	// role/phase/model/session/promptはそのまま保持し、--resumeで同一session/checkpointから再試行する。
+	ProviderUnavailable               bool      `json:"provider_unavailable,omitempty"`
+	ProviderUnavailableClassification string    `json:"provider_unavailable_classification,omitempty"`
+	ProviderUnavailableProbes         int       `json:"provider_unavailable_probes,omitempty"`
+	ProviderUnavailableStartedAt      time.Time `json:"provider_unavailable_started_at,omitempty"`
 }
 
 func (s *StateStore) SaveResumeCheckpoint(checkpoint ResumeCheckpoint) error {

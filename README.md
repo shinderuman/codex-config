@@ -135,7 +135,7 @@ glm-worker --reset
 
 - `--decision`は`NEEDS_SOL_DECISION`で停止した同一タスクを継続する。
 - `--fix`は`NEEDS_SOL_REVIEW`後だけ利用できる。
-- `--resume`はZ.ai 5時間上限で停止した同一phase・sessionを再開する。
+- `--resume`はZ.ai 5時間上限またはprovider一時障害で停止した同一phase・session・checkpointを再開する。
 - `--status`と`--stats`は参照専用、`--reset`は現在の統計をarchiveして実行状態を消去する。
 
 主な環境変数:
@@ -200,6 +200,33 @@ wake時は同じローカルcheckoutでtask IDと`rate-limited`状態を照合�
 automation時刻はRFC3339のoffsetを保持してUTCへ変換する。heartbeat schedulerは`TZID`を`next_run_at`計算へ反映しないため、`DTSTART;TZID=Asia/Tokyo`は使わず、UTCの壁時計値を1回限りの`DTSTART`へ設定する。toolの成功応答だけで完了扱いせず、SQLiteの`automations.next_run_at`またはCodex app上の次回実行時刻が意図したJST時刻と一致することを確認する。
 
 
+## provider一時障害からの回復
+
+Z.ai 5時間上限とは別に、応答本文中の`502`/`503`/`504`/`529`と明確な一時network障害(connection refused/reset、i/o timeout、dial tcp失敗等)だけを一時provider障害として分類する。auth(401/403)・invalid request(400)・session破損・不明errorは従来どおり`WORKER_ERROR`、genericな429はZ.ai 5h固有signalがなければ非transientの`WORKER_ERROR`、5h上限signalのみ`RATE_LIMITED`で、いずれもここへは入らない。
+
+一時障害時は元taskのrole/phase/model/session/checkpoint/Git snapshotを保持したまま同一glm-worker process内で上限付きbackoffを行う。各待機後にrepoを読ませずtoolを許可せずsessionを作成・保存せずreasoningさせない最小疎通probeを同一endpoint・対象modelへ1回だけ送り(`--safe-mode`・setting sources空・empty MCP・env隔離を維持)、成功時だけ保存済み本taskを同一sessionで1回resumeする。全体でprobe最大4回・hard deadline約3時間。短周期pollingやCodex heartbeatによる途中wake、新task/sessionでの再実行は行わない。
+
+deadline/回数上限に到達すると、`WORKER_ERROR`や`RATE_LIMITED`とは独立した`provider-unavailable`の再開可能task状態とcheckpointを保存する(5h上限のような自動wakeは設定しない)。
+
+```text
+STATUS: PROVIDER_UNAVAILABLE
+PHASE: ...
+CLASSIFICATION: http-503
+PROBES: 4
+ELAPSED: ...
+RESUME_AVAILABLE: true
+RESUME_COMMAND: glm-worker --resume
+```
+
+回復後:
+
+```sh
+glm-worker --resume
+```
+
+同じtask/session/checkpointから再試行する。
+
+
 ## GLM実行の軽量化
 
 - worker: `opus` alias → `glm-5.2`
@@ -226,7 +253,7 @@ glm-worker --status
 glm-worker --stats
 ```
 
-`--status`は現在のtask ID、task status、task別artifact保存先、session、判断待ち、rate limit状態を表示する。
+`--status`は現在のtask ID、task status、task別artifact保存先、session、判断待ち、rate limit状態、provider-unavailable状態(原因分類・試行数・経過・RESUME_AVAILABLE)を表示する。
 `--stats`は通常のworker packetへ混ぜず、完了済みと現在のタスクを集計して次を表示する。
 
 - worker/reviewerとmodel alias別の呼び出し回数・実行時間・turn数
@@ -234,6 +261,7 @@ glm-worker --stats
 - Sol判断・明示fix・resume・自動fixの回数
 - `NEEDS_SOL_DECISION`、`NEEDS_SOL_REVIEW`、`PASS`の件数
 - model alias別rate limit、packet再圧縮、Solへ返したpacket bytes
+- model alias別provider-unavailable件数
 - 現在taskのartifact保存先
 
 新規タスク開始時に前タスクの統計をarchiveし、`--reset`時も現在値を破棄せずarchiveする。

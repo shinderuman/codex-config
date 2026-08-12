@@ -22,9 +22,11 @@ type fakeStep struct {
 }
 
 type fakeRunner struct {
-	steps   []fakeStep
-	prompts []string
-	models  []string
+	steps     []fakeStep
+	probeErrs []error
+	prompts   []string
+	models    []string
+	probes    []string
 }
 
 func (r *fakeRunner) Run(
@@ -45,6 +47,16 @@ func (r *fakeRunner) Run(
 		}
 	}
 	return runner.RunResult{SessionID: "test-session", Response: step.output}, step.runErr
+}
+
+func (r *fakeRunner) Probe(model string) (runner.ProbeResult, error) {
+	r.probes = append(r.probes, model)
+	index := len(r.probes) - 1
+	var err error
+	if index < len(r.probeErrs) {
+		err = r.probeErrs[index]
+	}
+	return runner.ProbeResult{}, err
 }
 
 func (r *fakeRunner) factory() RunnerFactory {

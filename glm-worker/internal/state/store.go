@@ -20,11 +20,12 @@ const (
 	WorkerRole   SessionRole = "worker"
 	ReviewerRole SessionRole = "reviewer"
 
-	TaskStatusActive           TaskStatus = "active"
-	TaskStatusWaitingDecision  TaskStatus = "waiting-decision"
-	TaskStatusWaitingSolReview TaskStatus = "waiting-sol-review"
-	TaskStatusComplete         TaskStatus = "complete"
-	TaskStatusRateLimited      TaskStatus = "rate-limited"
+	TaskStatusActive              TaskStatus = "active"
+	TaskStatusWaitingDecision     TaskStatus = "waiting-decision"
+	TaskStatusWaitingSolReview    TaskStatus = "waiting-sol-review"
+	TaskStatusComplete            TaskStatus = "complete"
+	TaskStatusRateLimited         TaskStatus = "rate-limited"
+	TaskStatusProviderUnavailable TaskStatus = "provider-unavailable"
 )
 
 type StateStore struct {

@@ -4,8 +4,10 @@ package workflow
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +22,7 @@ import (
 // interfaceは実装側ではなく利用側に置き、テストでは偽装実装へ差し替える。
 type ModelRunner interface {
 	Run(role state.SessionRole, model string, readOnly bool, effort string, prompt string, outputPath string) (runner.RunResult, error)
+	Probe(model string) (runner.ProbeResult, error)
 }
 
 type Workflow struct {
@@ -30,6 +33,9 @@ type Workflow struct {
 	temp                string
 	captureSnapshot     func(repoRoot string) (state.GitSnapshot, error)
 	collectChangedPaths func(repoRoot, baselineHead string) ([]string, error)
+	now                 func() time.Time
+	sleep               func(time.Duration)
+	jitter              func(base time.Duration) time.Duration
 }
 
 func NewWorkflow(cfg config.AppConfig, st *state.StateStore, r ModelRunner, output io.Writer) *Workflow {
@@ -40,7 +46,33 @@ func NewWorkflow(cfg config.AppConfig, st *state.StateStore, r ModelRunner, outp
 		output:              output,
 		captureSnapshot:     state.CaptureGitSnapshot,
 		collectChangedPaths: collectChangedPaths,
+		now:                 time.Now,
+		sleep:               time.Sleep,
+		jitter:              boundedBackoffJitter,
 	}
+}
+
+// providerUnavailableDeadlineは一時障害回復のhard deadline。backoffは各待機後にprobe 1回だけ送り、
+// この上限とprobe回数上限の先に到達した側で停止する。deadlineを超えるsleepはbackoffWaitが禁止する。
+const providerUnavailableDeadline = 3 * time.Hour
+
+const maxTransientProbes = 4
+
+// transientBackoffScheduleは各probe前のbase待機時間。合計155分で、jitter込みでも通常は
+// 2.5〜3時間以内にdeadlineへ収まるよう選んだ。
+var transientBackoffSchedule = []time.Duration{
+	5 * time.Minute,
+	15 * time.Minute,
+	45 * time.Minute,
+	90 * time.Minute,
+}
+
+// boundedBackoffJitterは固定間隔pollingを避けるためbaseに0〜25%を加える。testへ差し替え可能。
+func boundedBackoffJitter(base time.Duration) time.Duration {
+	if base <= 0 {
+		return base
+	}
+	return base + time.Duration(rand.Int63n(int64(base)/4+1))
 }
 
 func (w *Workflow) withTemp(fn func() error) error {
@@ -58,8 +90,13 @@ func (w *Workflow) ExecuteNewTask(request string) error {
 		if w.state.Exists("pending-decision") {
 			return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: previous task is waiting for Sol decision; use --decision or --reset")
 		}
-		if checkpoint, err := w.state.LoadResumeCheckpoint(); err == nil && checkpoint.RateLimited {
-			return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: previous task is rate-limited; use --resume or --reset")
+		if checkpoint, err := w.state.LoadResumeCheckpoint(); err == nil {
+			switch {
+			case checkpoint.RateLimited:
+				return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: previous task is rate-limited; use --resume or --reset")
+			case checkpoint.ProviderUnavailable:
+				return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: previous task is provider-unavailable; use --resume or --reset")
+			}
 		}
 
 		if _, err := w.state.StartNewTask(); err != nil {
@@ -185,8 +222,8 @@ func (w *Workflow) ExecuteResume() error {
 		if err != nil {
 			return err
 		}
-		if !checkpoint.RateLimited {
-			return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: saved task is not stopped by Z.ai 5h limit")
+		if !checkpoint.RateLimited && !checkpoint.ProviderUnavailable {
+			return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: saved task is not stopped by Z.ai 5h limit or provider unavailability")
 		}
 		if !isKnownResumeStage(checkpoint.Stage) {
 			return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: unknown resume stage: %s", checkpoint.Stage)
@@ -197,6 +234,20 @@ func (w *Workflow) ExecuteResume() error {
 			return err
 		}
 		w.state.RecordResume()
+		// provider-unavailable resumeは本taskの前にprobeで疎通確認する。未回復のまま重い実requestを
+		// 浪費しないため。transient失敗でbackoffに入り、上限で同じprovider-unavailable状態を再保存、
+		// 明確な非transient errorはfail closedへ復帰する。
+		if checkpoint.ProviderUnavailable {
+			if err := w.gateResumeOnProbe(checkpoint); err != nil {
+				var pErr *runner.ProviderUnavailableError
+				if errors.As(err, &pErr) {
+					return err
+				}
+				_ = w.state.ClearResumeCheckpoint()
+				_ = w.state.RemoveUnreadySession(checkpoint.Role)
+				return err
+			}
+		}
 		// review工程resume時は5h上限の時間経過を挟んでreview-start snapshotと現在状態を再照合する。
 		if checkpoint.Stage == state.ResumeStageReview {
 			if stopped, err := w.verifyReviewResumeSnapshot(); err != nil {
@@ -209,14 +260,26 @@ func (w *Workflow) ExecuteResume() error {
 		checkpoint.RateLimited = false
 		checkpoint.ResetAtCST = ""
 		checkpoint.ResetAtRFC3339 = ""
+		checkpoint.ProviderUnavailable = false
+		checkpoint.ProviderUnavailableClassification = ""
+		checkpoint.ProviderUnavailableProbes = 0
+		checkpoint.ProviderUnavailableStartedAt = time.Time{}
 
 		result, err := w.runModel(checkpoint)
 		if err != nil {
+			var pErr *runner.ProviderUnavailableError
+			if errors.As(err, &pErr) {
+				return err
+			}
 			saved, loadErr := w.state.LoadResumeCheckpoint()
-			if loadErr != nil || !saved.RateLimited {
+			if loadErr != nil || (!saved.RateLimited && !saved.ProviderUnavailable) {
 				_ = w.state.SaveResumeCheckpoint(previousCheckpoint)
 			}
-			_ = w.state.SetTaskStatus(state.TaskStatusRateLimited)
+			restoredStatus := state.TaskStatusRateLimited
+			if previousCheckpoint.ProviderUnavailable {
+				restoredStatus = state.TaskStatusProviderUnavailable
+			}
+			_ = w.state.SetTaskStatus(restoredStatus)
 			return err
 		}
 
@@ -633,6 +696,34 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 		}
 	}
 
+	// Z.ai 5h上限以外の一時障害(502/503/504/529・明確な一時network障害)は同じsession/checkpointと
+	// Git snapshotを保持した上限付きbackoffで回復する。auth/invalid request/session破損/不明errorは
+	// 非transientのためここへ入らず、従来どおり下段のWORKER_ERROR分岐へ進む。
+	if runErr != nil {
+		if class, transient := runner.ClassifyTransientFailure(runner.ReadTransientSignal(outputPath)); transient {
+			recovered, resumeResult, resumeStartedAt, resumeCompletedAt, recErr := w.recoverTransient(
+				checkpoint, outputPath, class, runResult, startedAt, completedAt,
+			)
+			if recovered {
+				runResult = resumeResult
+				startedAt = resumeStartedAt
+				completedAt = resumeCompletedAt
+				runErr = nil
+			} else {
+				var pErr *runner.ProviderUnavailableError
+				if errors.As(recErr, &pErr) {
+					_ = w.state.SecureArtifactDir()
+					w.state.RecordProviderUnavailable(checkpoint.Model)
+					return packet.Packet{}, recErr
+				}
+				runResult = resumeResult
+				startedAt = resumeStartedAt
+				completedAt = resumeCompletedAt
+				runErr = recErr
+			}
+		}
+	}
+
 	if err := w.state.SecureArtifactDir(); err != nil {
 		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", err, outputPath)
 		return packet.Packet{}, err
@@ -683,6 +774,198 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	}
 	w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "success", result.Status(), nil, outputPath)
 	return result, nil
+}
+
+// recoverTransientは一時provider障害を同じsession/checkpoint/Git snapshot保持で回復する。
+// 5h上限のような自動wakeは設定せず、短周期polling・新task/sessionでの再実行は行わない。
+func (w *Workflow) recoverTransient(
+	checkpoint state.ResumeCheckpoint,
+	outputPath string,
+	classification string,
+	initialResult runner.RunResult,
+	initialStartedAt time.Time,
+	initialCompletedAt time.Time,
+) (bool, runner.RunResult, time.Time, time.Time, error) {
+	w.recordModelCall(checkpoint, initialResult, initialStartedAt, initialCompletedAt, "transient_error", "", fmt.Errorf("transient provider failure: %s", classification), outputPath)
+	if err := w.state.MarkReady(checkpoint.Role); err != nil {
+		return false, runner.RunResult{}, time.Time{}, time.Time{}, err
+	}
+	return w.recoveryLoop(checkpoint, classification, false, func() (bool, runner.RunResult, time.Time, time.Time, error) {
+		return w.runResumedTask(checkpoint, outputPath)
+	})
+}
+
+// gateResumeOnProbeはprovider-unavailableからの--resumeで本task送出前にprobeで疎通を確認する。
+// 手動resume直後は既に時間経過しているため最初のprobeは即時に行う。
+func (w *Workflow) gateResumeOnProbe(checkpoint state.ResumeCheckpoint) error {
+	_, _, _, _, err := w.recoveryLoop(checkpoint, checkpoint.ProviderUnavailableClassification, true, func() (bool, runner.RunResult, time.Time, time.Time, error) {
+		return true, runner.RunResult{}, time.Time{}, time.Time{}, nil
+	})
+	return err
+}
+
+func (w *Workflow) runResumedTask(checkpoint state.ResumeCheckpoint, outputPath string) (bool, runner.RunResult, time.Time, time.Time, error) {
+	startedAt := w.now().UTC()
+	result, runErr := w.runner.Run(
+		checkpoint.Role,
+		checkpoint.Model,
+		checkpoint.ReadOnly,
+		checkpoint.Effort,
+		checkpoint.Prompt,
+		outputPath,
+	)
+	completedAt := w.now().UTC()
+	w.state.RecordModelDuration(checkpoint.Model, completedAt.Sub(startedAt))
+	if runErr == nil {
+		return true, result, startedAt, completedAt, nil
+	}
+	if _, transient := runner.ClassifyTransientFailure(runner.ReadTransientSignal(outputPath)); !transient {
+		return false, result, startedAt, completedAt, runErr
+	}
+	w.recordModelCall(checkpoint, result, startedAt, completedAt, "transient_error", "", runErr, outputPath)
+	return false, runner.RunResult{}, startedAt, completedAt, nil
+}
+
+// recoveryLoopは上限付きbackoffでprobeを繰り返す。firstProbeImmediateのとき(--resume等で既に時間経過済み)
+// 最初のprobe前に待機しない。probeの明確な非transient errorは即fail closed、502/503/504/529/networkだけ継続する。
+func (w *Workflow) recoveryLoop(
+	checkpoint state.ResumeCheckpoint,
+	classification string,
+	firstProbeImmediate bool,
+	onProbeSuccess func() (bool, runner.RunResult, time.Time, time.Time, error),
+) (bool, runner.RunResult, time.Time, time.Time, error) {
+	recoveryStart := w.now().UTC()
+	deadline := recoveryStart.Add(providerUnavailableDeadline)
+	probes := 0
+	sleeps := 0
+
+	for {
+		if probes >= maxTransientProbes {
+			break
+		}
+		if !(firstProbeImmediate && probes == 0) {
+			wait, ok := w.backoffWait(sleeps, deadline)
+			if !ok {
+				break
+			}
+			w.sleep(wait)
+			sleeps++
+			if w.now().After(deadline) {
+				break
+			}
+		}
+
+		probes++
+		probeStartedAt := w.now().UTC()
+		probeResult, probeErr := w.runner.Probe(checkpoint.Model)
+		probeCompletedAt := w.now().UTC()
+		w.state.RecordModelCall(checkpoint.Role, checkpoint.Model)
+		w.state.RecordModelDuration(checkpoint.Model, probeCompletedAt.Sub(probeStartedAt))
+		w.recordProbeCall(checkpoint, probeResult, probes, probeStartedAt, probeCompletedAt, probeErr)
+
+		if probeErr != nil {
+			if _, transient := runner.ClassifyTransientFailure(probeErr.Error()); !transient {
+				return false, runner.RunResult{}, probeStartedAt, probeCompletedAt, probeErr
+			}
+			continue
+		}
+
+		recovered, result, startedAt, completedAt, err := onProbeSuccess()
+		if recovered {
+			return true, result, startedAt, completedAt, nil
+		}
+		if err != nil {
+			return false, result, startedAt, completedAt, err
+		}
+	}
+
+	pErr, saveErr := w.saveProviderUnavailable(checkpoint, classification, probes, recoveryStart)
+	if saveErr != nil {
+		return false, runner.RunResult{}, time.Time{}, time.Time{}, saveErr
+	}
+	return false, runner.RunResult{}, time.Time{}, time.Time{}, pErr
+}
+
+// backoffWaitはscheduleにjitterを加えた待機時間を返す。deadline残り時間を超えないよう切り詰め、
+// schedule外か残り0のときはok=falseを返す。
+func (w *Workflow) backoffWait(sleeps int, deadline time.Time) (time.Duration, bool) {
+	if sleeps >= len(transientBackoffSchedule) {
+		return 0, false
+	}
+	remaining := deadline.Sub(w.now())
+	if remaining <= 0 {
+		return 0, false
+	}
+	wait := w.jitter(transientBackoffSchedule[sleeps])
+	if wait > remaining {
+		wait = remaining
+	}
+	return wait, true
+}
+
+func (w *Workflow) saveProviderUnavailable(checkpoint state.ResumeCheckpoint, classification string, probes int, recoveryStart time.Time) (*runner.ProviderUnavailableError, error) {
+	checkpoint.ProviderUnavailable = true
+	checkpoint.ProviderUnavailableClassification = classification
+	checkpoint.ProviderUnavailableProbes = probes
+	checkpoint.ProviderUnavailableStartedAt = recoveryStart
+	checkpoint.RateLimited = false
+	if err := w.state.SaveResumeCheckpoint(checkpoint); err != nil {
+		return nil, err
+	}
+	if err := w.state.SetTaskStatus(state.TaskStatusProviderUnavailable); err != nil {
+		return nil, err
+	}
+	taskID, _ := w.state.TaskID()
+	return &runner.ProviderUnavailableError{
+		Phase:          checkpoint.Phase,
+		Classification: classification,
+		Probes:         probes,
+		Elapsed:        w.now().Sub(recoveryStart),
+		TaskID:         taskID,
+		RepoRoot:       w.config.RepoRoot,
+		RepoShort:      w.config.RepoShort,
+	}, nil
+}
+
+func (w *Workflow) recordProbeCall(
+	checkpoint state.ResumeCheckpoint,
+	probe runner.ProbeResult,
+	attempt int,
+	startedAt time.Time,
+	completedAt time.Time,
+	probeErr error,
+) {
+	outcome := "probe_success"
+	errorText := ""
+	if probeErr != nil {
+		outcome = "probe_failure"
+		errorText = boundedText(probeErr.Error(), packet.MaxDiagnosticBytes)
+	}
+	promptHash := sha256.Sum256([]byte(runner.ProbePrompt))
+	response := probe.Response
+	if !w.config.TelemetryContent {
+		response = ""
+	}
+	w.state.RecordModelCallLog(state.ModelCallLog{
+		TaskID:           w.state.ReadOr("task.id", "unknown"),
+		SessionID:        "none",
+		StartedAt:        startedAt,
+		CompletedAt:      completedAt,
+		Phase:            fmt.Sprintf("%s-probe-%d", checkpoint.Phase, attempt),
+		Role:             checkpoint.Role,
+		ModelAlias:       checkpoint.Model,
+		Effort:           "low",
+		ReadOnly:         true,
+		Outcome:          outcome,
+		PromptBytes:      len(runner.ProbePrompt),
+		PromptSHA256:     hex.EncodeToString(promptHash[:]),
+		Response:         response,
+		ResponseBytes:    len(probe.Response),
+		Error:            errorText,
+		TopLevelUsage:    state.TokenUsage(probe.Usage),
+		WallDurationMS:   completedAt.Sub(startedAt).Milliseconds(),
+		ClaudeDurationMS: probe.DurationMS,
+	})
 }
 
 func (w *Workflow) recordModelCall(

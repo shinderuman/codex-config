@@ -5,6 +5,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
 )
@@ -28,14 +29,39 @@ func printStatus(st *state.StateStore, stdout io.Writer) error {
 	}
 
 	checkpoint, err := st.LoadResumeCheckpoint()
-	if err == nil && checkpoint.RateLimited {
+	rateLimited := err == nil && checkpoint.RateLimited
+	providerUnavailable := err == nil && checkpoint.ProviderUnavailable
+
+	if rateLimited {
 		fmt.Fprintln(stdout, "RATE_LIMITED: yes")
 		fmt.Fprintf(stdout, "RATE_LIMIT_PHASE: %s\n", checkpoint.Phase)
 		fmt.Fprintf(stdout, "RESET_AT_CST: %s\n", checkpoint.ResetAtCST)
 		fmt.Fprintln(stdout, "RESET_TIMEZONE: CST (China Standard Time, UTC+8)")
-		fmt.Fprintln(stdout, "RESUME_AVAILABLE: yes")
 	} else {
 		fmt.Fprintln(stdout, "RATE_LIMITED: no")
+	}
+
+	if providerUnavailable {
+		fmt.Fprintln(stdout, "PROVIDER_UNAVAILABLE: yes")
+		fmt.Fprintf(stdout, "PROVIDER_PHASE: %s\n", checkpoint.Phase)
+		classification := checkpoint.ProviderUnavailableClassification
+		if classification == "" {
+			classification = "unknown"
+		}
+		fmt.Fprintf(stdout, "PROVIDER_CLASSIFICATION: %s\n", classification)
+		fmt.Fprintf(stdout, "PROVIDER_PROBES: %d\n", checkpoint.ProviderUnavailableProbes)
+		if !checkpoint.ProviderUnavailableStartedAt.IsZero() {
+			fmt.Fprintf(stdout, "PROVIDER_ELAPSED: %s\n", time.Since(checkpoint.ProviderUnavailableStartedAt).Truncate(time.Second))
+		} else {
+			fmt.Fprintln(stdout, "PROVIDER_ELAPSED: unknown")
+		}
+	} else {
+		fmt.Fprintln(stdout, "PROVIDER_UNAVAILABLE: no")
+	}
+
+	if rateLimited || providerUnavailable {
+		fmt.Fprintln(stdout, "RESUME_AVAILABLE: yes")
+	} else {
 		fmt.Fprintln(stdout, "RESUME_AVAILABLE: no")
 	}
 	return nil
@@ -75,6 +101,8 @@ func printStats(st *state.StateStore, stdout io.Writer) error {
 		aggregate.RateLimits += stats.RateLimits
 		aggregate.PacketCompactions += stats.PacketCompactions
 		aggregate.SolPacketBytes += stats.SolPacketBytes
+		aggregate.ProviderUnavailable += stats.ProviderUnavailable
+		mergeIntMap(&aggregate.ProviderUnavailableByAlias, stats.ProviderUnavailableByAlias)
 	}
 
 	fmt.Fprintf(stdout, "TASKS: %d\n", len(all))
@@ -107,6 +135,8 @@ func printStats(st *state.StateStore, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "PASS_PACKETS: %d\n", aggregate.PassPackets)
 	fmt.Fprintf(stdout, "RATE_LIMITS: %d\n", aggregate.RateLimits)
 	fmt.Fprintf(stdout, "RATE_LIMITS_BY_ALIAS: %s\n", formatIntMap(aggregate.RateLimitsByAlias))
+	fmt.Fprintf(stdout, "PROVIDER_UNAVAILABLE: %d\n", aggregate.ProviderUnavailable)
+	fmt.Fprintf(stdout, "PROVIDER_UNAVAILABLE_BY_ALIAS: %s\n", formatIntMap(aggregate.ProviderUnavailableByAlias))
 	fmt.Fprintf(stdout, "PACKET_COMPACTIONS: %d\n", aggregate.PacketCompactions)
 	fmt.Fprintf(stdout, "SOL_PACKET_BYTES: %d\n", aggregate.SolPacketBytes)
 	fmt.Fprintf(stdout, "TELEMETRY_DIR: %s\n", st.Path("telemetry"))

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/config"
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/packet"
@@ -21,9 +22,11 @@ type runnerStep struct {
 }
 
 type scriptedRunner struct {
-	steps   []runnerStep
-	prompts []string
-	models  []string
+	steps     []runnerStep
+	probeErrs []error
+	prompts   []string
+	models    []string
+	probes    []string
 }
 
 func (r *scriptedRunner) Run(
@@ -51,6 +54,16 @@ func (r *scriptedRunner) Run(
 		result.Response = step.output
 	}
 	return result, step.runErr
+}
+
+func (r *scriptedRunner) Probe(model string) (runner.ProbeResult, error) {
+	r.probes = append(r.probes, model)
+	index := len(r.probes) - 1
+	var err error
+	if index < len(r.probeErrs) {
+		err = r.probeErrs[index]
+	}
+	return runner.ProbeResult{}, err
 }
 
 func implementedPacket(summary string) string {
@@ -112,6 +125,26 @@ func newStateStoreT(t *testing.T) *state.StateStore {
 	return st
 }
 
+var testFixedTime = time.Unix(1_700_000_000, 0).UTC()
+
+// fakeClockは実sleepなしでbackoff scheduleとdeadlineを駆動する試験用clock。
+// sleepは即座に現在時刻を進め、待機時間を記録する。
+type fakeClock struct {
+	now    time.Time
+	sleeps []time.Duration
+}
+
+func newFakeClock() *fakeClock {
+	return &fakeClock{now: testFixedTime}
+}
+
+func (c *fakeClock) nowFunc() time.Time { return c.now }
+
+func (c *fakeClock) sleepFunc(d time.Duration) {
+	c.sleeps = append(c.sleeps, d)
+	c.now = c.now.Add(d)
+}
+
 func newWorkflowT(t *testing.T, st *state.StateStore, r *scriptedRunner) *Workflow {
 	t.Helper()
 	w := NewWorkflow(config.AppConfig{
@@ -128,8 +161,15 @@ func newWorkflowT(t *testing.T, st *state.StateStore, r *scriptedRunner) *Workfl
 	w.collectChangedPaths = func(string, string) ([]string, error) {
 		return nil, nil
 	}
+	clock := newFakeClock()
+	w.now = clock.nowFunc
+	w.sleep = clock.sleepFunc
+	w.jitter = identityJitter
 	return w
 }
+
+// identityJitterはtest用の決定論jitter。待機時間をそのまま返す。
+func identityJitter(base time.Duration) time.Duration { return base }
 
 func TestRunModelRecordsPromptResponseAndUsage(t *testing.T) {
 	st := newStateStoreT(t)
@@ -753,12 +793,12 @@ func TestExecuteResumeRestoresRateLimitedStatusAfterRunnerError(t *testing.T) {
 	}
 
 	r := &scriptedRunner{steps: []runnerStep{{
-		output: "503 temporary service error\n",
+		output: "boom fatal session error\n",
 		runErr: errors.New("exit status 1"),
 	}}}
 	w := newWorkflowT(t, st, r)
 	err := w.ExecuteResume()
-	if err == nil || !strings.Contains(err.Error(), "503 temporary service error") {
+	if err == nil || !strings.Contains(err.Error(), "boom fatal session error") {
 		t.Fatalf("runner errorを期待: %v", err)
 	}
 	if st.TaskStatus() != state.TaskStatusRateLimited {
