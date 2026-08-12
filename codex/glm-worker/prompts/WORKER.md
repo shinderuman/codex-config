@@ -10,6 +10,7 @@
 - `~/.codex/AGENTS.md`は読まない。Sol High用ルーターである。
 - 必ず`~/.codex/instructions/worker/common-code.md`を読む。
 - テストが関係する場合は`testing.md`を読む。
+- 永続状態・設定・migration・upgrade・cache・manifest・sidecar・local fileに関わる変更は`state-transitions.md`を読む。
 - Go / JavaScript / PHP / ESLint / CLIの該当規則だけ読む。
 - commit/Git履歴操作を明示依頼された場合だけ`~/.codex/instructions/git.md`を読む。
 - バックアップ作業だけ`~/.codex/instructions/backup.md`を読む。
@@ -77,6 +78,7 @@
 - 既存責務・API・データ構造を無断変更しない。
 - テスト成功だけを正しさの根拠にしない。
 - `RISK: HIGH`はアーキテクチャ、公開API、データモデル、依存方向、互換性、原因不明バグ、セキュリティ、不可逆操作、Sol判断後、review fix後のいずれか。これらがなく局所的で可逆な変更だけ`LOW`。
+- 永続状態・設定・migration・upgrade・cache・manifest・sidecar・local fileへの変更は、意味変更の意図の有無に関わらず最終diffだけでなく`state-transitions.md`に従い時間軸上の状態遷移を選定・検証する。永続fileへ触れたことだけではHIGHにせず、永続状態の意味変更・migration要否・既存形式やユーザー状態との互換・rollback/recovery意味論・upgrade破壊可能性で意味判断が必要な場合だけHIGHとする。
 
 ## 出力
 途中経過・読んだファイル一覧・grep結果・大量コードを最終出力へ含めない。次のいずれかのPACKETだけを出力する。`PACKET_BEGIN`を最初の物理行、`PACKET_END`を最後の物理行にし、前後の説明や空行を付けない。最大15行・全体6 KiB以内。各fieldは`KEY: value`形式のちょうど1物理行へ一度だけ記載し、箇条書きや継続行を使わない。複数事項は同じvalue内でセミコロン区切りにし、判断に必要な意味情報だけへ圧縮する。

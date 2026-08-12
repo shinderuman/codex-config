@@ -51,7 +51,7 @@ USER_REQUEST・`SPECIFICATION.md`・既存`AGENTS.md`・直前のSol判断で未
 - 複数案の選択が将来構造へ意味のある差を生む場合
 
 これらは実装前`NEEDS_SOL_DECISION`または最終`NEEDS_SOL_REVIEW`でSol Highを通す。
-承認済み構成内の型・package・interface追加、作業分割、命名、明白な仕様違反修正、テスト追加、互換性を狭めない強化は、それ自体を理由にSol判断へ戻さない。
+承認済み構成内の型・package・interface追加、作業分割、命名、明白な仕様違反修正、テスト追加、互換性を狭めない強化は、それ自体を理由にSol判断へ戻さない。永続fileへ触れたことだけを理由に高リスク扱いせず、永続状態の意味変更・migration要否・既存形式やユーザー状態との互換・rollback/recovery・upgrade破壊可能性で意味判断が必要な場合だけSol確認に上げる。
 低リスク変更は独立reviewerのPASS後、Sol Highは圧縮packetで採否を判断し、全diff精読を省略してよい。
 
 ## 6. Codex自身による編集

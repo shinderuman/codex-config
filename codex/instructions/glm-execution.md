@@ -16,12 +16,12 @@
 
 ## 待機
 
-- 実行中はbackground terminalで利用可能な最大待機時間を指定してblocking waitする。
-- tool内部上限でsession IDが返る場合は、同じtool orchestration内で最大待機を再開し、Sol Highへ制御を戻して`write_stdin`等を呼ぶ方式へ変換しない。
-- 固定間隔の`write_stdin`、status・端末出力・生存確認を行わない。一定時間無出力であることだけを理由に失敗・再実行しない。
-- ユーザー向け進捗報告のために待機を短縮・中断したりGLMへ問い合わせたりしない。必要な報告は最後に確認済みの状態だけで行う。
+- 最初の`functions.exec`等の呼び出しからbackground terminalで利用可能な最大待機時間を指定し、可能な限り同一tool orchestration内で完了までblocking waitする。
+- tool内部上限でcell ID（session ID）が返る場合も、1回のwaitに最大待機時間を使い、短時間・固定間隔でwaitを掛け直さない。同じtool orchestration内で最大待機を再開し、Sol Highへ制御を戻して`write_stdin`等を呼ぶ方式へ変換しない。
+- tool orchestrationやexec cellに対する短時間・固定間隔の反復wait、固定間隔の`write_stdin`、status・端末出力・生存確認を行わない。一定時間無出力であることだけを理由に失敗・再実行しない。
+- 無出力を理由にした定期進捗発言、進捗報告目的のwake・待機短縮・中断・GLMへの問い合わせをしない。必要な報告は最後に確認済みの状態だけで行う。
 - ユーザーが状態確認を明示した場合だけ中間状態を確認してよい。
-- 最大待機時間後も生存していれば、再調査・代替作業・重複起動をせず再び最大時間で待つ。
+- 最大待機時間後も生存していれば、再調査・代替作業・重複起動をせず再び最大時間で待つ。完了や`RATE_LIMITED`を見逃さない現行動作を維持する。
 - 完了時はユーザーの追加入力を待たず、packet処理と可能な次工程を進める。ユーザーの判断・追加情報・許可が本当に必要な場合だけ停止する。
 
 ## `STATUS: RATE_LIMITED`

@@ -11,6 +11,7 @@
 - `~/.codex/AGENTS.md`は読まない。
 - `~/.codex/instructions/worker/`の該当規則を確認。
 - USER_REQUESTの各要求、範囲外変更、根本原因、テスト観点、既存互換性を独立確認。
+- 永続状態・設定・migration・upgrade・cache・manifest・sidecar・local fileへの変更は、workerのテスト一覧を前提にせず、USER_REQUESTとdiffから開始状態・2回目以降・解除後・旧version upgradeの遷移漏れを独立確認する(`state-transitions.md`)。
 - 必要ならテスト・lint・buildを再実行。
 - PRE_TASK_BASELINEが提示されている場合は必要に応じて参照し、worker開始前から存在した未コミット変更を今回変更と誤認しない。
 - レビュー中はファイルを編集しない。Bash経由書込やformatter変更も行わない。
@@ -27,7 +28,7 @@
 FIX_REQUIRED: Sol Highの新設計判断なしに直せる明確なバグ、要求漏れ、テスト不足、lint/build/test失敗、規約違反、範囲外変更、明確なエラーハンドリング不足、既存Sol判断との不一致。
 USER_REQUEST・`SPECIFICATION.md`・`AGENTS.md`・既存Sol判断で方向が確定している修正は、型・package・interface・互換性へ触れても、新しい意味判断が不要ならFIX_REQUIREDとしてworkerへ自動修正させる。作業分割・命名・明白な仕様準拠修正だけを理由にSolへ戻さない。
 
-NEEDS_SOL_REVIEW: アーキテクチャ、責務、公開API、データモデル、依存方向、互換性、原因不明バグの根本原因、preflight後の新規高リスク判断、セキュリティ・データ破損・不可逆性、実装前にSol判断を受けた高リスク変更、またはコードを見ないとSol Highが意味判断できない残余リスクがある場合。`TARGETS`を最小のfile:symbol/行範囲/論点へ絞る。
+NEEDS_SOL_REVIEW: アーキテクチャ、責務、公開API、データモデル、依存方向、互換性、原因不明バグの根本原因、preflight後の新規高リスク判断、セキュリティ・データ破損・不可逆性、実装前にSol判断を受けた高リスク変更、またはコードを見ないとSol Highが意味判断できない残余リスクがある場合。`TARGETS`を最小のfile:symbol/行範囲/論点へ絞る。永続fileへ触れただけの低リスク変更はPASS/FIX_REQUIREDとし、永続状態の意味変更・migration・既存形式やユーザー状態との互換・rollback/recovery意味論・upgrade破壊可能性で意味判断が必要な場合だけNEEDS_SOL_REVIEWとする。
 
 PASS: USER_REQUESTを満たし明確な不具合・要求漏れがなく、必要テストがあり、新しい高レバレッジ判断がなく、公開API・データモデル・責務・互換性等のSol確認対象ではなく、圧縮意味情報でSol Highが最終採否できる`RISK: LOW`の変更のみ。高リスクなら`NEEDS_SOL_REVIEW`。
 
