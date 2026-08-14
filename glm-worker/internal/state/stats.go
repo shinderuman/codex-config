@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/packet"
@@ -15,6 +16,9 @@ import (
 
 const (
 	currentStatsFile = "task-stats.json"
+	// taskStatsVersionはTaskStats JSONのschema version。既存fieldの意味/JSON名を変更するときだけ
+	// bumpし(旧archiveはAllTaskStats/decodeTaskStatsが読み飛ばす)、新集計fieldのomitempty追加は
+	// 後方互換(旧archiveは該当map欠落=0寄与)のためbump不要。
 	taskStatsVersion = 2
 )
 
@@ -60,6 +64,13 @@ type TaskStats struct {
 	SolPacketBytes                          int              `json:"sol_packet_bytes"`
 	ProviderUnavailable                     int              `json:"provider_unavailable"`
 	ProviderUnavailableByAlias              map[string]int   `json:"provider_unavailable_by_alias,omitempty"`
+	// 診断集計(v2のままomitempty追加)。旧archiveは該当map欠落=未観測(0寄与)で、
+	// --stats集計でcaptured record/archiveだけが計上される。比率(分母)は算出しない。
+	RiskFloorByCategory    map[string]int `json:"risk_floor_by_category,omitempty"`
+	SnapshotMismatches     int            `json:"snapshot_mismatches,omitempty"`
+	SnapshotMismatchByAxis map[string]int `json:"snapshot_mismatch_by_axis,omitempty"`
+	PacketRejectByCategory map[string]int `json:"packet_reject_by_category,omitempty"`
+	ProbeOutcome           map[string]int `json:"probe_outcome,omitempty"`
 }
 
 func warnStatsFailure(operation string, err error) {
@@ -283,6 +294,51 @@ func (s *StateStore) RecordProviderUnavailable(model string) {
 func (s *StateStore) RecordPacketCompaction() {
 	s.UpdateTaskStats(func(stats *TaskStats) {
 		stats.PacketCompactions++
+	})
+}
+
+// RecordRiskFloorはrisk floorがactive(HIGH)だったreview roundをcategory別に集計する。
+// categoryはrisk_floor_sourceから正規化した安定bucketで、self-protectionのpath詳細は含まない。
+func (s *StateStore) RecordRiskFloor(category string) {
+	if category == "" {
+		return
+	}
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		addInt(&stats.RiskFloorByCategory, category, 1)
+	})
+}
+
+// RecordSnapshotMismatchはdigest不一致eventsを総数と軸別に集計する。axisは"head,index,worktree"の
+// 複数可で、各軸を個別に加算する。取得失敗(比較未実施)は呼び出し側で除外し、真の不一致だけ計上する。
+func (s *StateStore) RecordSnapshotMismatch(axis string) {
+	if axis == "" {
+		return
+	}
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		stats.SnapshotMismatches++
+		for _, a := range strings.Split(axis, ",") {
+			addInt(&stats.SnapshotMismatchByAxis, a, 1)
+		}
+	})
+}
+
+// RecordPacketRejectはpacket検証不合格をcoarse category別に集計する。
+func (s *StateStore) RecordPacketReject(category string) {
+	if category == "" {
+		return
+	}
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		addInt(&stats.PacketRejectByCategory, category, 1)
+	})
+}
+
+// RecordProbeOutcomeはprobe結果(probe_success/probe_failure)を集計する。
+func (s *StateStore) RecordProbeOutcome(outcome string) {
+	if outcome == "" {
+		return
+	}
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		addInt(&stats.ProbeOutcome, outcome, 1)
 	})
 }
 

@@ -253,3 +253,76 @@ func (s *StateStore) LoadSnapshotComparison() (SnapshotComparison, error) {
 	}
 	return comparison, nil
 }
+
+// SnapshotDigestはGitSnapshotの3軸digestをtelemetry記録用へ切り出したもの。
+// 生diffやfile内容は持たず、HEAD・index・worktreeのdigestだけを残す。
+type SnapshotDigest struct {
+	Head           string `json:"head,omitempty"`
+	IndexDigest    string `json:"index_digest,omitempty"`
+	WorktreeDigest string `json:"worktree_digest,omitempty"`
+}
+
+func snapshotDigest(s GitSnapshot) SnapshotDigest {
+	return SnapshotDigest{
+		Head:           s.Head,
+		IndexDigest:    s.IndexDigest,
+		WorktreeDigest: s.WorktreeDigest,
+	}
+}
+
+// SnapshotDiagnosticは1回のreview工程に付与するGit snapshot診断。Previousは比較基準
+// (worker-endまたは保存review-start)、Currentは比較対象の現在snapshot。Matchedはpointerで
+// nil=比較未実施(取得失敗等)、true=一致、false=不一致を区別し、bool零値(false=不一致)との
+// 混同を防ぐ。MismatchAxis/Reasonは不一致または取得失敗時だけ設定される。
+type SnapshotDiagnostic struct {
+	Stage        string          `json:"stage"`
+	Previous     *SnapshotDigest `json:"previous,omitempty"`
+	Current      *SnapshotDigest `json:"current,omitempty"`
+	Matched      *bool           `json:"matched,omitempty"`
+	MismatchAxis string          `json:"mismatch_axis,omitempty"`
+	Reason       string          `json:"reason,omitempty"`
+}
+
+// MismatchAxisはcomparisonの不一致軸を"head,index,worktree"形式で返す。一致時は空文字。
+// SnapshotMismatchByAxis集計で各軸のmismatch件数へ用いる。
+func MismatchAxis(c SnapshotComparison) string {
+	if c.Matched {
+		return ""
+	}
+	var axes []string
+	if !c.HeadMatch {
+		axes = append(axes, "head")
+	}
+	if !c.IndexMatch {
+		axes = append(axes, "index")
+	}
+	if !c.WorktreeMatch {
+		axes = append(axes, "worktree")
+	}
+	return strings.Join(axes, ",")
+}
+
+// BuildSnapshotDiagnosticは2 snapshotと比較結果からtelemetry記録用diagnosticを構築する。
+// previous/currentのいずれかが空(取得失敗等)のときはmatchedをnil=未比較とし不一致軸集計から
+// 除外する。両方揃っていればcomparisonからmatched/mismatch軸を反映する。
+func BuildSnapshotDiagnostic(stage SnapshotStage, previous, current GitSnapshot, comparison SnapshotComparison, reason string) SnapshotDiagnostic {
+	diag := SnapshotDiagnostic{Stage: string(stage), Reason: reason}
+	if !isEmptySnapshot(previous) {
+		d := snapshotDigest(previous)
+		diag.Previous = &d
+	}
+	if !isEmptySnapshot(current) {
+		d := snapshotDigest(current)
+		diag.Current = &d
+	}
+	if diag.Previous != nil && diag.Current != nil {
+		matched := comparison.Matched
+		diag.Matched = &matched
+		diag.MismatchAxis = MismatchAxis(comparison)
+	}
+	return diag
+}
+
+func isEmptySnapshot(s GitSnapshot) bool {
+	return s.Head == "" && s.IndexDigest == "" && s.WorktreeDigest == ""
+}

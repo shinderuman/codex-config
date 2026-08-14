@@ -106,6 +106,11 @@ func printStats(st *state.StateStore, stdout io.Writer) error {
 		aggregate.SolPacketBytes += stats.SolPacketBytes
 		aggregate.ProviderUnavailable += stats.ProviderUnavailable
 		mergeIntMap(&aggregate.ProviderUnavailableByAlias, stats.ProviderUnavailableByAlias)
+		mergeIntMap(&aggregate.RiskFloorByCategory, stats.RiskFloorByCategory)
+		aggregate.SnapshotMismatches += stats.SnapshotMismatches
+		mergeIntMap(&aggregate.SnapshotMismatchByAxis, stats.SnapshotMismatchByAxis)
+		mergeIntMap(&aggregate.PacketRejectByCategory, stats.PacketRejectByCategory)
+		mergeIntMap(&aggregate.ProbeOutcome, stats.ProbeOutcome)
 	}
 
 	fmt.Fprintf(stdout, "TASKS: %d\n", len(all))
@@ -141,6 +146,11 @@ func printStats(st *state.StateStore, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "PROVIDER_UNAVAILABLE: %d\n", aggregate.ProviderUnavailable)
 	fmt.Fprintf(stdout, "PROVIDER_UNAVAILABLE_BY_ALIAS: %s\n", formatIntMap(aggregate.ProviderUnavailableByAlias))
 	fmt.Fprintf(stdout, "PACKET_COMPACTIONS: %d\n", aggregate.PacketCompactions)
+	fmt.Fprintf(stdout, "RISK_FLOOR_BY_CATEGORY: %s\n", formatIntMap(aggregate.RiskFloorByCategory))
+	fmt.Fprintf(stdout, "SNAPSHOT_MISMATCHES: %d\n", aggregate.SnapshotMismatches)
+	fmt.Fprintf(stdout, "SNAPSHOT_MISMATCH_BY_AXIS: %s\n", formatIntMap(aggregate.SnapshotMismatchByAxis))
+	fmt.Fprintf(stdout, "PACKET_REJECT_BY_CATEGORY: %s\n", formatIntMap(aggregate.PacketRejectByCategory))
+	fmt.Fprintf(stdout, "PROBE_OUTCOME: %s\n", formatIntMap(aggregate.ProbeOutcome))
 	fmt.Fprintf(stdout, "SOL_PACKET_BYTES: %d\n", aggregate.SolPacketBytes)
 	fmt.Fprintf(stdout, "TELEMETRY_DIR: %s\n", st.Path("telemetry"))
 	fmt.Fprintf(stdout, "CURRENT_TASK_ID: %s\n", st.ReadOr("task.id", "none"))

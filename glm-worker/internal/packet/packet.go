@@ -31,6 +31,32 @@ func IsConstraintError(err error) bool {
 	return errors.As(err, &target)
 }
 
+// RejectCategoryはpacket検証不合格のerrorを集計用の安定categoryへ分類する。
+// 理由文字列のphrasingに依存するが、これらはValidate/ValidateArtifacts内で固定済み。
+// 戻り値: size/missing-field/risk/status/malformed/artifacts/other。
+func RejectCategory(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "ARTIFACTS") || strings.Contains(msg, "artifact"):
+		return "artifacts"
+	case strings.Contains(msg, "行以内") || strings.Contains(msg, "bytes以内"):
+		return "size"
+	case strings.Contains(msg, "必須field"):
+		return "missing-field"
+	case strings.Contains(msg, "RISK"):
+		return "risk"
+	case strings.Contains(msg, "STATUS"):
+		return "status"
+	case strings.Contains(msg, "KEY: value") || strings.Contains(msg, "重複") || strings.Contains(msg, "PACKET_BEGIN"):
+		return "malformed"
+	default:
+		return "other"
+	}
+}
+
 // PacketはPACKET_BEGIN/PACKET_ENDで囲まれた出力を表す。
 type Packet struct {
 	Lines  []string

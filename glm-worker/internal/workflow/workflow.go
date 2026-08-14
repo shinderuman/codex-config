@@ -36,6 +36,19 @@ type Workflow struct {
 	now                 func() time.Time
 	sleep               func(time.Duration)
 	jitter              func(base time.Duration) time.Duration
+	// pendingSnapshotはverifyReviewStart/ResumeSnapshotが一致判定した直近snapshot診断。
+	// reviewer呼出成功時にそのcallのtelemetryへ付与して消費する。reemit呼出には付与しない。
+	pendingSnapshot *state.SnapshotDiagnostic
+	// currentResumeSourceはExecuteResumeが設定する再開理由(rate-limit/provider-unavailable)。
+	// resume直後のrunModel記録へ付与して使う。1コマンド実行で1回だけ設定される。
+	currentResumeSource string
+}
+
+// callDiagnosticsは1回のmodel呼出記録へ付与する診断情報。recordModelCallへ渡す。
+// reportedRiskは成功時のpacket RISK。providerClassificationはtransient障害分類。
+type callDiagnostics struct {
+	reportedRisk           string
+	providerClassification string
 }
 
 func NewWorkflow(cfg config.AppConfig, st *state.StateStore, r ModelRunner, output io.Writer) *Workflow {
@@ -234,6 +247,7 @@ func (w *Workflow) ExecuteResume() error {
 			return err
 		}
 		w.state.RecordResume()
+		w.currentResumeSource = resumeSourceOf(checkpoint)
 		// provider-unavailable resumeは本taskの前にprobeで疎通確認する。未回復のまま重い実requestを
 		// 浪費しないため。transient失敗でbackoffに入り、上限で同じprovider-unavailable状態を再保存、
 		// 明確な非transient errorはfail closedへ復帰する。
@@ -344,6 +358,18 @@ func isKnownResumeStage(stage state.ResumeStage) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// resumeSourceOfは再開理由をrate-limit/provider-unavailable/空(非resume)へ分類する。
+func resumeSourceOf(checkpoint state.ResumeCheckpoint) string {
+	switch {
+	case checkpoint.ProviderUnavailable:
+		return "provider-unavailable"
+	case checkpoint.RateLimited:
+		return "rate-limit"
+	default:
+		return ""
 	}
 }
 
@@ -684,7 +710,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 				artifactWarning = artifactErr.Error()
 				telemetryErr = fmt.Errorf("%v; %w", runErr, artifactErr)
 			}
-			w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "rate_limited", "", telemetryErr, outputPath)
+			w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "rate_limited", "", telemetryErr, outputPath, callDiagnostics{})
 			return packet.Packet{}, runner.ZaiRateLimitError{
 				Phase:           checkpoint.Phase,
 				Limit:           limit,
@@ -725,11 +751,11 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	}
 
 	if err := w.state.SecureArtifactDir(); err != nil {
-		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", err, outputPath)
+		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", err, outputPath, callDiagnostics{})
 		return packet.Packet{}, err
 	}
 	if runErr != nil {
-		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "error", "", runErr, outputPath)
+		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "error", "", runErr, outputPath, callDiagnostics{})
 		_ = w.state.ClearResumeCheckpoint()
 		_ = w.state.RemoveUnreadySession(checkpoint.Role)
 		return packet.Packet{}, workerError(
@@ -740,7 +766,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	}
 
 	if err := w.state.ClearResumeCheckpoint(); err != nil {
-		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", err, outputPath)
+		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", err, outputPath, callDiagnostics{})
 		return packet.Packet{}, err
 	}
 
@@ -748,13 +774,13 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	if err == nil {
 		taskID, taskErr := w.state.TaskID()
 		if taskErr != nil {
-			w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", taskErr, outputPath)
+			w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", taskErr, outputPath, callDiagnostics{})
 			return packet.Packet{}, taskErr
 		}
 		err = packet.ValidateArtifacts(result, w.state.ArtifactDir(taskID))
 	}
 	if err != nil {
-		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "invalid_packet", "", err, outputPath)
+		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "invalid_packet", "", err, outputPath, callDiagnostics{})
 		if packet.IsConstraintError(err) && !checkpoint.PacketCompacted {
 			w.state.RecordPacketCompaction()
 			compactCheckpoint := checkpoint
@@ -772,7 +798,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 			packet.Tail(outputPath, 20),
 		)
 	}
-	w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "success", result.Status(), nil, outputPath)
+	w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "success", result.Status(), nil, outputPath, callDiagnostics{reportedRisk: result.Risk()})
 	return result, nil
 }
 
@@ -786,7 +812,7 @@ func (w *Workflow) recoverTransient(
 	initialStartedAt time.Time,
 	initialCompletedAt time.Time,
 ) (bool, runner.RunResult, time.Time, time.Time, error) {
-	w.recordModelCall(checkpoint, initialResult, initialStartedAt, initialCompletedAt, "transient_error", "", fmt.Errorf("transient provider failure: %s", classification), outputPath)
+	w.recordModelCall(checkpoint, initialResult, initialStartedAt, initialCompletedAt, "transient_error", "", fmt.Errorf("transient provider failure: %s", classification), outputPath, callDiagnostics{providerClassification: classification})
 	if err := w.state.MarkReady(checkpoint.Role); err != nil {
 		return false, runner.RunResult{}, time.Time{}, time.Time{}, err
 	}
@@ -819,10 +845,11 @@ func (w *Workflow) runResumedTask(checkpoint state.ResumeCheckpoint, outputPath 
 	if runErr == nil {
 		return true, result, startedAt, completedAt, nil
 	}
-	if _, transient := runner.ClassifyTransientFailure(runner.ReadTransientSignal(outputPath)); !transient {
+	class, transient := runner.ClassifyTransientFailure(runner.ReadTransientSignal(outputPath))
+	if !transient {
 		return false, result, startedAt, completedAt, runErr
 	}
-	w.recordModelCall(checkpoint, result, startedAt, completedAt, "transient_error", "", runErr, outputPath)
+	w.recordModelCall(checkpoint, result, startedAt, completedAt, "transient_error", "", runErr, outputPath, callDiagnostics{providerClassification: class})
 	return false, runner.RunResult{}, startedAt, completedAt, nil
 }
 
@@ -915,16 +942,36 @@ func (w *Workflow) saveProviderUnavailable(checkpoint state.ResumeCheckpoint, cl
 	if err := w.state.SetTaskStatus(state.TaskStatusProviderUnavailable); err != nil {
 		return nil, err
 	}
+	elapsed := w.now().Sub(recoveryStart)
+	w.recordProviderUnavailableEvent(checkpoint, classification, probes, elapsed)
 	taskID, _ := w.state.TaskID()
 	return &runner.ProviderUnavailableError{
 		Phase:          checkpoint.Phase,
 		Classification: classification,
 		Probes:         probes,
-		Elapsed:        w.now().Sub(recoveryStart),
+		Elapsed:        elapsed,
 		TaskID:         taskID,
 		RepoRoot:       w.config.RepoRoot,
 		RepoShort:      w.config.RepoShort,
 	}, nil
+}
+
+// recordProviderUnavailableEventは回復が上限/deadlineに到達し再開可能停止状態へ移行した事実を
+// telemetryへ記録する。classification・probe回数・累積経過時間を残し、token消費は持たない(best-effort)。
+func (w *Workflow) recordProviderUnavailableEvent(checkpoint state.ResumeCheckpoint, classification string, probes int, elapsed time.Duration) {
+	now := w.now().UTC()
+	w.state.RecordModelCallLog(state.ModelCallLog{
+		TaskID:                 w.state.ReadOr("task.id", "unknown"),
+		StartedAt:              now,
+		CompletedAt:            now,
+		Phase:                  checkpoint.Phase + "-provider-unavailable",
+		Role:                   checkpoint.Role,
+		ModelAlias:             checkpoint.Model,
+		Outcome:                "provider_unavailable",
+		ProviderClassification: classification,
+		ProbeAttempt:           probes,
+		RetryElapsedMS:         elapsed.Milliseconds(),
+	})
 }
 
 func (w *Workflow) recordProbeCall(
@@ -941,6 +988,7 @@ func (w *Workflow) recordProbeCall(
 		outcome = "probe_failure"
 		errorText = boundedText(probeErr.Error(), packet.MaxDiagnosticBytes)
 	}
+	w.state.RecordProbeOutcome(outcome)
 	promptHash := sha256.Sum256([]byte(runner.ProbePrompt))
 	response := probe.Response
 	if !w.config.TelemetryContent {
@@ -957,6 +1005,7 @@ func (w *Workflow) recordProbeCall(
 		Effort:           "low",
 		ReadOnly:         true,
 		Outcome:          outcome,
+		ProbeAttempt:     attempt,
 		PromptBytes:      len(runner.ProbePrompt),
 		PromptSHA256:     hex.EncodeToString(promptHash[:]),
 		Response:         response,
@@ -977,6 +1026,7 @@ func (w *Workflow) recordModelCall(
 	packetStatus string,
 	callErr error,
 	outputPath string,
+	diag callDiagnostics,
 ) {
 	response := runResult.Response
 	if response == "" {
@@ -1006,7 +1056,7 @@ func (w *Workflow) recordModelCall(
 		systemPromptContent = ""
 		responseContent = ""
 	}
-	w.state.RecordModelCallLog(state.ModelCallLog{
+	entry := state.ModelCallLog{
 		TaskID:             w.state.ReadOr("task.id", "unknown"),
 		SessionID:          modelSessionID(w.state, checkpoint.Role, runResult.SessionID),
 		StartedAt:          startedAt,
@@ -1041,7 +1091,63 @@ func (w *Workflow) recordModelCall(
 		ClaudeAPIDurationMS: runResult.DurationAPIMS,
 		TopLevelTurns:       runResult.TopLevelTurns,
 		TotalCostUSD:        runResult.TotalCostUSD,
-	})
+	}
+	w.applyCallDiagnostics(&entry, checkpoint, outcome, callErr, diag)
+	w.state.RecordModelCallLog(entry)
+}
+
+// applyCallDiagnosticsは診断fieldと集計をentryへ反映する。報告risk・実効risk・risk floor・
+// snapshot・packet reject・provider分類・resume sourceを、当該callで観測されたときだけ設定する。
+// 未観測は零値(空文字/nil)のままで、意味値(HIGH/LOW/一致)とは区別される。
+func (w *Workflow) applyCallDiagnostics(entry *state.ModelCallLog, checkpoint state.ResumeCheckpoint, outcome string, callErr error, diag callDiagnostics) {
+	if diag.reportedRisk != "" {
+		if checkpoint.Role == state.ReviewerRole {
+			entry.ReviewerReportedRisk = diag.reportedRisk
+		} else {
+			entry.WorkerReportedRisk = diag.reportedRisk
+		}
+	}
+	if checkpoint.EffectiveRisk != "" {
+		entry.EffectiveRisk = checkpoint.EffectiveRisk
+		entry.RiskFloorSource = checkpoint.EffectiveRiskSource
+		if checkpoint.Role == state.ReviewerRole && checkpoint.EffectiveRisk == "HIGH" {
+			category := riskFloorCategory(checkpoint.EffectiveRiskSource)
+			entry.RiskFloorCategory = category
+			w.state.RecordRiskFloor(category)
+		}
+	}
+	if diag.providerClassification != "" {
+		entry.ProviderClassification = diag.providerClassification
+	}
+	if w.currentResumeSource != "" {
+		entry.ResumeSource = w.currentResumeSource
+		w.currentResumeSource = ""
+	}
+	if outcome == "invalid_packet" && callErr != nil {
+		category := packet.RejectCategory(callErr)
+		entry.PacketRejectReason = category
+		w.state.RecordPacketReject(category)
+	}
+	if checkpoint.Role == state.ReviewerRole && outcome == "success" && w.pendingSnapshot != nil {
+		entry.Snapshot = w.pendingSnapshot
+		w.pendingSnapshot = nil
+	}
+}
+
+// riskFloorSourceは"worker-declared;auto-fix;self-protection:critical-path"等の詳細文字列。
+// riskFloorCategoryは集計用へself-protectionのpath詳細を落として安定bucket化する。
+func riskFloorCategory(source string) string {
+	if source == "" {
+		return ""
+	}
+	var categories []string
+	for _, raw := range strings.Split(source, ";") {
+		name := strings.SplitN(raw, ":", 2)[0]
+		if name != "" {
+			categories = append(categories, name)
+		}
+	}
+	return strings.Join(categories, ",")
 }
 
 func modelSessionID(st *state.StateStore, role state.SessionRole, fromRunner string) string {
@@ -1178,6 +1284,7 @@ func (w *Workflow) verifyReviewStartSnapshot() (bool, error) {
 	if !comparison.Matched {
 		return true, w.failClosedSnapshot(state.SnapshotStageReviewStart, workerEnd, reviewStart, "worker終了状態とreview開始状態が一致しません", nil)
 	}
+	w.pendingSnapshot = snapshotDiagnosticPtr(state.BuildSnapshotDiagnostic(state.SnapshotStageReviewStart, workerEnd, reviewStart, comparison, ""))
 	return false, nil
 }
 
@@ -1197,12 +1304,15 @@ func (w *Workflow) verifyReviewResumeSnapshot() (bool, error) {
 	if !comparison.Matched {
 		return true, w.failClosedSnapshot(state.SnapshotStageReviewResume, saved, current, "review開始時から状態が変化しています", nil)
 	}
+	w.pendingSnapshot = snapshotDiagnosticPtr(state.BuildSnapshotDiagnostic(state.SnapshotStageReviewResume, saved, current, comparison, ""))
 	return false, nil
 }
 
 // checkpointを先に消すことでstatus更新失敗時もresumeさせず安全方向へ収束させ、
 // WaitingSolReview移行中に残存checkpointがresume復元情報と矛盾するのを防ぐ。
+// 併せてsnapshot診断をtelemetry/statsへbest-effort記録する(本flowは止めない)。
 func (w *Workflow) failClosedSnapshot(stage state.SnapshotStage, workerEnd, reviewStart state.GitSnapshot, reason string, cause error) error {
+	w.recordSnapshotEvent(stage, workerEnd, reviewStart, reason, cause)
 	if err := w.state.ClearResumeCheckpoint(); err != nil {
 		return err
 	}
@@ -1213,6 +1323,41 @@ func (w *Workflow) failClosedSnapshot(stage state.SnapshotStage, workerEnd, revi
 		reason = fmt.Sprintf("%s: %v", reason, cause)
 	}
 	return w.emitPacket(snapshotFailClosedPacket(stage, workerEnd, reviewStart, reason))
+}
+
+// recordSnapshotEventはsnapshot同一性確認失敗をtelemetryへ記録する。比較結果に応じて
+// Outcomeを切り替える: 両snapshot揃って不一致→snapshot_mismatch(mismatch軸を集計)、
+// 揃ったが一致(保存失敗等でfail-closed)→snapshot_save_failed、一方が空(取得失敗等)で
+// 比較未実施→snapshot_unavailable。token消費は持たない(best-effort)。
+func (w *Workflow) recordSnapshotEvent(stage state.SnapshotStage, workerEnd, reviewStart state.GitSnapshot, reason string, cause error) {
+	comparison := state.CompareGitSnapshot(workerEnd, reviewStart, stage, "")
+	diag := state.BuildSnapshotDiagnostic(stage, workerEnd, reviewStart, comparison, reason)
+	outcome := "snapshot_unavailable"
+	switch {
+	case diag.Matched != nil && !*diag.Matched:
+		outcome = "snapshot_mismatch"
+		w.state.RecordSnapshotMismatch(diag.MismatchAxis)
+	case diag.Matched != nil && *diag.Matched:
+		outcome = "snapshot_save_failed"
+	}
+	now := w.now().UTC()
+	entry := state.ModelCallLog{
+		TaskID:      w.state.ReadOr("task.id", "unknown"),
+		StartedAt:   now,
+		CompletedAt: now,
+		Phase:       fmt.Sprintf("%s-snapshot-check", stage),
+		Role:        state.ReviewerRole,
+		Outcome:     outcome,
+		Snapshot:    snapshotDiagnosticPtr(diag),
+	}
+	if cause != nil {
+		entry.Error = boundedText(cause.Error(), packet.MaxDiagnosticBytes)
+	}
+	w.state.RecordModelCallLog(entry)
+}
+
+func snapshotDiagnosticPtr(diag state.SnapshotDiagnostic) *state.SnapshotDiagnostic {
+	return &diag
 }
 
 func snapshotFailClosedPacket(stage state.SnapshotStage, workerEnd, reviewStart state.GitSnapshot, reason string) packet.Packet {

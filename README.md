@@ -262,11 +262,12 @@ glm-worker --stats
 - `NEEDS_SOL_DECISION`、`NEEDS_SOL_REVIEW`、`PASS`の件数
 - model alias別rate limit、packet再圧縮、Solへ返したpacket bytes
 - model alias別provider-unavailable件数
+- risk floor件数(category別)、snapshot mismatch件数(軸別)、packet reject件数(reason別)、probe成功失敗
 - 現在taskのartifact保存先
 
 新規タスク開始時に前タスクの統計をarchiveし、`--reset`時も現在値を破棄せずarchiveする。
 `--stats`の`TELEMETRY_DIR`配下には、各呼出しのphase、role、alias、実モデル、effort、session、prompt、最終response、top-level usage、subagentを含むtree usage、所要時間、結果をJSONLで保持する。alias別token集計にはtree usageを用い、top-level turn数は別名で表示する。promptとresponse本文を保存したくない環境では`GLM_WORKER_TELEMETRY_CONTENT=false`を指定し、byte数とSHA-256、usageだけを残す。
-statsとtelemetryのschemaはversion 2で、top-level集計だったversion 1は`--stats`とtelemetry読込から除外する。旧値の移行・混在は行わない。
+statsとtelemetryのschemaはversion 2で、top-level集計だったversion 1は`--stats`とtelemetry読込から除外する。旧値の移行・混在は行わない。versionは既存fieldの意味やJSON名を変更するときだけ上げ、上げ時は旧version recordをfail-closedで読み飛ばす。新fieldのomitempty追加は後方互換のためversionを維持し、旧recordでの新field欠落は「未観測/not captured」(0件・一致・LOW等の意味値とは区別)として扱う。telemetry各recordはworker/reviewer報告risk、実効risk、risk floor source/category、worker_end/review_startのGit snapshot digest(HEAD・index・worktree。生diffやfile内容は保存しない)、snapshot mismatch軸、packet reject理由、provider障害分類、probe/retry試行と経過時間、resume source(rate-limit/provider-unavailable)を同じ呼出へ紐付けて記録し、`--stats`はrisk floor・snapshot mismatch・packet reject・probe outcomeの少数集計を表示する。
 artifactはtask更新や`--reset`後もtelemetryと同様にtask ID別で保持する。不要になった成果物の削除は自動化しない。
 
 

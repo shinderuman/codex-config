@@ -114,3 +114,81 @@ func TestReadModelCallLogsSkipsVersion1(t *testing.T) {
 		t.Fatalf("version 1を除外したtelemetry = %#v", logs)
 	}
 }
+
+// 旧record(診断field欠落)と新record(診断field付き)が同一v2 JSONLへ混在しても、
+// 既存token集計は両方から維持され、診断値はcaptured recordだけに現れる(not capturedと区別)。
+func TestReadModelCallLogsMixedSchemaPreservesTokensAndDiagnostics(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	taskID, err := st.StartNewTask()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := ModelCallLog{
+		Version:    modelCallLogVersion,
+		CallID:     "legacy",
+		TaskID:     taskID,
+		Phase:      "worker-new",
+		ModelAlias: "opus",
+		Outcome:    "success",
+		TopLevelUsage: TokenUsage{
+			InputTokens:  100,
+			OutputTokens: 50,
+		},
+	}
+	if err := st.appendModelCallLog(legacy); err != nil {
+		t.Fatal(err)
+	}
+	st.RecordModelCallLog(ModelCallLog{
+		CallID:             "current",
+		TaskID:             taskID,
+		Phase:              "reviewer-1",
+		ModelAlias:         "haiku",
+		Outcome:            "success",
+		WorkerReportedRisk: "HIGH",
+		EffectiveRisk:      "HIGH",
+		RiskFloorCategory:  "worker-declared",
+		TopLevelUsage:      TokenUsage{InputTokens: 20, OutputTokens: 10},
+	})
+
+	logs, err := st.ReadModelCallLogs(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("両recordが読めるべき: %#v", logs)
+	}
+	var legacyRec, currentRec ModelCallLog
+	for _, l := range logs {
+		switch l.CallID {
+		case "legacy":
+			legacyRec = l
+		case "current":
+			currentRec = l
+		}
+	}
+	if legacyRec.WorkerReportedRisk != "" || legacyRec.EffectiveRisk != "" || legacyRec.RiskFloorCategory != "" {
+		t.Fatalf("旧recordの診断fieldは未観測(空)のべき: %+v", legacyRec)
+	}
+	if legacyRec.TopLevelUsage.InputTokens != 100 {
+		t.Fatalf("旧recordのtoken集計が失われた: %+v", legacyRec)
+	}
+	if currentRec.WorkerReportedRisk != "HIGH" || currentRec.EffectiveRisk != "HIGH" || currentRec.RiskFloorCategory != "worker-declared" {
+		t.Fatalf("新recordの診断fieldが失われた: %+v", currentRec)
+	}
+	if currentRec.TopLevelUsage.InputTokens != 20 {
+		t.Fatalf("新recordのtoken集計が失われた: %+v", currentRec)
+	}
+
+	// legacyはappendModelCallLogで直接書かれたためstats mirrorへは含まれず、current recordの
+	// tokenだけがstatsへ集計される(旧recordのtokenはJSONL読込側で維持される)。
+	stats, err := st.loadTaskStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.InputTokensByAlias["haiku"] != 20 || stats.OutputTokensByAlias["haiku"] != 10 {
+		t.Fatalf("current recordのtoken集計 = %+v", stats.InputTokensByAlias)
+	}
+	if stats.InputTokensByAlias["opus"] != 0 {
+		t.Fatalf("legacyはstats未集計のべき: %+v", stats.InputTokensByAlias)
+	}
+}

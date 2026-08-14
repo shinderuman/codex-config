@@ -229,3 +229,70 @@ func TestUpdateTaskStatsRebuildsVersion1Mirror(t *testing.T) {
 		t.Fatal("version 1を破棄したwarningがありません")
 	}
 }
+
+// 旧v2 archive(診断map欠落)と新v2 mirror(診断map付き)が混在しても、既存token集計は両方から
+// 維持され、診断集計mapは新archiveだけから計上される(旧archiveの欠落=0寄与で分母へ混ぜない)。
+func TestAllTaskStatsMixedSchemaPreservesTokensAndDiagnostics(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	historyDir := filepath.Join(st.dir, "stats")
+	if err := os.MkdirAll(historyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacyArchive := `{"version":2,"task_id":"legacy","model_calls":5,"input_tokens_by_alias":{"opus":999},"output_tokens_by_alias":{"opus":111}}`
+	if err := os.WriteFile(filepath.Join(historyDir, "legacy.json"), []byte(legacyArchive), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.StartNewTask(); err != nil {
+		t.Fatal(err)
+	}
+	st.RecordModelCall(WorkerRole, "opus")
+	st.RecordRiskFloor("worker-declared")
+	st.RecordSnapshotMismatch("head,index")
+	st.RecordPacketReject("size")
+	st.RecordProbeOutcome("probe_failure")
+
+	all, err := st.AllTaskStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var (
+		modelCalls                             int
+		input, output                          map[string]int64
+		riskFloor, mismatchAxis, reject, probe map[string]int
+	)
+	for _, s := range all {
+		modelCalls += s.ModelCalls
+		input = mergeInt64Test(input, s.InputTokensByAlias)
+		output = mergeInt64Test(output, s.OutputTokensByAlias)
+		riskFloor = mergeIntTest(riskFloor, s.RiskFloorByCategory)
+		mismatchAxis = mergeIntTest(mismatchAxis, s.SnapshotMismatchByAxis)
+		reject = mergeIntTest(reject, s.PacketRejectByCategory)
+		probe = mergeIntTest(probe, s.ProbeOutcome)
+	}
+	if modelCalls != 6 || input["opus"] != 999 || output["opus"] != 111 {
+		t.Fatalf("旧archiveのtoken集計が失われた: modelCalls=%d input=%+v output=%+v", modelCalls, input, output)
+	}
+	if riskFloor["worker-declared"] != 1 || mismatchAxis["head"] != 1 || reject["size"] != 1 || probe["probe_failure"] != 1 {
+		t.Fatalf("新mirrorの診断集計が正しくない: floor=%+v axis=%+v reject=%+v probe=%+v", riskFloor, mismatchAxis, reject, probe)
+	}
+}
+
+func mergeIntTest(dst, src map[string]int) map[string]int {
+	if dst == nil {
+		dst = make(map[string]int)
+	}
+	for k, v := range src {
+		dst[k] += v
+	}
+	return dst
+}
+
+func mergeInt64Test(dst, src map[string]int64) map[string]int64 {
+	if dst == nil {
+		dst = make(map[string]int64)
+	}
+	for k, v := range src {
+		dst[k] += v
+	}
+	return dst
+}

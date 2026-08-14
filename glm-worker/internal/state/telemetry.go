@@ -9,6 +9,9 @@ import (
 	"time"
 )
 
+// modelCallLogVersionはModelCallLog JSONのschema version。既存fieldの意味やJSON名を
+// 変更するときだけbumpし、ReadModelCallLogsが旧version recordを読み飛ばす(fail-closed)。
+// 新fieldのomitempty追加は後方互換(旧recordは新field欠落=未観測/not captured)のためbump不要。
 const modelCallLogVersion = 2
 
 type TokenUsage struct {
@@ -60,6 +63,21 @@ type ModelCallLog struct {
 	ClaudeAPIDurationMS int64                         `json:"claude_api_duration_ms,omitempty"`
 	TopLevelTurns       int                           `json:"top_level_turns,omitempty"`
 	TotalCostUSD        float64                       `json:"total_cost_usd,omitempty"`
+	// 診断field群(v2のままomitempty追加)。未設定は「このcallで観測されなかった/not captured」を表す。
+	// enum系 risk/classification/resume_source は空文字=未観測(HIGH/LOW等の意味値と区別)、
+	// probe_attempt/retry_elapsed_ms のint零値=未観測、snapshot は *struct nil=未観測で、
+	// その内部 matched *bool も nil=未比較。旧recordはこれらが欠落=未観測として扱う。
+	WorkerReportedRisk     string              `json:"worker_reported_risk,omitempty"`
+	ReviewerReportedRisk   string              `json:"reviewer_reported_risk,omitempty"`
+	EffectiveRisk          string              `json:"effective_risk,omitempty"`
+	RiskFloorSource        string              `json:"risk_floor_source,omitempty"`
+	RiskFloorCategory      string              `json:"risk_floor_category,omitempty"`
+	PacketRejectReason     string              `json:"packet_reject_reason,omitempty"`
+	ProviderClassification string              `json:"provider_classification,omitempty"`
+	ProbeAttempt           int                 `json:"probe_attempt,omitempty"`
+	RetryElapsedMS         int64               `json:"retry_elapsed_ms,omitempty"`
+	ResumeSource           string              `json:"resume_source,omitempty"`
+	Snapshot               *SnapshotDiagnostic `json:"snapshot,omitempty"`
 }
 
 // RecordModelCallLogは詳細ログを追記し、token集計をmirrorへ反映する。

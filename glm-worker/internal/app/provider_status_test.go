@@ -100,3 +100,68 @@ func TestPrintStatsAggregatesProviderUnavailable(t *testing.T) {
 		t.Fatalf("model別provider-unavailable集計がありません: %q", body)
 	}
 }
+
+// 新診断集計(risk floor / snapshot mismatch axis / packet reject / probe outcome)が
+// --statsへ少数表示される。空ならnone。
+func TestPrintStatsReportsDiagnosticAggregates(t *testing.T) {
+	cfg := newAppConfig(t)
+	st, err := state.NewStateStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.StartNewTask(); err != nil {
+		t.Fatal(err)
+	}
+	st.RecordRiskFloor("worker-declared")
+	st.RecordRiskFloor("worker-declared")
+	st.RecordRiskFloor("self-protection")
+	st.RecordSnapshotMismatch("head,index")
+	st.RecordPacketReject("size")
+	st.RecordPacketReject("malformed")
+	st.RecordProbeOutcome("probe_failure")
+	st.RecordProbeOutcome("probe_success")
+
+	var out bytes.Buffer
+	if err := printStats(st, &out); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	for _, want := range []string{
+		"RISK_FLOOR_BY_CATEGORY: self-protection=1,worker-declared=2",
+		"SNAPSHOT_MISMATCHES: 1",
+		"SNAPSHOT_MISMATCH_BY_AXIS: head=1,index=1",
+		"PACKET_REJECT_BY_CATEGORY: malformed=1,size=1",
+		"PROBE_OUTCOME: probe_failure=1,probe_success=1",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("stats出力に%qがありません:\n%s", want, body)
+		}
+	}
+}
+
+func TestPrintStatsReportsDiagnosticAggregatesEmpty(t *testing.T) {
+	cfg := newAppConfig(t)
+	st, err := state.NewStateStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.StartNewTask(); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := printStats(st, &out); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	for _, want := range []string{
+		"RISK_FLOOR_BY_CATEGORY: none",
+		"SNAPSHOT_MISMATCHES: 0",
+		"SNAPSHOT_MISMATCH_BY_AXIS: none",
+		"PACKET_REJECT_BY_CATEGORY: none",
+		"PROBE_OUTCOME: none",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("空状態のstats出力に%qがありません:\n%s", want, body)
+		}
+	}
+}
