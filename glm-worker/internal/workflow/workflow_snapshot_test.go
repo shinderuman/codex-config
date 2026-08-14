@@ -322,8 +322,8 @@ func TestSnapshotReviewResumeMatchResumesReviewer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if comparison.Stage != state.SnapshotStageReviewResume || !comparison.Matched {
-		t.Fatalf("resume一致比較が記録されるべき: %#v", comparison)
+	if comparison.Stage != state.SnapshotStageReviewEnd || !comparison.Matched {
+		t.Fatalf("reviewer成功直後のreview-end一致比較が記録されるべき: %#v", comparison)
 	}
 }
 

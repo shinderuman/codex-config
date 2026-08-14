@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/packet"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
 )
 
 type scenarioStep struct {
@@ -33,6 +34,8 @@ type scenarioDoc struct {
 	ExpectedPacketRisk   string         `json:"expected_packet_risk"`
 	ExpectedTaskStatus   string         `json:"expected_task_status"`
 	MustNotPass          bool           `json:"must_not_pass"`
+	// ReviewerMutatesWorktreeはreviewerがBash相当でrepositoryを変更するscenarioで有効化する。
+	ReviewerMutatesWorktree bool `json:"reviewer_mutates_worktree,omitempty"`
 }
 
 type scenarioFile struct {
@@ -405,6 +408,20 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 	w := newWorkflowT(t, st, r)
 	buf := &bytes.Buffer{}
 	w.output = buf
+	var mutationRepoRoot string
+	if doc.ReviewerMutatesWorktree {
+		mutationRepoRoot = initMutationRepo(t)
+		mr := &mutatingRunner{
+			repoRoot: mutationRepoRoot,
+			steps:    stepsFromScenario(doc),
+			mutate: func(root string) error {
+				return os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("mutated\n"), 0o644)
+			},
+		}
+		w.runner = mr
+		w.config.RepoRoot = mutationRepoRoot
+		w.captureSnapshot = state.CaptureGitSnapshot
+	}
 	if doc.ChangedPaths != nil {
 		changedPaths := doc.ChangedPaths
 		w.collectChangedPaths = func(string, string) ([]string, error) { return changedPaths, nil }
@@ -419,6 +436,14 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 		t.Fatalf("unsupported entry %q for scenario %s", doc.Entry, doc.ID)
 	}
 
+	if doc.ReviewerMutatesWorktree {
+		mr := w.runner.(*mutatingRunner)
+		r.prompts = mr.prompts
+		r.models = mr.models
+		if content, err := os.ReadFile(filepath.Join(mutationRepoRoot, "tracked.txt")); err != nil || string(content) != "mutated\n" {
+			t.Fatalf("reviewer mutationが保持されていません: %q %v", content, err)
+		}
+	}
 	if len(r.prompts) == 0 {
 		t.Fatal("production runner was not invoked")
 	}

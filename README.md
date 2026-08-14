@@ -138,6 +138,8 @@ glm-worker --reset
 - `--resume`はZ.ai 5時間上限またはprovider一時障害で停止した同一phase・session・checkpointを再開する。
 - `--status`と`--stats`は参照専用、`--reset`は現在の統計をarchiveして実行状態を消去する。
 
+reviewer呼出しの前後でGit状態を3軸(HEAD・index・worktree/untracked)のdigestで固定・検証する。worker終了時とreviewer開始前、5h上限・provider障害からのresume前、そして各reviewer model callが正常終了した直後かつPASS/FIX_REQUIRED/NEEDS_SOL_REVIEW等を採用する前に、保存snapshotと現在状態を同じ3軸で比較する。reviewerがEdit/Write禁止でもBash・formatter・test・generator等でrepositoryを変更していた場合はreview結果を採用せず、rollbackも黙認もせず`NEEDS_SOL_REVIEW`/`HIGH`へfail closedする。追加のmodel呼出・reviewer層の変更は行わない。
+
 主な環境変数:
 
 | 変数 | 既定値 | 用途 |
@@ -267,7 +269,7 @@ glm-worker --stats
 
 新規タスク開始時に前タスクの統計をarchiveし、`--reset`時も現在値を破棄せずarchiveする。
 `--stats`の`TELEMETRY_DIR`配下には、各呼出しのphase、role、alias、実モデル、effort、session、prompt、最終response、top-level usage、subagentを含むtree usage、所要時間、結果をJSONLで保持する。alias別token集計にはtree usageを用い、top-level turn数は別名で表示する。promptとresponse本文を保存したくない環境では`GLM_WORKER_TELEMETRY_CONTENT=false`を指定し、byte数とSHA-256、usageだけを残す。
-statsとtelemetryのschemaはversion 2で、top-level集計だったversion 1は`--stats`とtelemetry読込から除外する。旧値の移行・混在は行わない。versionは既存fieldの意味やJSON名を変更するときだけ上げ、上げ時は旧version recordをfail-closedで読み飛ばす。新fieldのomitempty追加は後方互換のためversionを維持し、旧recordでの新field欠落は「未観測/not captured」(0件・一致・LOW等の意味値とは区別)として扱う。telemetry各recordはworker/reviewer報告risk、実効risk、risk floor source/category、worker_end/review_startのGit snapshot digest(HEAD・index・worktree。生diffやfile内容は保存しない)、snapshot mismatch軸、packet reject理由、provider障害分類、probe/retry試行と経過時間、resume source(rate-limit/provider-unavailable)を同じ呼出へ紐付けて記録し、`--stats`はrisk floor・snapshot mismatch・packet reject・probe outcomeの少数集計を表示する。
+statsとtelemetryのschemaはversion 2で、top-level集計だったversion 1は`--stats`とtelemetry読込から除外する。旧値の移行・混在は行わない。versionは既存fieldの意味やJSON名を変更するときだけ上げ、上げ時は旧version recordをfail-closedで読み飛ばす。新fieldのomitempty追加は後方互換のためversionを維持し、旧recordでの新field欠落は「未観測/not captured」(0件・一致・LOW等の意味値とは区別)として扱う。telemetry各recordはworker/reviewer報告risk、実効risk、risk floor source/category、worker_end/review_start/review_endのGit snapshot digest(HEAD・index・worktree。生diffやfile内容は保存しない)、snapshot mismatch軸、packet reject理由、provider障害分類、probe/retry試行と経過時間、resume source(rate-limit/provider-unavailable)を同じ呼出へ紐付けて記録し、`--stats`はrisk floor・snapshot mismatch・packet reject・probe outcomeの少数集計を表示する。
 artifactはtask更新や`--reset`後もtelemetryと同様にtask ID別で保持する。不要になった成果物の削除は自動化しない。
 
 

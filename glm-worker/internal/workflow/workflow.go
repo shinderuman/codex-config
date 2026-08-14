@@ -304,6 +304,11 @@ func (w *Workflow) ExecuteResume() error {
 			workerPacket := packet.FromLines(checkpoint.WorkerPacket)
 			decision := w.state.ReadOr("last-decision", "none")
 			if checkpoint.RiskFloorReemit {
+				if stopped, err := w.verifyReviewEndSnapshot(); err != nil {
+					return err
+				} else if stopped {
+					return nil
+				}
 				reviewPacket := resolveRiskFloorReemit(result)
 				if err := w.state.Write("last-review", reviewPacket.String()); err != nil {
 					return err
@@ -316,8 +321,13 @@ func (w *Workflow) ExecuteResume() error {
 					checkpoint.AutoFixes,
 				)
 			}
+			if stopped, err := w.verifyReviewEndSnapshot(); err != nil {
+				return err
+			} else if stopped {
+				return nil
+			}
 			highRiskFloor := w.resolveReviewResumeRisk(workerPacket, checkpoint).high
-			reviewPacket, err := w.enforceRiskFloor(
+			reviewPacket, reemitStopped, err := w.enforceRiskFloor(
 				checkpoint.Request,
 				workerPacket,
 				checkpoint.ReviewNumber,
@@ -328,6 +338,9 @@ func (w *Workflow) ExecuteResume() error {
 			)
 			if err != nil {
 				return err
+			}
+			if reemitStopped {
+				return nil
 			}
 			if err := w.state.Write("last-review", reviewPacket.String()); err != nil {
 				return err
@@ -446,7 +459,12 @@ func (w *Workflow) reviewUntilStable(
 	if err != nil {
 		return err
 	}
-	reviewPacket, err = w.enforceRiskFloor(
+	if stopped, err := w.verifyReviewEndSnapshot(); err != nil {
+		return err
+	} else if stopped {
+		return nil
+	}
+	reviewPacket, reemitStopped, err := w.enforceRiskFloor(
 		request,
 		workerPacket,
 		reviewNumber,
@@ -457,6 +475,9 @@ func (w *Workflow) reviewUntilStable(
 	)
 	if err != nil {
 		return err
+	}
+	if reemitStopped {
+		return nil
 	}
 	if err := w.state.Write("last-review", reviewPacket.String()); err != nil {
 		return err
@@ -1193,11 +1214,15 @@ func (w *Workflow) enforceRiskFloor(
 	decision string,
 	effectiveHigh bool,
 	reviewPacket packet.Packet,
-) (packet.Packet, error) {
+) (packet.Packet, bool, error) {
 	if !effectiveHigh || reviewPacket.Status() != "PASS" {
-		return reviewPacket, nil
+		return reviewPacket, false, nil
 	}
-	return w.riskFloorReemit(request, workerPacket, reviewNumber, autoFixes, decision)
+	reemitPacket, stopped, err := w.riskFloorReemit(request, workerPacket, reviewNumber, autoFixes, decision)
+	if err != nil || stopped {
+		return packet.Packet{}, stopped, err
+	}
+	return reemitPacket, false, nil
 }
 
 func (w *Workflow) riskFloorReemit(
@@ -1206,7 +1231,7 @@ func (w *Workflow) riskFloorReemit(
 	reviewNumber int,
 	autoFixes int,
 	decision string,
-) (packet.Packet, error) {
+) (packet.Packet, bool, error) {
 	prompt := riskFloorReemitPrompt()
 	checkpoint := state.ResumeCheckpoint{
 		Stage:           state.ResumeStageReview,
@@ -1226,9 +1251,14 @@ func (w *Workflow) riskFloorReemit(
 	}
 	reemitPacket, err := w.runModel(checkpoint)
 	if err != nil {
-		return packet.Packet{}, err
+		return packet.Packet{}, false, err
 	}
-	return resolveRiskFloorReemit(reemitPacket), nil
+	if stopped, err := w.verifyReviewEndSnapshot(); err != nil {
+		return packet.Packet{}, false, err
+	} else if stopped {
+		return packet.Packet{}, true, nil
+	}
+	return resolveRiskFloorReemit(reemitPacket), false, nil
 }
 
 func resolveRiskFloorReemit(reemitPacket packet.Packet) packet.Packet {
@@ -1305,6 +1335,27 @@ func (w *Workflow) verifyReviewResumeSnapshot() (bool, error) {
 		return true, w.failClosedSnapshot(state.SnapshotStageReviewResume, saved, current, "review開始時から状態が変化しています", nil)
 	}
 	w.pendingSnapshot = snapshotDiagnosticPtr(state.BuildSnapshotDiagnostic(state.SnapshotStageReviewResume, saved, current, comparison, ""))
+	return false, nil
+}
+
+// verifyReviewEndSnapshotはreviewer呼出成功直後・結果採用前にもreview-start snapshotへ再照合する。
+// reviewerはEdit/Write禁止でもBash等でrepositoryを変更でき、review-start時点では検出できないため。
+func (w *Workflow) verifyReviewEndSnapshot() (bool, error) {
+	saved, err := w.state.LoadReviewStartSnapshot()
+	if err != nil {
+		return true, w.failClosedSnapshot(state.SnapshotStageReviewEnd, state.GitSnapshot{}, state.GitSnapshot{}, "review-start snapshot読込失敗", err)
+	}
+	current, err := w.captureSnapshot(w.config.RepoRoot)
+	if err != nil {
+		return true, w.failClosedSnapshot(state.SnapshotStageReviewEnd, saved, state.GitSnapshot{}, "review-end snapshot取得失敗", err)
+	}
+	comparison := state.CompareGitSnapshot(saved, current, state.SnapshotStageReviewEnd, "")
+	if err := w.state.SaveSnapshotComparison(comparison); err != nil {
+		return true, w.failClosedSnapshot(state.SnapshotStageReviewEnd, saved, current, "snapshot comparison保存失敗", err)
+	}
+	if !comparison.Matched {
+		return true, w.failClosedSnapshot(state.SnapshotStageReviewEnd, saved, current, "reviewer実行中にrepository状態が変化しています", nil)
+	}
 	return false, nil
 }
 

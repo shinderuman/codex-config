@@ -249,6 +249,48 @@
       "expected_packet_risk": "LOW",
       "expected_task_status": "complete",
       "must_not_pass": false
+    },
+    {
+      "id": "reviewer-worktree-mutation-rejects-pass",
+      "behavior": "reviewerがEdit/Write禁止でもBash相当でtracked fileを変更した場合、wrapperはreview-end境界のsnapshot不一致を検出しPASSを採用せずNEEDS_SOL_REVIEW/HIGHへfail closedする。変更はrollback・黙認せず保持する",
+      "request": "通常の実装タスク",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md",
+        "codex/glm-worker/prompts/REVIEWER.md"
+      ],
+      "changed_paths": ["README.md"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: done", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: pass", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus", "haiku"],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true,
+      "reviewer_mutates_worktree": true
+    },
+    {
+      "id": "reviewer-worktree-mutation-rejects-fix-required",
+      "behavior": "reviewerがBash相当でworktreeを変更した後にFIX_REQUIREDを返した場合、wrapperは採用せずauto-fixを起こさずNEEDS_SOL_REVIEW/HIGHへfail closedする",
+      "request": "通常の実装タスク",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md",
+        "codex/glm-worker/prompts/REVIEWER.md"
+      ],
+      "changed_paths": ["README.md"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: done", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: FIX_REQUIRED", "RISK: LOW", "SUMMARY: fix", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: i", "RESIDUAL_RISK: r", "TARGETS: t", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus", "haiku"],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true,
+      "reviewer_mutates_worktree": true
     }
   ]
 }

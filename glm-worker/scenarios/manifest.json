@@ -34,7 +34,9 @@
         "state-partial-loss-mislabeled-safe-recovery",
         "scope-out-of-request-change",
         "orchestrator-critical-low-self-declare",
-        "low-risk-non-critical-pass"
+        "low-risk-non-critical-pass",
+        "reviewer-worktree-mutation-rejects-pass",
+        "reviewer-worktree-mutation-rejects-fix-required"
       ]
     },
     {
@@ -48,7 +50,9 @@
         "state-partial-loss-mislabeled-safe-recovery",
         "scope-out-of-request-change",
         "orchestrator-critical-low-self-declare",
-        "low-risk-non-critical-pass"
+        "low-risk-non-critical-pass",
+        "reviewer-worktree-mutation-rejects-pass",
+        "reviewer-worktree-mutation-rejects-fix-required"
       ]
     }
   ]

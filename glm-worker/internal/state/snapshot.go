@@ -34,6 +34,7 @@ const (
 	SnapshotStageWorkerEnd    SnapshotStage = "worker-end"
 	SnapshotStageReviewStart  SnapshotStage = "review-start"
 	SnapshotStageReviewResume SnapshotStage = "review-resume"
+	SnapshotStageReviewEnd    SnapshotStage = "review-end"
 )
 
 // SnapshotComparisonはworker-endとreview-start snapshotの一致判定結果を記録する。
