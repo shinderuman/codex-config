@@ -15,6 +15,9 @@ import (
 
 func printStatus(st *state.StateStore, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "REPO: %s\n", st.ReadOr("repo-root", "unknown"))
+	probe := ProbeRepoLock(st.LockPath())
+	fmt.Fprintf(stdout, "REPOSITORY_LOCK: %s\n", probe.State)
+	fmt.Fprintf(stdout, "LOCK_PID: %s\n", probe.PID)
 	taskID := st.ReadOr("task.id", "none")
 	fmt.Fprintf(stdout, "TASK_ID: %s\n", taskID)
 	if taskID != "none" {
@@ -23,6 +26,9 @@ func printStatus(st *state.StateStore, stdout io.Writer) error {
 		fmt.Fprintln(stdout, "ARTIFACT_DIR: none")
 	}
 	fmt.Fprintf(stdout, "TASK_STATUS: %s\n", st.TaskStatus())
+	if st.TaskStatus() == state.TaskStatusActive {
+		fmt.Fprintf(stdout, "TASK_LIVENESS: %s\n", taskLiveness(probe))
+	}
 	fmt.Fprintf(stdout, "WORKER_SESSION: %s\n", st.ReadOr("worker.id", "none"))
 	fmt.Fprintf(stdout, "REVIEWER_SESSION: %s\n", st.ReadOr("reviewer.id", "none"))
 	if st.Exists("pending-decision") {
@@ -68,6 +74,20 @@ func printStatus(st *state.StateStore, stdout io.Writer) error {
 		fmt.Fprintln(stdout, "RESUME_AVAILABLE: no")
 	}
 	return nil
+}
+
+// taskLivenessはTASK_STATUS=active時のrepo lock実保持による生存表示。
+// lock heldなら現在のglm-worker processが同一repo taskを実行中、freeはstale候補、
+// unknownは判定不能。lock file内PIDは権威にせずstale PID・PID reuseでrunning扱いしない。
+func taskLiveness(probe LockProbe) string {
+	switch probe.State {
+	case LockHeld:
+		return "running"
+	case LockFree:
+		return "stale"
+	default:
+		return "unknown"
+	}
 }
 
 func printStats(st *state.StateStore, stdout io.Writer) error {

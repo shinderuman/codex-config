@@ -14,12 +14,20 @@
 - 同一taskがSol判断待ち・review fix・rate limit中なら分割や新規起動へ切り替えず、保存済みtaskとsessionを継続する。
 - モデル配分・token節約・品質バランスの調整を依頼された場合だけ`glm-worker --stats`を実行し、出力の`TELEMETRY_DIR`にあるタスク別JSONLを対象に、phase・role・effort・alias・実モデル・tree usage・top-level usage・prompt・response・結果を比較する。総消費量にはsubagentを含むtree usageを使う。通常作業では調整目的のためだけに詳細ログを読まない。
 
+## 対象repoの生存判定
+
+- glm-worker taskの生存判定は`glm-worker --status`の`REPOSITORY_LOCK`(held/free/unknown)と、`TASK_STATUS: active`時の`TASK_LIVENESS`(running/stale/unknown)だけを使う。global process一覧・`pgrep`・Claude Code processの存在を生存判定や起動可否の根拠にしない。lock file内のPIDは診断情報であり、stale PIDやPID reuseでrunning扱いしない。
+- `REPOSITORY_LOCK`は対象repoのlockだけを意味する。別repositoryのglm-worker processやlockの解放を待たず、「GLM全体で同時実行不可」と推測して待機しない。global mutexは追加しない。
+- 同じrepoの`REPOSITORY_LOCK: held`だけが重複起動の待避理由になる。
+- `TASK_STATUS: active`・`REPOSITORY_LOCK: free`・`RESUME_AVAILABLE: no`を別repo終了待ちにせず、stale候補として扱う。対象repoのworking treeとstateを確認し、repo固有の復旧へ進む。checkpointがある場合は既存のresume手順に従う。
+- status観測と次command実行の間のraceは、次command自身が同じrepoのlockを取り直すことで安全に収束する。lock取得失敗だけを重複起動の根拠にする。
+
 ## 待機
 
 - 最初の`functions.exec`等の呼び出しからbackground terminalで利用可能な最大待機時間を指定し、可能な限り同一tool orchestration内で完了までblocking waitする。
 - tool内部上限でcell ID（session ID）が返る場合も、1回のwaitに最大待機時間を使い、短時間・固定間隔でwaitを掛け直さない。同じtool orchestration内で最大待機を再開し、Sol Highへ制御を戻して`write_stdin`等を呼ぶ方式へ変換しない。
 - tool orchestrationやexec cellに対する短時間・固定間隔の反復wait、固定間隔の`write_stdin`、status・端末出力・生存確認を行わない。一定時間無出力であることだけを理由に失敗・再実行しない。
-- 無出力を理由にした定期進捗発言、進捗報告目的のwake・待機短縮・中断・GLMへの問い合わせをしない。必要な報告は最後に確認済みの状態だけで行う。
+- 無出力を理由にした定期進捗発言、進捗報告目的のwake・待機短縮・中断・GLMへの問い合わせをしない。必要な報告は最後に確認済みの状態だけで行う。前回報告からの経過時刻や待機継続だけを理由に、確認済みの状態に変化がなくても発言しない。
 - ユーザーが状態確認を明示した場合だけ中間状態を確認してよい。
 - 最大待機時間後も生存していれば、再調査・代替作業・重複起動をせず再び最大時間で待つ。完了や`RATE_LIMITED`を見逃さない現行動作を維持する。
 - 完了時はユーザーの追加入力を待たず、packet処理と可能な次工程を進める。ユーザーの判断・追加情報・許可が本当に必要な場合だけ停止する。

@@ -75,6 +75,11 @@ grep -Fq 'TELEMETRY_DIR' "$success_case/codex/instructions/glm-execution.md"
 grep -Fq '同じ責務・変更理由・検証単位' "$success_case/codex/instructions/glm-execution.md"
 grep -Fq 'REPORT_ARTIFACT_DIR' "$success_case/codex/instructions/glm-execution.md"
 grep -Fq 'direct-edit.md' "$success_case/codex/instructions/glm-execution.md"
+grep -Fq 'REPOSITORY_LOCK' "$success_case/codex/instructions/glm-execution.md"
+grep -Fq 'TASK_LIVENESS' "$success_case/codex/instructions/glm-execution.md"
+grep -Fq 'GLM全体で同時実行不可' "$success_case/codex/instructions/glm-execution.md"
+grep -Fq 'stale PIDやPID reuseでrunning扱いしない' "$success_case/codex/instructions/glm-execution.md"
+grep -Fq '確認済みの状態に変化がなくても発言しない' "$success_case/codex/instructions/glm-execution.md"
 test -f "$success_case/codex/instructions/direct-edit.md"
 grep -Fq '許可は、ユーザーが明示したaction class・成果物・変更理由へ限定' "$success_case/codex/instructions/direct-edit.md"
 grep -Fq '同一session・同一目的・同一release・作業の連続性は、許可を別の行為へ拡張する理由にならない' "$success_case/codex/instructions/direct-edit.md"
@@ -119,6 +124,13 @@ grep -Fq 'packetまたは`STATUS: WORKER_ERROR`を含む結果' "$success_case/c
     GLM_WORKER_HOME="$success_case/glm-home" \
         "$success_case/bin/glm-worker" --status \
         | grep -Fq 'ARTIFACT_DIR: none'
+)
+
+(
+    cd "$success_source"
+    GLM_WORKER_HOME="$success_case/glm-home" \
+        "$success_case/bin/glm-worker" --status \
+        | grep -Fq 'REPOSITORY_LOCK: free'
 )
 
 "$success_case/bin/glm-worker" --verify-auto-resume 2>&1 \

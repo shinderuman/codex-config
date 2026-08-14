@@ -253,7 +253,7 @@ glm-worker --status
 glm-worker --stats
 ```
 
-`--status`は現在のtask ID、task status、task別artifact保存先、session、判断待ち、rate limit状態、provider-unavailable状態(原因分類・試行数・経過・RESUME_AVAILABLE)を表示する。
+`--status`は現在のtask ID、task status、task別artifact保存先、session、判断待ち、rate limit状態、provider-unavailable状態(原因分類・試行数・経過・RESUME_AVAILABLE)に加え、対象repositoryのlock実保持(`REPOSITORY_LOCK: held/free/unknown`)と、`TASK_STATUS: active`時の`TASK_LIVENESS: running/stale/unknown`を表示する。lock保持判定はflock実取得の非破壊probeであり、lock file内のPIDは診断情報(`LOCK_PID`)としてのみ扱う。GLM workerの生存判定・重複起動待避は対象repoのlockだけを根拠にし、別repoのprocess一覧や`pgrep`は使わない。`active`+`REPOSITORY_LOCK: free`はstale候補としてrepo固有の復旧へ導く。
 `--stats`は通常のworker packetへ混ぜず、完了済みと現在のタスクを集計して次を表示する。
 
 - worker/reviewerとmodel alias別の呼び出し回数・実行時間・turn数
