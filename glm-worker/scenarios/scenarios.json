@@ -155,6 +155,82 @@
       "must_not_pass": true
     },
     {
+      "id": "release-permission-new-design-returns-to-sol",
+      "behavior": "release・deploy等の直接実行許可の途中でlive障害により新設計が必要になった場合、未確定architecture判断をGLMだけで確定させずNEEDS_SOL_DECISIONへ終端する。安全停止・現状保全・観測事実の整理までを報告範囲とする",
+      "request": "release直接許可の作業中にlive障害が判明した。安全停止・現状保全・観測事実の整理までを行い、新設計の判断はSolへ渡す",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/instructions/direct-edit.md"
+      ],
+      "changed_paths": ["README.md"],
+      "runner_steps": [
+        {"lines": ["STATUS: NEEDS_SOL_DECISION", "RISK: HIGH", "DECISION: live障害発生後の新設計方針", "EVIDENCE: 本番で連続アクセスblockが判明し現行設計では回避不能", "OPTIONS: 既存設計の維持 / 取得間隔の再設計", "RECOMMENDATION: 設計判断はSolが決定し実装は新規taskへ分離", "TEST_OBLIGATIONS: 新設計決定後に実装taskで全体test", "TARGETS: none", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus"],
+      "expected_packet_status": "NEEDS_SOL_DECISION",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-decision",
+      "must_not_pass": true
+    },
+    {
+      "id": "safe-stop-readonly-diagnosis-completes-low-risk",
+      "behavior": "安全停止・現状保全・read-only診断・観測事実の整理だけのtaskは、設計判断や実装変更を含まない限り低リスク経路で完遂する",
+      "request": "live障害対応として安全停止・現状保全とread-only診断による観測事実の整理だけを行う。設計判断・実装変更は行わない",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/instructions/direct-edit.md"
+      ],
+      "changed_paths": ["README.md"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: safe stop and read-only diagnosis", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: pass", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus", "haiku"],
+      "expected_packet_status": "PASS",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "complete",
+      "must_not_pass": false
+    },
+    {
+      "id": "re-explicit-permission-limited-to-specific-fix",
+      "behavior": "ユーザーが特定の実装修正を再明示許可した場合、その許可は対象実装に限定され、許可範囲を超えた新設計を含む実装はSol判断へ戻る",
+      "request": "ユーザーが再明示許可した特定の実装修正のみを行う。許可していない追加設計変更は行わない",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/instructions/direct-edit.md"
+      ],
+      "changed_paths": ["README.md"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: re-permitted fix plus extra redesign", "REQUIREMENT_COVERAGE: partial", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: FIX_REQUIRED", "RISK: LOW", "SUMMARY: beyond re-permitted scope", "REQUIREMENT_COVERAGE: partial", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: unpermitted redesign included", "RESIDUAL_RISK: r", "TARGETS: t", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: NEEDS_SOL_DECISION", "RISK: HIGH", "DECISION: 許可外の追加設計を含めるか", "EVIDENCE: 再明示許可は特定実装修正に限定されている", "OPTIONS: 許可範囲のみ実装 / 追加設計の許可を得る", "RECOMMENDATION: 許可範囲だけを実装する", "TEST_OBLIGATIONS: 許可範囲のtest", "TARGETS: t", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus", "haiku", "opus"],
+      "expected_packet_status": "NEEDS_SOL_DECISION",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-decision",
+      "must_not_pass": true
+    },
+    {
+      "id": "same-session-release-not-permission-expansion",
+      "behavior": "同一session・同一目的・同一releaseを、直接許可を別の行為へ拡張する理由に使う実装はSol確認へ昇格し、PASSで完遂しない",
+      "request": "release直接許可と同じsession内で、許可されていないsource変更を同一release継続作業として実施する",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/instructions/direct-edit.md"
+      ],
+      "changed_paths": ["README.md"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: source edits as same-release continuation", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: NEEDS_SOL_REVIEW", "RISK: HIGH", "SUMMARY: permission boundary violation", "REQUIREMENT_COVERAGE: misapplied", "INVARIANTS: direct permission scope not extended", "TEST_EVIDENCE: ev", "ISSUES: same-release is not permission expansion", "RESIDUAL_RISK: r", "TARGETS: t", "ARTIFACTS: none", "SOL_QUESTION: 許可外変更の扱い"]}
+      ],
+      "expected_models": ["opus", "haiku"],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true
+    },
+    {
       "id": "low-risk-non-critical-pass",
       "behavior": "非criticalで低リスクな変更は通常reviewerのPASSで完遂する。gateが常時拒否する退化をしていないことの正面制御",
       "request": "READMEの軽微な記載修正のみを行う",

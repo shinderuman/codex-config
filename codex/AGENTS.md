@@ -58,7 +58,8 @@ USER_REQUEST・`SPECIFICATION.md`・既存`AGENTS.md`・直前のSol判断で未
 
 - Codex自身は原則としてソースコード・テスト・設定・ドキュメントを直接編集せず、GLMの変更に問題があればGLMへ差し戻す。
 - 1行変更・小規模・機械的であることを理由に直接編集へ切り替えない。
-- ユーザーがCodex自身による直接編集を明示した場合だけ例外とし、`~/.codex/instructions/worker/`の該当規則を必要時だけ読む。
+- ユーザーがCodex自身による直接編集・直接実行を明示した場合だけ例外とし、`~/.codex/instructions/worker/`の該当規則を必要時だけ読む。
+- 直接実行の許可はユーザーが明示した行為・成果物・変更理由に限定する。運用・release・deploy・live確認への許可は、その途中で新たに必要になった設計変更や実装変更を自動的には許可しない。同一session・同一目的・同一releaseを理由に拡張しない。
 
 ## 7. 必要時だけ読む規則
 
@@ -69,3 +70,4 @@ USER_REQUEST・`SPECIFICATION.md`・既存`AGENTS.md`・直前のSol判断で未
 - GLM packet・WORKER_ERROR処理 → `~/.codex/instructions/glm-packets.md`
 - GLM rate limit自動再開 → `~/.codex/instructions/glm-auto-resume.md`
 - Codex自身が例外的に直接編集 → `~/.codex/instructions/worker/`の該当ファイル
+- 直接編集・直接実行の許可境界 → `~/.codex/instructions/direct-edit.md`

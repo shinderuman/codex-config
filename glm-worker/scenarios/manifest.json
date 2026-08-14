@@ -3,6 +3,16 @@
   "description": "scenario corpusが根拠とするmanaged instruction fileのSHA-256固定。file内容が変更されるとhash mismatchでtestが失敗しscenariosに列挙したIDの再確認を強制する。自然言語の意味適合の自動証明ではなく変更検知と人手再確認のgate。hash更新時は該当scenarioの期待STATUS・routing・terminalを現物へ再照合すること。",
   "instruction_files": [
     {
+      "path": "codex/instructions/direct-edit.md",
+      "sha256": "ae3d7c440f47534e25613af83cddbe81e0eaaceaf78c9868a3567e1eadeeefad",
+      "scenarios": [
+        "release-permission-new-design-returns-to-sol",
+        "safe-stop-readonly-diagnosis-completes-low-risk",
+        "re-explicit-permission-limited-to-specific-fix",
+        "same-session-release-not-permission-expansion"
+      ]
+    },
+    {
       "path": "codex/instructions/worker/state-transitions.md",
       "sha256": "4a5fce67da6f7d253a7d257aa5f15dd099399e5a7decc8e303bb6487f48dc98d",
       "scenarios": [
