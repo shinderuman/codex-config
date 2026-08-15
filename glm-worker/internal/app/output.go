@@ -131,11 +131,21 @@ func printStats(st *state.StateStore, stdout io.Writer) error {
 		mergeIntMap(&aggregate.SnapshotMismatchByAxis, stats.SnapshotMismatchByAxis)
 		mergeIntMap(&aggregate.PacketRejectByCategory, stats.PacketRejectByCategory)
 		mergeIntMap(&aggregate.ProbeOutcome, stats.ProbeOutcome)
+		aggregate.TransientRetries += stats.TransientRetries
+	}
+
+	probeCalls := 0
+	for _, count := range aggregate.ProbeOutcome {
+		probeCalls += count
 	}
 
 	fmt.Fprintf(stdout, "TASKS: %d\n", len(all))
+	// MODEL_CALLSはTask Work Callのみ。probeはPROBE_CALLS(probe_outcome総計)へ別計上し、
+	// TOTAL_AI_CALLS = MODEL_CALLS + PROBE_CALLS で重複・欠落なく導出できる。
 	fmt.Fprintf(stdout, "MODEL_CALLS: %d\n", aggregate.ModelCalls)
 	fmt.Fprintf(stdout, "MODEL_CALLS_BY_ALIAS: %s\n", formatIntMap(aggregate.ModelCallsByAlias))
+	fmt.Fprintf(stdout, "PROBE_CALLS: %d\n", probeCalls)
+	fmt.Fprintf(stdout, "TOTAL_AI_CALLS: %d\n", aggregate.ModelCalls+probeCalls)
 	fmt.Fprintf(stdout, "MODEL_DURATION_MS_BY_ALIAS: %s\n", formatInt64Map(aggregate.ModelDurationMSByAlias))
 	fmt.Fprintf(stdout, "INPUT_TOKENS_BY_ALIAS: %s\n", formatInt64Map(aggregate.InputTokensByAlias))
 	fmt.Fprintf(stdout, "CACHE_CREATION_INPUT_TOKENS_BY_ALIAS: %s\n", formatInt64Map(aggregate.CacheCreationInputTokensByAlias))
@@ -157,6 +167,7 @@ func printStats(st *state.StateStore, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "DECISION_COMMANDS: %d\n", aggregate.DecisionCommands)
 	fmt.Fprintf(stdout, "FIX_COMMANDS: %d\n", aggregate.FixCommands)
 	fmt.Fprintf(stdout, "RESUME_COMMANDS: %d\n", aggregate.ResumeCommands)
+	fmt.Fprintf(stdout, "TRANSIENT_RETRIES: %d\n", aggregate.TransientRetries)
 	fmt.Fprintf(stdout, "AUTO_FIX_ROUNDS: %d\n", aggregate.AutoFixRounds)
 	fmt.Fprintf(stdout, "NEEDS_SOL_DECISION_PACKETS: %d\n", aggregate.NeedsSolDecisionPackets)
 	fmt.Fprintf(stdout, "NEEDS_SOL_REVIEW_PACKETS: %d\n", aggregate.NeedsSolReviewPackets)

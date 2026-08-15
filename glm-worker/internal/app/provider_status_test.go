@@ -120,6 +120,7 @@ func TestPrintStatsReportsDiagnosticAggregates(t *testing.T) {
 	st.RecordPacketReject("malformed")
 	st.RecordProbeOutcome("probe_failure")
 	st.RecordProbeOutcome("probe_success")
+	st.RecordTransientRetry()
 
 	var out bytes.Buffer
 	if err := printStats(st, &out); err != nil {
@@ -132,6 +133,9 @@ func TestPrintStatsReportsDiagnosticAggregates(t *testing.T) {
 		"SNAPSHOT_MISMATCH_BY_AXIS: head=1,index=1",
 		"PACKET_REJECT_BY_CATEGORY: malformed=1,size=1",
 		"PROBE_OUTCOME: probe_failure=1,probe_success=1",
+		"PROBE_CALLS: 2",
+		"TOTAL_AI_CALLS: 2",
+		"TRANSIENT_RETRIES: 1",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("stats出力に%qがありません:\n%s", want, body)
@@ -159,6 +163,9 @@ func TestPrintStatsReportsDiagnosticAggregatesEmpty(t *testing.T) {
 		"SNAPSHOT_MISMATCH_BY_AXIS: none",
 		"PACKET_REJECT_BY_CATEGORY: none",
 		"PROBE_OUTCOME: none",
+		"PROBE_CALLS: 0",
+		"TOTAL_AI_CALLS: 0",
+		"TRANSIENT_RETRIES: 0",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("空状態のstats出力に%qがありません:\n%s", want, body)

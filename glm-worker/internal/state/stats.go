@@ -19,7 +19,9 @@ const (
 	// taskStatsVersionはTaskStats JSONのschema version。既存fieldの意味/JSON名を変更するときだけ
 	// bumpし(旧archiveはAllTaskStats/decodeTaskStatsが読み飛ばす)、新集計fieldのomitempty追加は
 	// 後方互換(旧archiveは該当map欠落=0寄与)のためbump不要。
-	taskStatsVersion = 2
+	// v3はmodel_calls/実行時間/token集計をTask Work Call専用(probeを含まない)へ変更したためbumpし、
+	// probeをmodel_callsへ混ぜていたv2以前のarchiveを集計へ混在させない。
+	taskStatsVersion = 3
 )
 
 var errUnsupportedTaskStatsVersion = errors.New("unsupported task stats version")
@@ -31,11 +33,14 @@ var statsWarnOut io.Writer = os.Stderr
 
 // TaskStatsは観測用のタスク統計mirror。
 type TaskStats struct {
-	Version                                 int              `json:"version"`
-	TaskID                                  string           `json:"task_id"`
-	StartedAt                               time.Time        `json:"started_at"`
-	ArchivedAt                              *time.Time       `json:"archived_at,omitempty"`
-	Status                                  TaskStatus       `json:"status"`
+	Version    int        `json:"version"`
+	TaskID     string     `json:"task_id"`
+	StartedAt  time.Time  `json:"started_at"`
+	ArchivedAt *time.Time `json:"archived_at,omitempty"`
+	Status     TaskStatus `json:"status"`
+	// ModelCalls/ModelCallsByAlias/各token mapはTask Work Call(worker/reviewerの本task呼出、
+	// transient再試行を含む)だけを数える。probe呼出はProbeOutcomeへ、tokenはJSONL telemetryへ
+	// 記録され、これらの集計へは混ぜない。
 	ModelCalls                              int              `json:"model_calls"`
 	ModelCallsByAlias                       map[string]int   `json:"model_calls_by_alias,omitempty"`
 	ModelDurationMSByAlias                  map[string]int64 `json:"model_duration_ms_by_alias,omitempty"`
@@ -71,6 +76,9 @@ type TaskStats struct {
 	SnapshotMismatchByAxis map[string]int `json:"snapshot_mismatch_by_axis,omitempty"`
 	PacketRejectByCategory map[string]int `json:"packet_reject_by_category,omitempty"`
 	ProbeOutcome           map[string]int `json:"probe_outcome,omitempty"`
+	// TransientRetriesはtransient障害後にprobe成功を経て再実行した本task呼出回数。
+	// ModelCallsは初回呼出とこの再試行の両方を含む(重複なく数えるため)。
+	TransientRetries int `json:"transient_retries,omitempty"`
 }
 
 func warnStatsFailure(operation string, err error) {
@@ -223,6 +231,8 @@ func (s *StateStore) AllTaskStats() ([]TaskStats, error) {
 	return result, nil
 }
 
+// RecordModelCallはTask Work Call(本taskのworker/reviewer呼出)をrole/alias別に数える。
+// probe呼出はここへ入れない。
 func (s *StateStore) RecordModelCall(role SessionRole, model string) {
 	s.UpdateTaskStats(func(stats *TaskStats) {
 		stats.ModelCalls++
@@ -235,6 +245,13 @@ func (s *StateStore) RecordModelCall(role SessionRole, model string) {
 		} else {
 			stats.WorkerCalls++
 		}
+	})
+}
+
+// RecordTransientRetryはtransient障害からの本task再実行1回を数える。
+func (s *StateStore) RecordTransientRetry() {
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		stats.TransientRetries++
 	})
 }
 

@@ -230,9 +230,9 @@ func TestUpdateTaskStatsRebuildsVersion1Mirror(t *testing.T) {
 	}
 }
 
-// 旧v2 archive(診断map欠落)と新v2 mirror(診断map付き)が混在しても、既存token集計は両方から
-// 維持され、診断集計mapは新archiveだけから計上される(旧archiveの欠落=0寄与で分母へ混ぜない)。
-func TestAllTaskStatsMixedSchemaPreservesTokensAndDiagnostics(t *testing.T) {
+// v2 archiveはmodel_callsへprobeを混ぜていた旧意味のためv3集計から除外し、
+// 診断集計は現在mirrorだけから計上される(旧archiveの新schema混在を防ぐ)。
+func TestAllTaskStatsSkipsVersion2Archive(t *testing.T) {
 	st := &StateStore{dir: t.TempDir()}
 	historyDir := filepath.Join(st.dir, "stats")
 	if err := os.MkdirAll(historyDir, 0o700); err != nil {
@@ -246,34 +246,36 @@ func TestAllTaskStatsMixedSchemaPreservesTokensAndDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 	st.RecordModelCall(WorkerRole, "opus")
-	st.RecordRiskFloor("worker-declared")
-	st.RecordSnapshotMismatch("head,index")
-	st.RecordPacketReject("size")
+	st.RecordTransientRetry()
 	st.RecordProbeOutcome("probe_failure")
+	st.RecordRiskFloor("worker-declared")
 
 	all, err := st.AllTaskStats()
 	if err != nil {
 		t.Fatal(err)
 	}
 	var (
-		modelCalls                             int
-		input, output                          map[string]int64
-		riskFloor, mismatchAxis, reject, probe map[string]int
+		modelCalls       int
+		input, output    map[string]int64
+		riskFloor, probe map[string]int
+		transientRetries int
 	)
 	for _, s := range all {
 		modelCalls += s.ModelCalls
 		input = mergeInt64Test(input, s.InputTokensByAlias)
 		output = mergeInt64Test(output, s.OutputTokensByAlias)
 		riskFloor = mergeIntTest(riskFloor, s.RiskFloorByCategory)
-		mismatchAxis = mergeIntTest(mismatchAxis, s.SnapshotMismatchByAxis)
-		reject = mergeIntTest(reject, s.PacketRejectByCategory)
 		probe = mergeIntTest(probe, s.ProbeOutcome)
+		transientRetries += s.TransientRetries
 	}
-	if modelCalls != 6 || input["opus"] != 999 || output["opus"] != 111 {
-		t.Fatalf("旧archiveのtoken集計が失われた: modelCalls=%d input=%+v output=%+v", modelCalls, input, output)
+	if len(all) != 1 {
+		t.Fatalf("v2 archiveを除外したarchive数 = %d", len(all))
 	}
-	if riskFloor["worker-declared"] != 1 || mismatchAxis["head"] != 1 || reject["size"] != 1 || probe["probe_failure"] != 1 {
-		t.Fatalf("新mirrorの診断集計が正しくない: floor=%+v axis=%+v reject=%+v probe=%+v", riskFloor, mismatchAxis, reject, probe)
+	if modelCalls != 1 || input["opus"] != 0 || output["opus"] != 0 {
+		t.Fatalf("v2 archiveの集計が混入している: modelCalls=%d input=%+v output=%+v", modelCalls, input, output)
+	}
+	if transientRetries != 1 || riskFloor["worker-declared"] != 1 || probe["probe_failure"] != 1 {
+		t.Fatalf("現在mirrorの集計が正しくない: retries=%d floor=%+v probe=%+v", transientRetries, riskFloor, probe)
 	}
 }
 

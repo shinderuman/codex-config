@@ -535,6 +535,100 @@
       "probe_responses": ["Scheduled maintenance is in progress. Please retry later."],
       "expected_probe_count": 1,
       "expected_run_count": 0
+    },
+    {
+      "id": "provider-transient-probe-fail-then-success-resumes-task",
+      "behavior": "transient障害→probe失敗→backoff→probe成功→同一session/checkpointでsaved taskを再開→worker→reviewerへ成功する経路で、task呼出数(worker初回+再開+reviewer)・probe呼出数・transient retry・total AI call数・task/probe別tokenとcost・checkpoint解除・final statusまでを加法整合的に固定する",
+      "request": "通常の実装タスク",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": [
+        "README.md"
+      ],
+      "runner_steps": [
+        {"signal": "API Error: 503 Service Unavailable"},
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: recovered", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"], "usage": {"input_tokens": 10, "output_tokens": 5}, "cost_usd": 0.03},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: pass", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"], "usage": {"input_tokens": 7, "output_tokens": 3}, "cost_usd": 0.02}
+      ],
+      "expected_models": ["opus", "opus", "haiku"],
+      "expected_packet_status": "PASS",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "complete",
+      "must_not_pass": false,
+      "probe_errors": ["API Error: 503 Service Unavailable", ""],
+      "expected_probe_count": 2,
+      "expected_checkpoint": "none",
+      "expected_stats": {
+        "model_calls": 3,
+        "worker_calls": 2,
+        "reviewer_calls": 1,
+        "transient_retries": 1,
+        "resume_commands": 0,
+        "probe_success": 1,
+        "probe_failure": 1,
+        "total_ai_calls": 5
+      },
+      "expected_telemetry": {
+        "task_calls": 3,
+        "probe_calls": 2,
+        "event_calls": 0,
+        "task_input_tokens": 17,
+        "task_output_tokens": 8,
+        "task_cost_usd": 0.05,
+        "probe_input_tokens": 2,
+        "probe_output_tokens": 2,
+        "probe_cost_usd": 0.02,
+        "probe_resolved_model": "glm-5.3"
+      }
+    },
+    {
+      "id": "provider-resume-probe-success-then-five-hour-limit",
+      "behavior": "provider-unavailableからのresumeでprobe成功後に本taskを1回実行しZ.ai 5h上限へ到達した場合、rate-limited checkpoint保存・status切替・resume command数・probe成功数・total AI call数・未観測token(推測なし)を固定する",
+      "request": "通常の実装タスク",
+      "entry": "resume",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": [
+        "README.md"
+      ],
+      "runner_steps": [
+        {"signal": "API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour. Your limit will reset at 2026-07-22 14:06:34]"}
+      ],
+      "expected_models": ["opus"],
+      "expected_packet_status": "IMPLEMENTED",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "rate-limited",
+      "must_not_pass": true,
+      "expected_error_status": "RATE_LIMITED",
+      "forbidden_error_status": "PROVIDER_UNAVAILABLE",
+      "expected_probe_count": 1,
+      "expected_run_count": 1,
+      "expected_checkpoint": "rate-limited",
+      "expected_stats": {
+        "model_calls": 1,
+        "worker_calls": 1,
+        "reviewer_calls": 0,
+        "transient_retries": 0,
+        "resume_commands": 1,
+        "probe_success": 1,
+        "probe_failure": 0,
+        "total_ai_calls": 2
+      },
+      "expected_telemetry": {
+        "task_calls": 1,
+        "probe_calls": 1,
+        "event_calls": 0,
+        "task_input_tokens": 0,
+        "task_output_tokens": 0,
+        "task_cost_usd": 0,
+        "probe_input_tokens": 1,
+        "probe_output_tokens": 1,
+        "probe_cost_usd": 0.01,
+        "probe_resolved_model": "glm-5.3"
+      }
     }
   ]
 }

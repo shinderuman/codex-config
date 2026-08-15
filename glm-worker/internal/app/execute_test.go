@@ -155,6 +155,7 @@ func TestPrintStatsAggregatesAndSortsModelAliases(t *testing.T) {
 	st.RecordRateLimit("opus")
 	st.RecordModelCallLog(state.ModelCallLog{
 		TaskID:     st.ReadOr("task.id", "unknown"),
+		CallType:   state.CallTypeTask,
 		ModelAlias: "opus",
 		TopLevelUsage: state.TokenUsage{
 			InputTokens:          1,

@@ -65,6 +65,9 @@
 - probe成功はJSON正常・type=result・is_error=false・応答trim後sentinel `GLM_WORKER_PROBE_OK`完全一致・usage出力tokenありの全成立だけとする。probe promptはreasoning不要のsentinel返却だけを要求する固定文にする。
 - process exit 0でもis_error=trueやsentinel不一致を成功扱いせず、probe-contract分類で追加probeのAI costなく初回provider-unavailableへfail closedし元task/session/checkpointを保持する。
 - 偽陽性がreviewを通過した原因はexit codeと非空responseのpositive testへの偏り、成功後resume境界のnegative caseとsentinel契約のscenario欠落であるため、gate変更ではfalse-positive caseを独立testとscenario(corpus `provider-resume-probe-*`)へ要求する。追加AI callやstatus page依存でprobeを補強しない。
+- Task Work Call(worker/reviewerの本task呼出)とProvider Probe Callを明確に分離する。worker/reviewerのtask call数・実行時間・token集計へprobeを混ぜず、probe成功後の本task再開実行をrole別task callとして毎回数える。probe呼出数・transient retry数・resume回数・total AI call数(task+probe)が重複・欠落なく導出できる。
+- probeはClaude CLIが既に返すinput/output/cache token・cost・resolved model・API/wall durationを追加AI callなしで既存telemetry(JSONL)へ記録する。取得不能値は未観測(零値)のまま推測しない。
+- transient→probe失敗→backoff→probe成功→saved task resume→success、およびprobe成功→resume→5h limitの2経路を、checkpoint/task status/task・probe呼出数・token/cost・final status込みでscenario corpus(`provider-transient-probe-fail-then-success-resumes-task`・`provider-resume-probe-success-then-five-hour-limit`)へ固定する。
 
 
 ## 統計
@@ -74,7 +77,8 @@
 - Claude JSON出力のtop-level usageと、subagentを含む`modelUsage`由来のtree usage・実モデル名を呼出単位で区別して記録する。
 - `--stats`のalias別・実モデル別tokenはtree usageから集計し、top-level turn数は明示的に区別する。
 - タスク別JSONLへphase、role、effort、session、system/dynamic prompt、最終response、両usage、結果を`0600`で保存する。本文保存は環境変数で無効化できる。
-- statsとtelemetryはversion 2だけを集計・読込対象とし、意味の異なるversion 1を混在させない。
+- statsとtelemetryはversion 3だけを集計・読込対象とし、意味の異なる旧version(model_callsへprobeを混ぜたv2 stats、call_typeを持たないv2 telemetry)を混在させない。過去telemetryを書き換えない。
+- telemetry/stats変更では数値が書かれるだけでなく、各metricが何を1呼出として数えるかの意味と加法整合性(total AI calls = task calls + probe calls、worker+reviewer = task calls)をreviewする。escaped reviewの原因はprobeをtask call metricへ混ぜた既存metricの意味確認不足として固定する。
 - `glm-worker --stats`だけが統計を表示し、通常packet出力へ統計を混在させない。
 - stats mirrorまたはtelemetryが破損・書き込み不能でも通常workflowとresetを継続し、warningを出す。
 

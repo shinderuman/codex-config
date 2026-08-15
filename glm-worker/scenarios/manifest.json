@@ -47,7 +47,9 @@
         "packet-recompact-repeat-multi-stops-worker-error",
         "packet-resume-multi-complete-recompacts-to-single",
         "provider-resume-probe-is-error-exit-zero-stays-unavailable",
-        "provider-resume-probe-sentinel-mismatch-stays-unavailable"
+        "provider-resume-probe-sentinel-mismatch-stays-unavailable",
+        "provider-transient-probe-fail-then-success-resumes-task",
+        "provider-resume-probe-success-then-five-hour-limit"
       ]
     },
     {

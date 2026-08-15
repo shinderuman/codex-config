@@ -9,11 +9,16 @@ import (
 	"strings"
 )
 
+// ProbeResultはprobe応答とClaude CLIが返した観測値。取得不能な値は零値のまま
+// (未観測)にし、呼び出し側で推測しない。
 type ProbeResult struct {
-	Response   string
-	IsError    bool
-	DurationMS int64
-	Usage      TokenUsage
+	Response      string
+	IsError       bool
+	DurationMS    int64
+	DurationAPIMS int64
+	TotalCostUSD  float64
+	Usage         TokenUsage
+	ModelUsage    map[string]ModelUsage
 }
 
 // ProbeSentinelはprobe応答の本文がtrim後完全一致すべき固定token。
@@ -105,7 +110,10 @@ func (r *ClaudeRunner) Probe(model string) (ProbeResult, error) {
 		result.Response = parsed.Result
 		result.IsError = parsed.IsError
 		result.Usage = parsed.Usage
+		result.ModelUsage = parsed.ModelUsage
 		result.DurationMS = parsed.DurationMS
+		result.DurationAPIMS = parsed.DurationAPIMS
+		result.TotalCostUSD = parsed.TotalCostUSD
 	}
 	if runErr != nil {
 		stderrText, _ := os.ReadFile(stderrPath)

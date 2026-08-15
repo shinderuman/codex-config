@@ -15,6 +15,7 @@ func TestRecordModelCallLogPersistsPrivateJSONL(t *testing.T) {
 	now := time.Now().UTC()
 	st.RecordModelCallLog(ModelCallLog{
 		TaskID:      taskID,
+		CallType:    CallTypeTask,
 		SessionID:   "session",
 		StartedAt:   now,
 		CompletedAt: now.Add(time.Second),
@@ -79,6 +80,7 @@ func TestRecordModelCallLogFailureDoesNotBlockStats(t *testing.T) {
 
 	st.RecordModelCallLog(ModelCallLog{
 		TaskID:        taskID,
+		CallType:      CallTypeTask,
 		ModelAlias:    "haiku",
 		TopLevelUsage: TokenUsage{OutputTokens: 7},
 	})
@@ -115,6 +117,69 @@ func TestReadModelCallLogsSkipsVersion1(t *testing.T) {
 	}
 }
 
+// v2 recordはcall_typeを持たずtask/probeが区別できないため、v3集計へ混在させない。
+func TestReadModelCallLogsSkipsVersion2(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	taskID, err := st.StartNewTask()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.appendModelCallLog(ModelCallLog{Version: 2, TaskID: taskID, CallID: "v2", CallType: CallTypeProbe}); err != nil {
+		t.Fatal(err)
+	}
+	st.RecordModelCallLog(ModelCallLog{TaskID: taskID, CallID: "v3", CallType: CallTypeTask})
+
+	logs, err := st.ReadModelCallLogs(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || logs[0].Version != 3 || logs[0].CallID != "v3" {
+		t.Fatalf("version 2を除外したtelemetry = %#v", logs)
+	}
+}
+
+// probe recordはJSONLへtoken/cost/resolved modelを残すが、task集計mirrorへは混ぜない。
+func TestRecordProbeCallLogExcludedFromTaskAggregates(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	taskID, err := st.StartNewTask()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.RecordModelCallLog(ModelCallLog{
+		TaskID:     taskID,
+		CallType:   CallTypeProbe,
+		ModelAlias: "opus",
+		Outcome:    "probe_success",
+		TopLevelUsage: TokenUsage{
+			InputTokens:  5,
+			OutputTokens: 7,
+		},
+		ResolvedModelUsage: map[string]ResolvedModelUsage{
+			"glm-5.3": {InputTokens: 5, OutputTokens: 7, CostUSD: 0.01},
+		},
+		TotalCostUSD: 0.01,
+	})
+
+	logs, err := st.ReadModelCallLogs(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || logs[0].CallType != CallTypeProbe {
+		t.Fatalf("probe record = %#v", logs)
+	}
+	if logs[0].TotalCostUSD != 0.01 || logs[0].ResolvedModelUsage["glm-5.3"].OutputTokens != 7 {
+		t.Fatalf("probe cost/resolved modelがtelemetryへ記録されていない: %#v", logs[0])
+	}
+	stats, err := st.loadTaskStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.ModelCalls != 0 || stats.InputTokensByAlias["opus"] != 0 ||
+		stats.OutputTokensByResolvedModel["glm-5.3"] != 0 || stats.CallTreesByResolvedModel["glm-5.3"] != 0 {
+		t.Fatalf("probeがtask集計へ混ざっている: %#v", stats)
+	}
+}
+
 // 旧record(診断field欠落)と新record(診断field付き)が同一v2 JSONLへ混在しても、
 // 既存token集計は両方から維持され、診断値はcaptured recordだけに現れる(not capturedと区別)。
 func TestReadModelCallLogsMixedSchemaPreservesTokensAndDiagnostics(t *testing.T) {
@@ -126,6 +191,7 @@ func TestReadModelCallLogsMixedSchemaPreservesTokensAndDiagnostics(t *testing.T)
 	legacy := ModelCallLog{
 		Version:    modelCallLogVersion,
 		CallID:     "legacy",
+		CallType:   CallTypeTask,
 		TaskID:     taskID,
 		Phase:      "worker-new",
 		ModelAlias: "opus",
@@ -140,6 +206,7 @@ func TestReadModelCallLogsMixedSchemaPreservesTokensAndDiagnostics(t *testing.T)
 	}
 	st.RecordModelCallLog(ModelCallLog{
 		CallID:             "current",
+		CallType:           CallTypeTask,
 		TaskID:             taskID,
 		Phase:              "reviewer-1",
 		ModelAlias:         "haiku",

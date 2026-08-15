@@ -76,9 +76,13 @@ func (r *scriptedRunner) Probe(model string) (runner.ProbeResult, error) {
 		response = r.probeResponses[index]
 	}
 	return runner.ProbeResult{
-		Response: response,
-		IsError:  r.probeIsError,
-		Usage:    runner.TokenUsage{InputTokens: 1, OutputTokens: 1},
+		Response:      response,
+		IsError:       r.probeIsError,
+		Usage:         runner.TokenUsage{InputTokens: 1, OutputTokens: 1},
+		ModelUsage:    map[string]runner.ModelUsage{"glm-5.3": {InputTokens: 1, OutputTokens: 1, CostUSD: 0.01}},
+		DurationMS:    50,
+		DurationAPIMS: 100,
+		TotalCostUSD:  0.01,
 	}, err
 }
 

@@ -123,6 +123,62 @@ func TestRecoveryProbeSuccessThenResumeCompletes(t *testing.T) {
 	}
 }
 
+// probe成功後の本task再実行はrole別task callとして数え、probe呼出・tokenはtask集計へ混ざらない。
+// total AI call数はtask call + probe callで重複・欠落なく導出できる。
+func TestRecoveryAccountingSeparatesTaskAndProbeCalls(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{
+		steps: []runnerStep{
+			{output: "API Error: 503 Service Unavailable", runErr: errors.New("exit status 1")},
+			{output: implementedPacket("recovered")},
+		},
+		probeErrs: []error{errProbeTransient, nil},
+	}
+	w, _ := newRecoveryWorkflowT(t, st, r)
+	w.temp = t.TempDir()
+
+	if _, err := w.runModel(workerCheckpoint()); err != nil {
+		t.Fatalf("回復成功を期待: %v", err)
+	}
+	stats := currentStats(t, st)
+	if stats.ModelCalls != 2 || stats.WorkerCalls != 2 || stats.ReviewerCalls != 0 {
+		t.Fatalf("task call集計 = %#v", stats)
+	}
+	if stats.TransientRetries != 1 {
+		t.Fatalf("transient retries = %d", stats.TransientRetries)
+	}
+	if stats.ProbeOutcome["probe_failure"] != 1 || stats.ProbeOutcome["probe_success"] != 1 {
+		t.Fatalf("probe outcome = %+v", stats.ProbeOutcome)
+	}
+	probeCalls := stats.ProbeOutcome["probe_failure"] + stats.ProbeOutcome["probe_success"]
+	if total := stats.ModelCalls + probeCalls; total != 4 {
+		t.Fatalf("total AI calls = %d", total)
+	}
+	var taskRecords, probeRecords int
+	var probeCost float64
+	for _, l := range taskLogs(t, st) {
+		switch l.CallType {
+		case state.CallTypeTask:
+			taskRecords++
+		case state.CallTypeProbe:
+			probeRecords++
+			probeCost += l.TotalCostUSD
+			if l.ClaudeAPIDurationMS != 100 || l.ResolvedModelUsage["glm-5.3"].CostUSD != 0.01 {
+				t.Fatalf("probe telemetryのAPI duration/resolved model = %#v", l)
+			}
+		}
+	}
+	if taskRecords != 2 || probeRecords != 2 {
+		t.Fatalf("telemetry records task=%d probe=%d", taskRecords, probeRecords)
+	}
+	if probeCost != 0.02 {
+		t.Fatalf("probe cost = %v", probeCost)
+	}
+	if stats.InputTokensByAlias["opus"] != 0 || stats.OutputTokensByAlias["opus"] != 0 {
+		t.Fatalf("probe tokenがtask集計へ混ざった: %#v", stats)
+	}
+}
+
 func TestRecoveryResumeTransientRetriesNextBackoff(t *testing.T) {
 	st := newStateStoreT(t)
 	r := &scriptedRunner{

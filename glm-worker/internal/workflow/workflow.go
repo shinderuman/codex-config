@@ -887,6 +887,9 @@ func (w *Workflow) gateResumeOnProbe(checkpoint state.ResumeCheckpoint) error {
 
 func (w *Workflow) runResumedTask(checkpoint state.ResumeCheckpoint, outputPath string) (bool, runner.RunResult, time.Time, time.Time, error) {
 	startedAt := w.now().UTC()
+	// probe成功後の再実行も本taskのTask Work Callとしてrole別に数える。
+	w.state.RecordTransientRetry()
+	w.state.RecordModelCall(checkpoint.Role, checkpoint.Model)
 	result, runErr := w.runner.Run(
 		checkpoint.Role,
 		checkpoint.Model,
@@ -944,8 +947,6 @@ func (w *Workflow) recoveryLoop(
 		probeStartedAt := w.now().UTC()
 		probeResult, probeErr := w.runner.Probe(checkpoint.Model)
 		probeCompletedAt := w.now().UTC()
-		w.state.RecordModelCall(checkpoint.Role, checkpoint.Model)
-		w.state.RecordModelDuration(checkpoint.Model, probeCompletedAt.Sub(probeStartedAt))
 		// fake runnerはreal runnerの応答検証を通らないため、gate側でも契約を強制する。
 		var probeInvalid *runner.ProbeInvalidResponseError
 		if probeErr == nil {
@@ -1037,6 +1038,7 @@ func (w *Workflow) recordProviderUnavailableEvent(checkpoint state.ResumeCheckpo
 	now := w.now().UTC()
 	w.state.RecordModelCallLog(state.ModelCallLog{
 		TaskID:                 w.state.ReadOr("task.id", "unknown"),
+		CallType:               state.CallTypeEvent,
 		StartedAt:              now,
 		CompletedAt:            now,
 		Phase:                  checkpoint.Phase + "-provider-unavailable",
@@ -1069,26 +1071,40 @@ func (w *Workflow) recordProbeCall(
 	if !w.config.TelemetryContent {
 		response = ""
 	}
+	resolvedUsage := make(map[string]state.ResolvedModelUsage, len(probe.ModelUsage))
+	for model, usage := range probe.ModelUsage {
+		resolvedUsage[model] = state.ResolvedModelUsage{
+			InputTokens:              usage.InputTokens,
+			CacheCreationInputTokens: usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     usage.CacheReadInputTokens,
+			OutputTokens:             usage.OutputTokens,
+			CostUSD:                  usage.CostUSD,
+		}
+	}
 	w.state.RecordModelCallLog(state.ModelCallLog{
-		TaskID:           w.state.ReadOr("task.id", "unknown"),
-		SessionID:        "none",
-		StartedAt:        startedAt,
-		CompletedAt:      completedAt,
-		Phase:            fmt.Sprintf("%s-probe-%d", checkpoint.Phase, attempt),
-		Role:             checkpoint.Role,
-		ModelAlias:       checkpoint.Model,
-		Effort:           "low",
-		ReadOnly:         true,
-		Outcome:          outcome,
-		ProbeAttempt:     attempt,
-		PromptBytes:      len(runner.ProbePrompt),
-		PromptSHA256:     hex.EncodeToString(promptHash[:]),
-		Response:         response,
-		ResponseBytes:    len(probe.Response),
-		Error:            errorText,
-		TopLevelUsage:    state.TokenUsage(probe.Usage),
-		WallDurationMS:   completedAt.Sub(startedAt).Milliseconds(),
-		ClaudeDurationMS: probe.DurationMS,
+		TaskID:              w.state.ReadOr("task.id", "unknown"),
+		CallType:            state.CallTypeProbe,
+		SessionID:           "none",
+		StartedAt:           startedAt,
+		CompletedAt:         completedAt,
+		Phase:               fmt.Sprintf("%s-probe-%d", checkpoint.Phase, attempt),
+		Role:                checkpoint.Role,
+		ModelAlias:          checkpoint.Model,
+		ResolvedModelUsage:  resolvedUsage,
+		Effort:              "low",
+		ReadOnly:            true,
+		Outcome:             outcome,
+		ProbeAttempt:        attempt,
+		PromptBytes:         len(runner.ProbePrompt),
+		PromptSHA256:        hex.EncodeToString(promptHash[:]),
+		Response:            response,
+		ResponseBytes:       len(probe.Response),
+		Error:               errorText,
+		TopLevelUsage:       state.TokenUsage(probe.Usage),
+		WallDurationMS:      completedAt.Sub(startedAt).Milliseconds(),
+		ClaudeDurationMS:    probe.DurationMS,
+		ClaudeAPIDurationMS: probe.DurationAPIMS,
+		TotalCostUSD:        probe.TotalCostUSD,
 	})
 }
 
@@ -1133,6 +1149,7 @@ func (w *Workflow) recordModelCall(
 	}
 	entry := state.ModelCallLog{
 		TaskID:             w.state.ReadOr("task.id", "unknown"),
+		CallType:           state.CallTypeTask,
 		SessionID:          modelSessionID(w.state, checkpoint.Role, runResult.SessionID),
 		StartedAt:          startedAt,
 		CompletedAt:        completedAt,
@@ -1448,6 +1465,7 @@ func (w *Workflow) recordSnapshotEvent(stage state.SnapshotStage, workerEnd, rev
 	now := w.now().UTC()
 	entry := state.ModelCallLog{
 		TaskID:      w.state.ReadOr("task.id", "unknown"),
+		CallType:    state.CallTypeEvent,
 		StartedAt:   now,
 		CompletedAt: now,
 		Phase:       fmt.Sprintf("%s-snapshot-check", stage),

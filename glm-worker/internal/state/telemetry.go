@@ -11,8 +11,17 @@ import (
 
 // modelCallLogVersionはModelCallLog JSONのschema version。既存fieldの意味やJSON名を
 // 変更するときだけbumpし、ReadModelCallLogsが旧version recordを読み飛ばす(fail-closed)。
-// 新fieldのomitempty追加は後方互換(旧recordは新field欠落=未観測/not captured)のためbump不要。
-const modelCallLogVersion = 2
+// v3はcall_type(task/probe/event)導入でrecord種別の判別が意味を持つようになったためbumpし、
+// call_typeを持たないv2以前(task callとprobe callが区別不能)を集計へ混在させない。
+const modelCallLogVersion = 3
+
+// CallTypeは1 recordの呼出種別。task = worker/reviewerのTask Work Call、
+// probe = provider疎通確認のProvider Probe Call、event = AI callを伴わない事実記録。
+const (
+	CallTypeTask  = "task"
+	CallTypeProbe = "probe"
+	CallTypeEvent = "event"
+)
 
 type TokenUsage struct {
 	InputTokens              int64 `json:"input_tokens"`
@@ -33,6 +42,7 @@ type ResolvedModelUsage struct {
 type ModelCallLog struct {
 	Version             int                           `json:"version"`
 	CallID              string                        `json:"call_id"`
+	CallType            string                        `json:"call_type,omitempty"`
 	TaskID              string                        `json:"task_id"`
 	SessionID           string                        `json:"session_id"`
 	StartedAt           time.Time                     `json:"started_at"`
@@ -125,7 +135,12 @@ func (s *StateStore) appendModelCallLog(value ModelCallLog) error {
 	return file.Close()
 }
 
+// recordTokenUsageはTask Work Callだけをtoken/turn集計へ反映する。probeのtoken・cost・
+// resolved modelはJSONL recordへ記録されるが、task alias/resolved model集計へは混ぜない。
 func (s *StateStore) recordTokenUsage(value ModelCallLog) {
+	if value.CallType != CallTypeTask {
+		return
+	}
 	s.UpdateTaskStats(func(stats *TaskStats) {
 		addInt64(&stats.InputTokensByAlias, value.ModelAlias, value.TreeUsage.InputTokens)
 		addInt64(&stats.CacheCreationInputTokensByAlias, value.ModelAlias, value.TreeUsage.CacheCreationInputTokens)

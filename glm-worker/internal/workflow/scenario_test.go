@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/packet"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/runner"
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
 )
 
@@ -23,6 +24,43 @@ type scenarioStep struct {
 	Signal string `json:"signal,omitempty"`
 	// Rawはpacket品質gate違反を再現する生の出力本文。packet.Validateを通らないmarker構造をscenarioへ入力する。
 	Raw string `json:"raw,omitempty"`
+	// Usage/CostUSDは成功stepのRunResult観測値(token/cost telemetry検証用)。
+	// signal/error stepでは未観測(0)のままにする。
+	Usage   scenarioUsage `json:"usage,omitempty"`
+	CostUSD float64       `json:"cost_usd,omitempty"`
+}
+
+type scenarioUsage struct {
+	InputTokens  int64 `json:"input_tokens,omitempty"`
+	OutputTokens int64 `json:"output_tokens,omitempty"`
+}
+
+// scenarioStatsはTask Work CallとProvider Probe Callの呼出数が重複・欠落なく数えられる
+// ことを固定する期待値。TotalAICalls = ModelCalls + probe成功/失敗の合計。
+type scenarioStats struct {
+	ModelCalls       int `json:"model_calls"`
+	WorkerCalls      int `json:"worker_calls"`
+	ReviewerCalls    int `json:"reviewer_calls"`
+	TransientRetries int `json:"transient_retries"`
+	ResumeCommands   int `json:"resume_commands"`
+	ProbeSuccess     int `json:"probe_success"`
+	ProbeFailure     int `json:"probe_failure"`
+	TotalAICalls     int `json:"total_ai_calls"`
+}
+
+// scenarioTelemetryは呼出種別別のJSONL記録数とtoken/cost期待値。種別はcall_typeで
+// 判別し、task集計へprobeが混ざらないことを呼出種別別の和で検証する。
+type scenarioTelemetry struct {
+	TaskCalls          int     `json:"task_calls"`
+	ProbeCalls         int     `json:"probe_calls"`
+	EventCalls         int     `json:"event_calls"`
+	TaskInputTokens    int64   `json:"task_input_tokens"`
+	TaskOutputTokens   int64   `json:"task_output_tokens"`
+	TaskCostUSD        float64 `json:"task_cost_usd"`
+	ProbeInputTokens   int64   `json:"probe_input_tokens"`
+	ProbeOutputTokens  int64   `json:"probe_output_tokens"`
+	ProbeCostUSD       float64 `json:"probe_cost_usd"`
+	ProbeResolvedModel string  `json:"probe_resolved_model"`
 }
 
 type scenarioDoc struct {
@@ -56,6 +94,12 @@ type scenarioDoc struct {
 	ProbeIsError bool `json:"probe_is_error,omitempty"`
 	// ReviewerMutatesWorktreeはreviewerがBash相当でrepositoryを変更するscenarioで有効化する。
 	ReviewerMutatesWorktree bool `json:"reviewer_mutates_worktree,omitempty"`
+	// ExpectedStatsは終端後のtask/probe呼出数集計の期待値。
+	ExpectedStats *scenarioStats `json:"expected_stats,omitempty"`
+	// ExpectedTelemetryは終端後のJSONL telemetryの種別別記録数とtoken/costの期待値。
+	ExpectedTelemetry *scenarioTelemetry `json:"expected_telemetry,omitempty"`
+	// ExpectedCheckpointは終端時のresume checkpoint状態(none/rate-limited/provider-unavailable)。
+	ExpectedCheckpoint string `json:"expected_checkpoint,omitempty"`
 }
 
 type scenarioFile struct {
@@ -190,6 +234,23 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 		}
 		if s.Entry == "resume" && s.ExpectedErrorStatus == "" && s.RunnerSteps[len(s.RunnerSteps)-1].Error == "" && s.RunnerSteps[len(s.RunnerSteps)-1].Signal == "" && s.RunnerSteps[len(s.RunnerSteps)-1].Raw == "" && len(s.RunnerSteps[len(s.RunnerSteps)-1].Lines) == 0 {
 			return fmt.Errorf("scenario %s empty terminal step", s.ID)
+		}
+		knownCheckpoint := map[string]bool{"": true, "none": true, "rate-limited": true, "provider-unavailable": true}
+		if !knownCheckpoint[s.ExpectedCheckpoint] {
+			return fmt.Errorf("scenario %s unknown expected checkpoint %q", s.ID, s.ExpectedCheckpoint)
+		}
+		if es := s.ExpectedStats; es != nil {
+			if es.WorkerCalls+es.ReviewerCalls != es.ModelCalls {
+				return fmt.Errorf("scenario %s worker+reviewer calls != model calls", s.ID)
+			}
+			if es.ModelCalls+es.ProbeSuccess+es.ProbeFailure != es.TotalAICalls {
+				return fmt.Errorf("scenario %s total_ai_calls != model+probe calls", s.ID)
+			}
+		}
+		if et := s.ExpectedTelemetry; et != nil && s.ExpectedStats != nil {
+			if et.TaskCalls != s.ExpectedStats.ModelCalls || et.ProbeCalls != s.ExpectedStats.ProbeSuccess+s.ExpectedStats.ProbeFailure {
+				return fmt.Errorf("scenario %s telemetry call counts disagree with expected_stats", s.ID)
+			}
 		}
 		if len(s.RunnerSteps) != len(s.ExpectedModels) {
 			return fmt.Errorf("scenario %s runner_steps/expected_models count mismatch: %d vs %d", s.ID, len(s.RunnerSteps), len(s.ExpectedModels))
@@ -402,6 +463,19 @@ func TestScenarioCorpusContractRejectsInvalid(t *testing.T) {
 		{"manifest lists scenario missing path", func(_ *scenarioFile, mf *manifestFile) {
 			mf.InstructionFiles = append(mf.InstructionFiles, manifestEntry{Path: "codex/glm-worker/prompts/REVIEWER.md", SHA256: "x", Scenarios: []string{"s1"}})
 		}, "does not declare path"},
+		{"unknown expected checkpoint", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].ExpectedCheckpoint = "waiting"
+		}, "unknown expected checkpoint"},
+		{"stats role counts disagree", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].ExpectedStats = &scenarioStats{ModelCalls: 2, WorkerCalls: 2, ReviewerCalls: 1, TotalAICalls: 5, ProbeSuccess: 1, ProbeFailure: 2}
+		}, "worker+reviewer calls != model calls"},
+		{"stats total ai calls disagree", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].ExpectedStats = &scenarioStats{ModelCalls: 2, WorkerCalls: 1, ReviewerCalls: 1, ProbeSuccess: 1, TotalAICalls: 5}
+		}, "total_ai_calls != model+probe calls"},
+		{"telemetry counts disagree with stats", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].ExpectedStats = &scenarioStats{ModelCalls: 2, WorkerCalls: 1, ReviewerCalls: 1, TotalAICalls: 2}
+			sc.Scenarios[0].ExpectedTelemetry = &scenarioTelemetry{TaskCalls: 3, ProbeCalls: 0}
+		}, "telemetry call counts disagree"},
 	}
 	for _, c := range cases {
 		c := c
@@ -434,7 +508,14 @@ func stepsFromScenario(doc scenarioDoc) []runnerStep {
 		if s.Raw != "" {
 			output = s.Raw
 		}
-		steps[i] = runnerStep{output: output, runErr: runErr}
+		result := runner.RunResult{
+			TopLevelUsage: runner.TokenUsage{
+				InputTokens:  s.Usage.InputTokens,
+				OutputTokens: s.Usage.OutputTokens,
+			},
+			TotalCostUSD: s.CostUSD,
+		}
+		steps[i] = runnerStep{output: output, runErr: runErr, result: result}
 	}
 	return steps
 }
@@ -499,8 +580,8 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 		if err := st.Write("last-request", doc.Request); err != nil {
 			t.Fatal(err)
 		}
-		// new_taskのsignal stepで停止状態を自前で作る場合を除き、provider-unavailableをseedする。
-		if len(doc.RunnerSteps) > 0 && doc.RunnerSteps[0].Signal == "" {
+		// resume entryは常にprovider-unavailable停止状態から開始する。
+		{
 			if err := st.SaveResumeCheckpoint(state.ResumeCheckpoint{
 				Stage:                             state.ResumeStageWorker,
 				Phase:                             "worker-new",
@@ -600,6 +681,89 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 	}
 	if got := string(st.TaskStatus()); got != doc.ExpectedTaskStatus {
 		t.Fatalf("task status = %q want %q", got, doc.ExpectedTaskStatus)
+	}
+	if doc.ExpectedCheckpoint != "" {
+		cp, cpErr := st.LoadResumeCheckpoint()
+		switch doc.ExpectedCheckpoint {
+		case "none":
+			if cpErr == nil {
+				t.Fatalf("resume checkpoint = %#v want none", cp)
+			}
+		case "rate-limited":
+			if cpErr != nil || !cp.RateLimited {
+				t.Fatalf("rate-limited checkpointが保存されていない: %#v err=%v", cp, cpErr)
+			}
+		case "provider-unavailable":
+			if cpErr != nil || !cp.ProviderUnavailable {
+				t.Fatalf("provider-unavailable checkpointが保存されていない: %#v err=%v", cp, cpErr)
+			}
+		}
+	}
+	if doc.ExpectedStats != nil {
+		verifyScenarioStats(t, st, *doc.ExpectedStats)
+	}
+	if doc.ExpectedTelemetry != nil {
+		verifyScenarioTelemetry(t, st, *doc.ExpectedTelemetry)
+	}
+}
+
+// verifyScenarioStatsはtask/probe呼出数の加法整合性(total = task + probe)を検証する。
+func verifyScenarioStats(t *testing.T, st *state.StateStore, want scenarioStats) {
+	t.Helper()
+	stats := currentStats(t, st)
+	probeCalls := stats.ProbeOutcome["probe_success"] + stats.ProbeOutcome["probe_failure"]
+	got := scenarioStats{
+		ModelCalls:       stats.ModelCalls,
+		WorkerCalls:      stats.WorkerCalls,
+		ReviewerCalls:    stats.ReviewerCalls,
+		TransientRetries: stats.TransientRetries,
+		ResumeCommands:   stats.ResumeCommands,
+		ProbeSuccess:     stats.ProbeOutcome["probe_success"],
+		ProbeFailure:     stats.ProbeOutcome["probe_failure"],
+		TotalAICalls:     stats.ModelCalls + probeCalls,
+	}
+	if got != want {
+		t.Fatalf("stats = %+v want %+v", got, want)
+	}
+}
+
+// verifyScenarioTelemetryはcall_type別のJSONL記録数とtoken/costを検証する。
+// probeはtoken/cost/resolved modelをJSONLへ残し、task集計へ混ざらない。
+func verifyScenarioTelemetry(t *testing.T, st *state.StateStore, want scenarioTelemetry) {
+	t.Helper()
+	got := scenarioTelemetry{}
+	for _, l := range taskLogs(t, st) {
+		switch l.CallType {
+		case state.CallTypeTask:
+			got.TaskCalls++
+			got.TaskInputTokens += l.TopLevelUsage.InputTokens
+			got.TaskOutputTokens += l.TopLevelUsage.OutputTokens
+			got.TaskCostUSD += l.TotalCostUSD
+		case state.CallTypeProbe:
+			got.ProbeCalls++
+			got.ProbeInputTokens += l.TopLevelUsage.InputTokens
+			got.ProbeOutputTokens += l.TopLevelUsage.OutputTokens
+			got.ProbeCostUSD += l.TotalCostUSD
+			if want.ProbeResolvedModel != "" {
+				usage, ok := l.ResolvedModelUsage[want.ProbeResolvedModel]
+				if !ok || usage.OutputTokens <= 0 {
+					t.Fatalf("probe recordのresolved model %qが記録されていない: %+v", want.ProbeResolvedModel, l.ResolvedModelUsage)
+				}
+			}
+		case state.CallTypeEvent:
+			got.EventCalls++
+		}
+	}
+	if got.TaskCalls != want.TaskCalls || got.ProbeCalls != want.ProbeCalls || got.EventCalls != want.EventCalls {
+		t.Fatalf("telemetry call counts = task/probe/event %d/%d/%d want %d/%d/%d",
+			got.TaskCalls, got.ProbeCalls, got.EventCalls, want.TaskCalls, want.ProbeCalls, want.EventCalls)
+	}
+	if got.TaskInputTokens != want.TaskInputTokens || got.TaskOutputTokens != want.TaskOutputTokens ||
+		got.ProbeInputTokens != want.ProbeInputTokens || got.ProbeOutputTokens != want.ProbeOutputTokens {
+		t.Fatalf("telemetry tokens = %+v want %+v", got, want)
+	}
+	if got.TaskCostUSD != want.TaskCostUSD || got.ProbeCostUSD != want.ProbeCostUSD {
+		t.Fatalf("telemetry cost = task/probe %v/%v want %v/%v", got.TaskCostUSD, got.ProbeCostUSD, want.TaskCostUSD, want.ProbeCostUSD)
 	}
 }
 
