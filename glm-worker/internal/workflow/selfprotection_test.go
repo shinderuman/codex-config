@@ -38,6 +38,20 @@ func TestIsCriticalPath(t *testing.T) {
 		{"state snapshot 3-axis fail-closed", "glm-worker/internal/state/snapshot.go", true, "state-critical"},
 		{"state artifact/packet boundary", "glm-worker/internal/state/artifact.go", true, "state-critical"},
 		{"state atomic write underpins persistence integrity", "glm-worker/internal/state/store_util.go", true, "state-critical"},
+		{"autoresume fail-closed verification of automation", "glm-worker/internal/autoresume/verify.go", true, "autoresume-package"},
+		{"autoresume automation TOML entity contract", "glm-worker/internal/autoresume/toml.go", true, "autoresume-package"},
+		{"autoresume SQLite row verification", "glm-worker/internal/autoresume/sqlite.go", true, "autoresume-package"},
+		{"future internal package defaults critical", "glm-worker/internal/newpkg/engine.go", true, "internal-production"},
+		{"nested file under known internal package", "glm-worker/internal/runner/deeper/probe.go", true, "runner-package"},
+		{"cmd entrypoint routes CLI flags into app gates", "glm-worker/cmd/glm-worker/main.go", true, "worker-entrypoint"},
+		{"future cmd file caught by directory rule", "glm-worker/cmd/glm-worker/wiring.go", true, "worker-entrypoint"},
+		{"merge engine for managed settings application", "tools/merge-json/main.go", true, "merge-tool"},
+		{"installer applies every managed surface", "install.sh", true, "installer"},
+		{"post-merge hook auto-runs installer", ".githooks/post-merge", true, "installer"},
+		{"managed claude settings pin model routing and provider", "claude/settings-managed.json", true, "managed-claude-settings"},
+		{"managed codex config pins execution envelope", "codex/config-managed.toml", true, "managed-codex-config"},
+		{"worker binary dependency boundary", "glm-worker/go.mod", true, "dependency-manifest"},
+		{"merge tool dependency boundary", "tools/merge-json/go.mod", true, "dependency-manifest"},
 		{"scenario corpus contract is policy", "glm-worker/scenarios/scenarios.json", true, "scenario-corpus"},
 		{"scenario manifest hash pin is policy", "glm-worker/scenarios/manifest.json", true, "scenario-corpus"},
 		{"future scenario asset caught by directory rule", "glm-worker/scenarios/extra.json", true, "scenario-corpus"},
@@ -48,24 +62,25 @@ func TestIsCriticalPath(t *testing.T) {
 		{"rules file", "codex/rules/glm-worker.rules", true, "managed-rules"},
 		{"managed AGENTS quality gate", "codex/AGENTS.md", true, "managed-agents"},
 		{"repository root AGENTS bootstrap contract", "AGENTS.md", true, "repo-agents"},
-		{"nested AGENTS outside repo root contract", "docs/AGENTS.md", false, ""},
 
-		{"test files excluded keeps test-only 4.7", "glm-worker/internal/workflow/workflow_test.go", false, ""},
-		{"packet test excluded", "glm-worker/internal/packet/packet_test.go", false, ""},
-		{"selfprotection test excluded", "glm-worker/internal/workflow/selfprotection_test.go", false, ""},
-		{"scenario harness test excluded", "glm-worker/internal/workflow/scenario_test.go", false, ""},
-		{"runner test excluded", "glm-worker/internal/runner/runner_test.go", false, ""},
-		{"app test excluded", "glm-worker/internal/app/command_test.go", false, ""},
-		{"state stats observation only", "glm-worker/internal/state/stats.go", false, ""},
-		{"state telemetry observation only", "glm-worker/internal/state/telemetry.go", false, ""},
-		{"cmd thin entrypoint excluded", "glm-worker/cmd/glm-worker/main.go", false, ""},
-		{"README unrelated doc", "README.md", false, ""},
-		{"EVAL unrelated doc", "EVAL.md", false, ""},
-		{"install distribution", "install.sh", false, ""},
-		{"install smoke distribution", "tests/install_smoke.sh", false, ""},
-		{"claude connection settings unrelated config", "claude/settings-managed.json", false, ""},
-		{"managed config toml unrelated config", "codex/config-managed.toml", false, ""},
-		{"go.mod", "glm-worker/go.mod", false, ""},
+		{"test files excluded keeps test-only 4.7", "glm-worker/internal/workflow/workflow_test.go", false, "test"},
+		{"packet test excluded", "glm-worker/internal/packet/packet_test.go", false, "test"},
+		{"selfprotection test excluded", "glm-worker/internal/workflow/selfprotection_test.go", false, "test"},
+		{"scenario harness test excluded", "glm-worker/internal/workflow/scenario_test.go", false, "test"},
+		{"runner test excluded", "glm-worker/internal/runner/runner_test.go", false, "test"},
+		{"app test excluded", "glm-worker/internal/app/command_test.go", false, "test"},
+		{"autoresume test excluded", "glm-worker/internal/autoresume/verify_test.go", false, "test"},
+		{"merge tool test excluded", "tools/merge-json/main_test.go", false, "test"},
+		{"state stats observation only", "glm-worker/internal/state/stats.go", false, "observation"},
+		{"state telemetry observation only", "glm-worker/internal/state/telemetry.go", false, "observation"},
+		{"README unrelated doc", "README.md", false, "docs"},
+		{"EVAL unrelated doc", "EVAL.md", false, "docs"},
+		{"license doc", "LICENSE", false, "docs"},
+		{"gitignore repo metadata", ".gitignore", false, "repo-metadata"},
+		{"install smoke harness", "tests/install_smoke.sh", false, "test-harness"},
+		{"isolation smoke harness", "glm-worker/scripts/isolation-smoke.sh", false, "test-harness"},
+		{"nested AGENTS outside repo root contract", "docs/AGENTS.md", false, ""},
+		{"unclassified future tool stays low until classified", "tools/newtool/main.go", false, ""},
 		{"empty path", "", false, ""},
 	}
 	for _, tt := range tests {
@@ -74,10 +89,44 @@ func TestIsCriticalPath(t *testing.T) {
 			if got != tt.want {
 				t.Fatalf("IsCriticalPath(%q)=%v want %v", tt.path, got, tt.want)
 			}
-			if got && cat != tt.category {
+			if cat != tt.category {
 				t.Fatalf("category=%q want %q", cat, tt.category)
 			}
 		})
+	}
+}
+
+// TestSelfProtectionClassifiesEveryTrackedFileはrepoの全tracked fileがcritical・非対象
+// いずれかの意味分類を持つことを強制する。将来file追加時に分類を決めないまま放置すると
+// 本testが失敗し、HIGH/LOWの意味判断を強制する。
+func TestSelfProtectionClassifiesEveryTrackedFile(t *testing.T) {
+	root := scenarioRepoRoot(t)
+	if _, err := exec.Command("git", "-C", root, "rev-parse", "--git-dir").Output(); err != nil {
+		t.Skipf("git metadata absent under %s: tracked-file completeness unverifiable", root)
+	}
+	out, err := exec.Command("git", "-C", root, "ls-files", "-z").Output()
+	if err != nil {
+		t.Fatalf("git ls-files: %v", err)
+	}
+	paths := splitNul(out)
+	if len(paths) == 0 {
+		t.Fatal("git ls-files returned no tracked files")
+	}
+	critical, nonCritical := 0, 0
+	for _, p := range paths {
+		isCritical, category := IsCriticalPath(p)
+		if category == "" {
+			t.Errorf("tracked file %q has no self-protection classification; decide critical or non-critical in selfprotection.go", p)
+			continue
+		}
+		if isCritical {
+			critical++
+		} else {
+			nonCritical++
+		}
+	}
+	if critical == 0 || nonCritical == 0 {
+		t.Fatalf("classification universe collapsed: critical=%d non-critical=%d", critical, nonCritical)
 	}
 }
 
@@ -100,7 +149,7 @@ func TestClassifySelfProtectionAggregatesCategories(t *testing.T) {
 }
 
 func TestClassifySelfProtectionEmptyIsLow(t *testing.T) {
-	dec := classifySelfProtection([]string{"README.md", "install.sh", "glm-worker/internal/state/stats.go"})
+	dec := classifySelfProtection([]string{"README.md", "tests/install_smoke.sh", "glm-worker/internal/state/stats.go"})
 	if dec.High {
 		t.Fatalf("非対象pathのみはLOWであるべき: %#v", dec)
 	}
@@ -254,6 +303,33 @@ func TestSelfProtectionManagedPromptMarkdownIsHigh(t *testing.T) {
 	}
 }
 
+func TestSelfProtectionCmdEntrypointChangeIsHigh(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{steps: []runnerStep{
+		{output: implementedPacket("done")},
+		{output: passPacket()},
+		{output: needsSolReviewPacket()},
+	}}
+	w := newWorkflowT(t, st, r)
+	w.collectChangedPaths = func(string, string) ([]string, error) {
+		return []string{"glm-worker/cmd/glm-worker/main.go"}, nil
+	}
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	if st.TaskStatus() != state.TaskStatusWaitingSolReview {
+		t.Fatalf("entrypoint変更は現状薄くてもCLI routing・gate呼出の境界としてHIGH: status=%q", st.TaskStatus())
+	}
+	if strings.Join(r.models, ",") != "opus,sonnet,sonnet" {
+		t.Fatalf("models=%#v", r.models)
+	}
+	risk := w.computeEffectiveRisk(packetOfRisk("LOW"), 0, false, false)
+	if !strings.Contains(risk.source, "self-protection:worker-entrypoint") {
+		t.Fatalf("self-protection sourceにentrypoint分類がない: %s", risk.source)
+	}
+}
+
 func TestSelfProtectionNonCriticalKeepsLowRiskPass(t *testing.T) {
 	st := newStateStoreT(t)
 	r := &scriptedRunner{steps: []runnerStep{
@@ -262,7 +338,7 @@ func TestSelfProtectionNonCriticalKeepsLowRiskPass(t *testing.T) {
 	}}
 	w := newWorkflowT(t, st, r)
 	w.collectChangedPaths = func(string, string) ([]string, error) {
-		return []string{"README.md", "EVAL.md", "install.sh", "tests/install_smoke.sh"}, nil
+		return []string{"README.md", "EVAL.md", "tests/install_smoke.sh", "glm-worker/scripts/isolation-smoke.sh"}, nil
 	}
 
 	if err := w.ExecuteNewTask("request"); err != nil {

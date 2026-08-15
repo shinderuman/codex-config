@@ -18,28 +18,69 @@ type selfProtectionDecision struct {
 	HitPath string
 }
 
-// IsCriticalPathは自己保護のHIGH対象pathかを判定する。全fileがQA-criticalなpackage(workflow/packet/runner/app/config)
-// はproduction .goをpackage-level対象、観測fileと混在するstateは明示file、managed品質規則と
-// repository rootのAGENTS.md(task継続契約のbootstrap規則)は対象とする。
-// scenario corpusはprompt/instruction意味変更検証の契約source of truthのため専用categoryでHIGHにする。
-// policy file自身はworkflow packageに含まれ本policy変更が自動HIGHとなり、将来追加fileのfail-openを防ぐ。
+// pathClassはfile単位の意味分類。critical・非対象の両方を保持し、
+// repo全tracked fileが分類なしで残ることをtestが検出できるようにする。
+type pathClass struct {
+	critical bool
+	category string
+}
+
+// classifiedFilesはdirectory規則で捕捉できないfile単位の意味分類。
+// installer適用経路・merge engine・管理settings内容・依存manifest・両AGENTS.mdはcritical、
+// 観測専用state file・docs・repo metadataは非対象とする。
+var classifiedFiles = map[string]pathClass{
+	"install.sh":                             {true, "installer"},
+	".githooks/post-merge":                   {true, "installer"},
+	"claude/settings-managed.json":           {true, "managed-claude-settings"},
+	"codex/config-managed.toml":              {true, "managed-codex-config"},
+	"glm-worker/go.mod":                      {true, "dependency-manifest"},
+	"tools/merge-json/go.mod":                {true, "dependency-manifest"},
+	"codex/AGENTS.md":                        {true, "managed-agents"},
+	"AGENTS.md":                              {true, "repo-agents"},
+	"glm-worker/internal/state/stats.go":     {false, "observation"},
+	"glm-worker/internal/state/telemetry.go": {false, "observation"},
+	"README.md":                              {false, "docs"},
+	"EVAL.md":                                {false, "docs"},
+	"LICENSE":                                {false, "docs"},
+	".gitignore":                             {false, "repo-metadata"},
+}
+
+// internalPackageCategoriesはglm-worker/internal配下の既知packageの分類名。
+// checkpoint・telemetryへ保存するself-protection source文字列の既存意味を変えないため
+// 固定nameへmapする。載らないpackageはinternal-productionへ倒しfail-openを防ぐ。
+var internalPackageCategories = map[string]string{
+	"workflow":   "workflow-package",
+	"packet":     "packet-package",
+	"runner":     "runner-package",
+	"app":        "app-package",
+	"config":     "config-package",
+	"state":      "state-critical",
+	"autoresume": "autoresume-package",
+}
+
+// IsCriticalPathはorchestrator自己変更のself-protection判定。戻り値は(HIGH対象か, 意味分類)。
+// 対象は委譲・model routing・prompt/instruction・PACKET・session/resume・provider recovery/
+// autoresume・権限/隔離・managed settings/installer適用意味を変更できるproduction surface。
+// glm-worker/internal配下のproduction .goはpackage既知・未知を問わず既定HIGHとし、将来の
+// internal package追加がfail-openにならない。glm-worker/cmd配下のproduction .goもCLI routing・
+// app/workflow gate呼出の生きた境界であるentrypointとしてHIGHに保つ。test file・検証harness・
+// docs・観測fileだけの変更は非対象のままLOWに保つ。全tracked fileがcritical・非対象いずれかの分類を持つことは
+// unit testが強制し、未分類の新規fileは意味判断を求めてtestを失敗させる。
+// policy file自身はworkflow packageに含まれ本policy変更が自動HIGHとなり、判定回避を防ぐ。
 func IsCriticalPath(path string) (bool, string) {
 	if path == "" {
 		return false, ""
 	}
+	if c, ok := classifiedFiles[path]; ok {
+		return c.critical, c.category
+	}
 	switch {
-	case isProductionGoUnder(path, "glm-worker/internal/workflow/"):
-		return true, "workflow-package"
-	case isProductionGoUnder(path, "glm-worker/internal/packet/"):
-		return true, "packet-package"
-	case isProductionGoUnder(path, "glm-worker/internal/runner/"):
-		return true, "runner-package"
-	case isProductionGoUnder(path, "glm-worker/internal/app/"):
-		return true, "app-package"
-	case isProductionGoUnder(path, "glm-worker/internal/config/"):
-		return true, "config-package"
-	case criticalStateFiles[path]:
-		return true, "state-critical"
+	case isProductionGoUnder(path, "glm-worker/internal/"):
+		return true, internalPackageCategory(path)
+	case isProductionGoUnder(path, "glm-worker/cmd/"):
+		return true, "worker-entrypoint"
+	case isProductionGoUnder(path, "tools/merge-json/"):
+		return true, "merge-tool"
 	case strings.HasPrefix(path, "glm-worker/scenarios/"):
 		return true, "scenario-corpus"
 	case strings.HasPrefix(path, "codex/glm-worker/prompts/"):
@@ -48,12 +89,26 @@ func IsCriticalPath(path string) (bool, string) {
 		return true, "managed-instructions"
 	case strings.HasPrefix(path, "codex/rules/"):
 		return true, "managed-rules"
-	case path == "codex/AGENTS.md":
-		return true, "managed-agents"
-	case path == "AGENTS.md":
-		return true, "repo-agents"
+	case strings.HasSuffix(path, "_test.go"):
+		return false, "test"
+	case strings.HasPrefix(path, "tests/"), strings.HasPrefix(path, "glm-worker/scripts/"):
+		return false, "test-harness"
 	}
 	return false, ""
+}
+
+// internalPackageCategoryはinternal直下の第一階層package名から分類名を引く。
+// 未知packageはinternal-productionとして既定HIGHへ分類する。
+func internalPackageCategory(path string) string {
+	rest := strings.TrimPrefix(path, "glm-worker/internal/")
+	pkg := rest
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		pkg = rest[:i]
+	}
+	if cat, ok := internalPackageCategories[pkg]; ok {
+		return cat
+	}
+	return "internal-production"
 }
 
 func isProductionGoUnder(path, dir string) bool {
@@ -64,16 +119,6 @@ func isProductionGoUnder(path, dir string) bool {
 		return false
 	}
 	return !strings.HasSuffix(path, "_test.go")
-}
-
-// stateはQA-critical fileと観測file(stats.go/telemetry.go)が混在するため、critical側を明示する。
-var criticalStateFiles = map[string]bool{
-	"glm-worker/internal/state/store.go":      true,
-	"glm-worker/internal/state/resume.go":     true,
-	"glm-worker/internal/state/baseline.go":   true,
-	"glm-worker/internal/state/snapshot.go":   true,
-	"glm-worker/internal/state/artifact.go":   true,
-	"glm-worker/internal/state/store_util.go": true,
 }
 
 func classifySelfProtection(paths []string) selfProtectionDecision {

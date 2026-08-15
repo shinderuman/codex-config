@@ -58,7 +58,13 @@
         "provider-transient-probe-mixed-transient-priority-resumes-task",
         "implementation-plan-present-ignored-returns-fix-required",
         "implementation-plan-absent-fabrication-returns-fix-required",
-        "repo-agents-root-change-escalates-self-protection-high"
+        "repo-agents-root-change-escalates-self-protection-high",
+        "install-merge-path-escalates-self-protection-high",
+        "managed-settings-content-escalates-self-protection-high",
+        "autoresume-verifier-escalates-self-protection-high",
+        "future-internal-package-escalates-self-protection-high",
+        "test-and-docs-only-stay-low-risk",
+        "cmd-entrypoint-escalates-self-protection-high"
       ]
     },
     {
@@ -77,7 +83,13 @@
         "reviewer-worktree-mutation-rejects-fix-required",
         "implementation-plan-present-ignored-returns-fix-required",
         "implementation-plan-absent-fabrication-returns-fix-required",
-        "repo-agents-root-change-escalates-self-protection-high"
+        "repo-agents-root-change-escalates-self-protection-high",
+        "install-merge-path-escalates-self-protection-high",
+        "managed-settings-content-escalates-self-protection-high",
+        "autoresume-verifier-escalates-self-protection-high",
+        "future-internal-package-escalates-self-protection-high",
+        "test-and-docs-only-stay-low-risk",
+        "cmd-entrypoint-escalates-self-protection-high"
       ]
     },
     {

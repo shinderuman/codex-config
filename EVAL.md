@@ -91,6 +91,18 @@
 - root `AGENTS.md`変更はself-protectionのHIGH対象(`repo-agents`)とし、file有無両経路とHIGH分類をscenario corpus(`implementation-plan-*`・`repo-agents-root-change-escalates-self-protection-high`)と`internal/workflow` testで固定する。manifest hash pin変更時は該当scenarioの期待結果を現物へ再照合する。
 
 
+## 自己保護critical surface
+
+- orchestrator自己変更のHIGH判定は`internal/workflow/selfprotection.go`を単一契約とし、拡張子や「永続file・scriptであること」ではなく意味で分類する。対象はCodex/GLMの委譲・model routing・prompt/instruction・PACKET・session/resume・provider recovery/autoresume・権限/隔離・managed settings/installer適用意味を変更できるproduction surface。
+- `glm-worker/internal/`配下のproduction `.go`はpackage既知・未知を問わず既定HIGHとし、未知packageは`internal-production`へ分類する。将来のinternal package追加がfail-openにならない。観測専用の`state/stats.go`・`state/telemetry.go`だけ非対象(`observation`)。
+- `glm-worker/cmd/`配下のproduction `.go`(CLI entrypoint)もHIGH(`worker-entrypoint`)。現状薄くてもCLI routing・flag処理・app/workflow gate呼出を直接変更でき、provider/session/resume/packet gateの迂回・意味変更の入り得る境界であるため。
+- installer適用経路(`install.sh`・`.githooks/post-merge`・`tools/merge-json/`のmerge engine)・管理settings内容(`claude/settings-managed.json`・`codex/config-managed.toml`)・依存manifest(`glm-worker/go.mod`・`tools/merge-json/go.mod`)はHIGH。installer・merge engineは全管理surfaceの適用意味を、管理settings内容はmodel routing・provider接続・実行envelopeを直接変更する。
+- scenario corpus(`glm-worker/scenarios/`)・`codex/instructions/`・`codex/rules/`・`codex/glm-worker/prompts/`・`codex/AGENTS.md`・root `AGENTS.md`は従来どおりHIGH。
+- 非対象はtest file(`*_test.go`)・検証harness(`tests/`・`glm-worker/scripts/`)・docs(`README.md`・`EVAL.md`・`LICENSE`)・repo metadata(`.gitignore`)に限定し、docs/testだけ・観測値だけの変更をHIGHにしない。
+- repoの全tracked fileがcritical・非対象いずれかの分類を持つことをunit test(`TestSelfProtectionClassifiesEveryTrackedFile`)が強制する。未分類fileはtestを失敗させ、追加時の意味判断(どちらかへ分類)を強制する。分類の変更自体はpolicy fileがworkflow packageに含まれるため自動HIGHになる。
+- 漏れ側の行動固定はscenario corpus(`orchestrator-critical-low-self-declare`・`repo-agents-root-change-escalates-self-protection-high`・`install-merge-path-escalates-self-protection-high`・`managed-settings-content-escalates-self-protection-high`・`autoresume-verifier-escalates-self-protection-high`・`future-internal-package-escalates-self-protection-high`・`cmd-entrypoint-escalates-self-protection-high`)、非対象側は`low-risk-non-critical-pass`・`test-and-docs-only-stay-low-risk`で固定する。manifest hash pin変更時は該当scenarioの期待結果を現物へ再照合する。
+
+
 ## Go品質ゲート
 
 - `go test ./...`が成功する。

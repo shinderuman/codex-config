@@ -161,6 +161,24 @@ reviewer呼出しの前後でGit状態を3軸(HEAD・index・worktree/untracked)
 呼出単位の詳細は`telemetry/<task ID>.jsonl`へ`0600`で保存する。stats・telemetryの破損や書き込み失敗はwarningを出してworkflowを継続し、明示的な`--stats`だけはstats読み込みエラーを返す。
 
 
+## 自己保護 (self-protection)
+
+glm-workerはこの配布repo自身を作業対象にした変更について、wrapper側のcritical surface判定で実効riskをHIGHへ固定し、workerのLOW自己申告やreviewerのPASSだけでは完結させずSol確認へ昇格する。判定はfile種別ではなく「委譲・model routing・prompt/instruction・PACKET・session/resume・provider recovery/autoresume・権限/隔離・managed settings/installer適用意味を変更できるproduction surfaceか」の意味で行う。
+
+HIGH対象:
+
+- `glm-worker/internal/`配下のproduction `.go`(package既知・未知を問わず既定。将来のinternal package追加もfail-openしない。観測専用の`state/stats.go`・`state/telemetry.go`のみ除外)
+- `glm-worker/cmd/`配下のproduction `.go`(CLI entrypoint。現状薄くてもCLI routing・app/workflow gate呼出を直接変更できる境界)
+- installer適用経路: `install.sh`、`.githooks/post-merge`、`tools/merge-json/`のmerge engine
+- 管理settings内容: `claude/settings-managed.json`(model routing・provider接続)、`codex/config-managed.toml`(実行envelope)
+- `glm-worker/go.mod`・`tools/merge-json/go.mod`(production binaryの依存境界)
+- `glm-worker/scenarios/`、`codex/instructions/`、`codex/rules/`、`codex/glm-worker/prompts/`、`codex/AGENTS.md`、root `AGENTS.md`
+
+非対象(通常のLOW reviewのまま): test file(`*_test.go`)、`tests/`・`glm-worker/scripts/`配下の検証harness、`README.md`・`EVAL.md`等docs、観測専用file。docs/testだけ・観測値だけの変更をHIGHにしない。
+
+判定契約の唯一の正は`glm-worker/internal/workflow/selfprotection.go`であり、production判定とtest/scenario corpusは同じ契約を参照する。repoの全tracked fileがcritical・非対象いずれかの分類を持つことをunit testが強制し、将来fileを分類なしで追加するとtestが失敗して意味判断を求める。行動固定はscenario corpus(`orchestrator-critical-low-self-declare`・`repo-agents-root-change-escalates-self-protection-high`・`install-merge-path-escalates-self-protection-high`・`managed-settings-content-escalates-self-protection-high`・`autoresume-verifier-escalates-self-protection-high`・`future-internal-package-escalates-self-protection-high`・`cmd-entrypoint-escalates-self-protection-high`・`test-and-docs-only-stay-low-risk`)による。
+
+
 ## Z.ai 5時間上限からの再開
 
 次のZ.ai実エラーを5時間上限として判定する。
