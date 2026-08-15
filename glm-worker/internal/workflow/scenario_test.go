@@ -25,8 +25,9 @@ type scenarioStep struct {
 	Signal string `json:"signal,omitempty"`
 	// Rawはpacket品質gate違反を再現する生の出力本文。packet.Validateを通らないmarker構造をscenarioへ入力する。
 	Raw string `json:"raw,omitempty"`
-	// Usage/CostUSDは成功stepのRunResult観測値(token/cost telemetry検証用)。
-	// signal/error stepでは未観測(0)のままにする。
+	// Usage/CostUSDはRunResult観測値(token/cost telemetry検証用)。実runnerはerror時も
+	// 取得できた観測値を返すため、fatal終了stepにも設定して記録欠落を検証できる。
+	// 未設定は未観測(0)を表す。
 	Usage   scenarioUsage `json:"usage,omitempty"`
 	CostUSD float64       `json:"cost_usd,omitempty"`
 }

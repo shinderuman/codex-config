@@ -778,14 +778,17 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 			startedAt = resumeStartedAt
 			completedAt = resumeCompletedAt
 			runErr = recErr
-			// recovery中のfatal errorは初回transient runとprobe呼出をそれぞれ記録済みのため、
-			// Runしていないtask呼出をphantom記録として二重計上しない。
+			// recovery終端のfatal分類と実call記録は分離する。実行された再開task呼出は
+			// runResumedTaskが各終端で記録済みで、probe段階fatalは本task呼出を実行していない。
+			// どちらもここへの追加記録はphantom/二重計上になるため抑止する。
 			recoveryFatal = true
 		}
 	}
 
 	if err := w.state.SecureArtifactDir(); err != nil {
-		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", err, outputPath, callDiagnostics{})
+		if !recoveryFatal {
+			w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", err, outputPath, callDiagnostics{})
+		}
 		return packet.Packet{}, err
 	}
 	if runErr != nil {
@@ -967,6 +970,10 @@ func (w *Workflow) runResumedTask(checkpoint state.ResumeCheckpoint, outputPath 
 		return false, result, startedAt, completedAt, err
 	}
 	if class.Kind != runner.ProviderFailureTransient {
+		// 実行した再開task呼出がordinary nontransient fatalで終わった場合も、初回transient runと
+		// 同じく実callの記録を残す。runModel側のrecovery fatal抑止と対で、call実行事実と
+		// recovery終端分類を独立に扱う。
+		w.recordModelCall(checkpoint, result, startedAt, completedAt, "error", "", runErr, outputPath, callDiagnostics{})
 		return false, result, startedAt, completedAt, runErr
 	}
 	w.recordModelCall(checkpoint, result, startedAt, completedAt, "transient_error", "", runErr, outputPath, callDiagnostics{providerClassification: class.Detail})

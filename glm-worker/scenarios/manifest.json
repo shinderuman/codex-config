@@ -67,7 +67,8 @@
         "autoresume-verifier-escalates-self-protection-high",
         "future-internal-package-escalates-self-protection-high",
         "test-and-docs-only-stay-low-risk",
-        "cmd-entrypoint-escalates-self-protection-high"
+        "cmd-entrypoint-escalates-self-protection-high",
+        "provider-transient-probe-success-resumed-task-fatal-fails-closed"
       ]
     },
     {

@@ -705,6 +705,55 @@
       }
     },
     {
+      "id": "provider-transient-probe-success-resumed-task-fatal-fails-closed",
+      "behavior": "transient障害→probe成功→同一session/checkpointでsaved taskを再開→再開task呼出がordinary nontransient fatalで終わった場合、WORKER_ERRORへfail closedしつつ実行した再開呼出をtoken/costごとstatsとraw telemetryの両方へちょうど1回記録する。probe段階fatal(provider-transient-probe-auth-error-fails-closed)と異なり本task呼出の実行事実があるため記録を欠落させない",
+      "request": "通常の実装タスク",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": [
+        "README.md"
+      ],
+      "runner_steps": [
+        {"signal": "API Error: 503 Service Unavailable"},
+        {"signal": "401 Unauthorized: invalid api key", "usage": {"input_tokens": 10, "output_tokens": 5}, "cost_usd": 0.03}
+      ],
+      "expected_models": ["opus", "opus"],
+      "expected_packet_status": "IMPLEMENTED",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "active",
+      "must_not_pass": true,
+      "expected_error_status": "WORKER_ERROR",
+      "forbidden_error_status": "PROVIDER_UNAVAILABLE",
+      "probe_errors": [""],
+      "expected_probe_count": 1,
+      "expected_run_count": 2,
+      "expected_checkpoint": "none",
+      "expected_stats": {
+        "model_calls": 2,
+        "worker_calls": 2,
+        "reviewer_calls": 0,
+        "transient_retries": 1,
+        "resume_commands": 0,
+        "probe_success": 1,
+        "probe_failure": 0,
+        "total_ai_calls": 3
+      },
+      "expected_telemetry": {
+        "task_calls": 2,
+        "probe_calls": 1,
+        "event_calls": 0,
+        "task_input_tokens": 10,
+        "task_output_tokens": 5,
+        "task_cost_usd": 0.03,
+        "probe_input_tokens": 1,
+        "probe_output_tokens": 1,
+        "probe_cost_usd": 0.01,
+        "probe_resolved_model": "glm-5.3"
+      }
+    },
+    {
       "id": "provider-resume-probe-success-then-five-hour-limit",
       "behavior": "provider-unavailableからのresumeでprobe成功後に本taskを1回実行しZ.ai 5h上限へ到達した場合、rate-limited checkpoint保存・status切替・resume command数・probe成功数・total AI call数・未観測token(推測なし)を固定する",
       "request": "通常の実装タスク",

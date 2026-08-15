@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -261,6 +263,147 @@ func TestRecoveryResumeNonTransientFailsClosed(t *testing.T) {
 	if _, cerr := st.LoadResumeCheckpoint(); cerr == nil {
 		t.Fatal("非transient error時はresume checkpointがclearされるべき")
 	}
+	// probe段階fatalと異なり本task呼出は実行済みのため、task記録は初回transient分と再開fatal分の2件。
+	stats := currentStats(t, st)
+	if stats.ModelCalls != 2 || stats.WorkerCalls != 2 || stats.TransientRetries != 1 {
+		t.Fatalf("task call集計 = %#v", stats)
+	}
+	var taskRecords int
+	for _, l := range taskLogs(t, st) {
+		if l.CallType == state.CallTypeTask {
+			taskRecords++
+		}
+	}
+	if taskRecords != stats.ModelCalls {
+		t.Fatalf("task telemetry %d件がstats model_calls %dと不一致", taskRecords, stats.ModelCalls)
+	}
+}
+
+// probe成功後に実行した再開task呼出がordinary nontransient fatalで終わっても、
+// token/cost/duration/session/resolved model等の観測fieldごと記録を落とさない。
+// recovery終端分類(WORKER_ERROR)と実AI callのaccounting事実は独立に扱う。
+func TestRecoveryResumeNonTransientFatalRecordsExecutedCall(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{
+		steps: []runnerStep{
+			{output: "API Error: 503 Service Unavailable", runErr: errors.New("exit status 1")},
+			{
+				output: "401 Unauthorized: invalid api key",
+				runErr: errors.New("exit status 1"),
+				result: runner.RunResult{
+					SessionID:     "resumed-session",
+					Resumed:       true,
+					TopLevelUsage: runner.TokenUsage{InputTokens: 11, OutputTokens: 7},
+					ModelUsage: map[string]runner.ModelUsage{
+						"glm-5.3": {InputTokens: 11, OutputTokens: 7, CostUSD: 0.04},
+					},
+					DurationMS:   1234,
+					TotalCostUSD: 0.04,
+				},
+			},
+		},
+		probeErrs: []error{nil},
+	}
+	w, _ := newRecoveryWorkflowT(t, st, r)
+	w.temp = t.TempDir()
+
+	_, err := w.runModel(workerCheckpoint())
+	if err == nil || !strings.Contains(err.Error(), "STATUS: WORKER_ERROR") {
+		t.Fatalf("WORKER_ERRORを期待: %v", err)
+	}
+	if !strings.Contains(err.Error(), "401 Unauthorized") {
+		t.Fatalf("fatal応答本文がerror終端に無い: %v", err)
+	}
+	if len(r.prompts) != 2 || len(r.probes) != 1 {
+		t.Fatalf("runner Run呼出=%d probe=%d want 2/1", len(r.prompts), len(r.probes))
+	}
+	logs := taskLogs(t, st)
+	var fatal state.ModelCallLog
+	var transient, probeRecords int
+	for _, l := range logs {
+		switch {
+		case l.CallType == state.CallTypeProbe:
+			probeRecords++
+		case l.CallType == state.CallTypeTask && l.Outcome == "transient_error":
+			if l.ProviderClassification != "http-503" {
+				t.Fatalf("初回transient記録のclassification = %q", l.ProviderClassification)
+			}
+			transient++
+		case l.CallType == state.CallTypeTask && l.Outcome == "error":
+			fatal = l
+		}
+	}
+	if transient != 1 || probeRecords != 1 {
+		t.Fatalf("task/probe記録 = transient:%d probe:%d want 1/1", transient, probeRecords)
+	}
+	if fatal.Phase != "worker-new" || fatal.SessionID != "resumed-session" || !fatal.Resumed {
+		t.Fatalf("fatal記録の呼出識別 = phase:%q session:%q resumed:%v", fatal.Phase, fatal.SessionID, fatal.Resumed)
+	}
+	if fatal.TopLevelUsage.InputTokens != 11 || fatal.TopLevelUsage.OutputTokens != 7 {
+		t.Fatalf("fatal記録のtoken = %+v", fatal.TopLevelUsage)
+	}
+	if usage := fatal.ResolvedModelUsage["glm-5.3"]; usage.CostUSD != 0.04 || usage.OutputTokens != 7 {
+		t.Fatalf("fatal記録のresolved model = %+v", fatal.ResolvedModelUsage)
+	}
+	if fatal.TotalCostUSD != 0.04 || fatal.ClaudeDurationMS != 1234 {
+		t.Fatalf("fatal記録のcost/duration = %v/%d", fatal.TotalCostUSD, fatal.ClaudeDurationMS)
+	}
+	if !strings.Contains(fatal.Response, "401 Unauthorized") || !strings.Contains(fatal.Error, "exit status 1") {
+		t.Fatalf("fatal記録のresponse/error本文が失われた: response=%q error=%q", fatal.Response, fatal.Error)
+	}
+	stats := currentStats(t, st)
+	if stats.InputTokensByAlias["opus"] != 11 || stats.OutputTokensByAlias["opus"] != 7 {
+		t.Fatalf("fatal再開呼出のtokenがtask集計へ反映されていない: %#v", stats)
+	}
+	if stats.ProbeOutcome["probe_success"] != 1 {
+		t.Fatalf("probe outcome = %+v", stats.ProbeOutcome)
+	}
+}
+
+// recovery fatal終端でartifact保護に失敗しても、実行済み再開呼出の記録をstate_error記録で
+// 二重に作らない。1実callあたりの記録は常にちょうど1件のまま維持する。
+func TestRecoveryResumeFatalArtifactFailureKeepsSingleRecord(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{
+		steps: []runnerStep{
+			{output: "API Error: 503 Service Unavailable", runErr: errors.New("exit status 1")},
+			{
+				output: "401 Unauthorized: invalid api key",
+				runErr: errors.New("exit status 1"),
+				result: runner.RunResult{TopLevelUsage: runner.TokenUsage{InputTokens: 11, OutputTokens: 7}},
+			},
+		},
+		probeErrs: []error{nil},
+	}
+	w, _ := newRecoveryWorkflowT(t, st, r)
+	w.temp = t.TempDir()
+	taskID, err := st.TaskID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(st.ArtifactDir(taskID), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("outside-state", filepath.Join(st.ArtifactDir(taskID), "link")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = w.runModel(workerCheckpoint())
+	if err == nil || !strings.Contains(err.Error(), "artifactの権限を保護できません") {
+		t.Fatalf("artifact保護errorを期待: %v", err)
+	}
+	var taskRecords int
+	for _, l := range taskLogs(t, st) {
+		if l.CallType == state.CallTypeTask {
+			taskRecords++
+		}
+	}
+	if taskRecords != 2 {
+		t.Fatalf("task telemetry %d件 want 2(transient記録+fatal記録のみ)", taskRecords)
+	}
+	if stats := currentStats(t, st); stats.InputTokensByAlias["opus"] != 11 {
+		t.Fatalf("state_error記録の追加でtokenが二重計上された: %#v", stats.InputTokensByAlias)
+	}
 }
 
 func TestRecoveryDoesNotTriggerOnFiveHourLimit(t *testing.T) {
@@ -457,6 +600,20 @@ func TestRecoveryProbeNonTransientFailsClosed(t *testing.T) {
 	}
 	if _, cerr := st.LoadResumeCheckpoint(); cerr == nil {
 		t.Fatal("fail closed時はresume checkpointがclearされるべき")
+	}
+	// probe段階fatalは本task呼出を実行していないため、task記録は初回transient分だけ。
+	stats := currentStats(t, st)
+	if stats.ModelCalls != 1 || stats.TransientRetries != 0 {
+		t.Fatalf("task call集計 = %#v", stats)
+	}
+	var taskRecords int
+	for _, l := range taskLogs(t, st) {
+		if l.CallType == state.CallTypeTask {
+			taskRecords++
+		}
+	}
+	if taskRecords != stats.ModelCalls {
+		t.Fatalf("task telemetry %d件がstats model_calls %dと不一致", taskRecords, stats.ModelCalls)
 	}
 }
 
