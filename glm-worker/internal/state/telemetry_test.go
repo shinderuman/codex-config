@@ -30,7 +30,7 @@ func TestRecordModelCallLogPersistsPrivateJSONL(t *testing.T) {
 			OutputTokens:         3,
 		},
 		ResolvedModelUsage: map[string]ResolvedModelUsage{
-			"glm-5.2": {InputTokens: 10, CacheReadInputTokens: 30, OutputTokens: 40},
+			"glm-5.3": {InputTokens: 10, CacheReadInputTokens: 30, OutputTokens: 40},
 			"glm-4.7": {InputTokens: 5, CacheReadInputTokens: 7, OutputTokens: 8},
 		},
 		TopLevelTurns: 2,
@@ -60,7 +60,7 @@ func TestRecordModelCallLogPersistsPrivateJSONL(t *testing.T) {
 	if stats.InputTokensByAlias["opus"] != 15 || stats.CacheReadInputTokensByAlias["opus"] != 37 || stats.TopLevelTurnsByAlias["opus"] != 2 {
 		t.Fatalf("alias usage = %#v", stats)
 	}
-	if stats.OutputTokensByResolvedModel["glm-5.2"] != 40 || stats.CallTreesByResolvedModel["glm-5.2"] != 1 {
+	if stats.OutputTokensByResolvedModel["glm-5.3"] != 40 || stats.CallTreesByResolvedModel["glm-5.3"] != 1 {
 		t.Fatalf("resolved usage = %#v", stats)
 	}
 }

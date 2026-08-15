@@ -159,7 +159,7 @@ func TestPrintStatsAggregatesAndSortsModelAliases(t *testing.T) {
 			OutputTokens:         3,
 		},
 		ResolvedModelUsage: map[string]state.ResolvedModelUsage{
-			"glm-5.2": {InputTokens: 10, CacheCreationInputTokens: 20, CacheReadInputTokens: 30, OutputTokens: 40},
+			"glm-5.3": {InputTokens: 10, CacheCreationInputTokens: 20, CacheReadInputTokens: 30, OutputTokens: 40},
 			"glm-4.7": {InputTokens: 5, CacheReadInputTokens: 7, OutputTokens: 8},
 		},
 		TopLevelTurns: 2,
@@ -185,7 +185,7 @@ func TestPrintStatsAggregatesAndSortsModelAliases(t *testing.T) {
 		"TOTAL_PROMPT_TOKENS_BY_ALIAS: opus=72",
 		"OUTPUT_TOKENS_BY_ALIAS: opus=48",
 		"TOP_LEVEL_TURNS_BY_ALIAS: opus=2",
-		"CALL_TREES_BY_RESOLVED_MODEL: glm-4.7=1,glm-5.2=1",
+		"CALL_TREES_BY_RESOLVED_MODEL: glm-4.7=1,glm-5.3=1",
 	} {
 		if !strings.Contains(out.String(), value) {
 			t.Fatalf("token statsに%qがありません: %q", value, out.String())

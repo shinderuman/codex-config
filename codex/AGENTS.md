@@ -38,7 +38,7 @@ Sol Highは原則として、リポジトリの一次探索、grepや呼び出�
 
 リポジトリ固有の調査・設計案・実装・テスト・lint・build・自己レビューは原則`glm-worker "<依頼>"`へ委譲する。
 同一タスクのSol判断・修正・5時間上限後の再開ではworker/reviewer sessionを継続し、新規タスクだけ新sessionへ切り替える。過去のGLM文脈をSol Highが再説明しない。
-通常workerはGLM-5.2 / high。初回低リスクreviewはGLM-4.7 / high、高リスク・Sol判断後・自動修正後・明示fix後のreviewはGLM-5.1 / highを一方だけ使う。Sol判断後のworker継続と明示fixはGLM-5.2 / max。
+通常workerはGLM-5.3 / high。初回低リスクreviewはGLM-4.7 / high、高リスク・Sol判断後・自動修正後・明示fix後のreviewはGLM-5.3 / highを一方だけ使う。Sol判断後のworker継続と明示fixはGLM-5.3 / max。
 
 `glm-worker`を実行・待機する前に`~/.codex/instructions/glm-execution.md`を読む。packetまたは`STATUS: WORKER_ERROR`を含む結果を受け取ったら`~/.codex/instructions/glm-packets.md`を読む。
 

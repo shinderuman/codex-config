@@ -116,8 +116,8 @@ test -f "$success_case/claude/settings.json"
 test -d "$success_case/glm-home/sessions"
 test ! -d "$success_case/home/.glm-worker/sessions"
 grep -Fq '"ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.7"' "$success_case/claude/settings.json"
-grep -Fq '"ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.1"' "$success_case/claude/settings.json"
-grep -Fq '"ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2"' "$success_case/claude/settings.json"
+grep -Fq '"ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.3"' "$success_case/claude/settings.json"
+grep -Fq '"ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.3"' "$success_case/claude/settings.json"
 grep -Fq '"local_setting": "keep"' "$success_case/claude/settings.json"
 grep -Fq '"LOCAL_ENV": "keep"' "$success_case/claude/settings.json"
 grep -Fq 'model = "local-model"' "$success_case/codex/config.toml"
@@ -141,6 +141,34 @@ grep -Fq 'packetまたは`STATUS: WORKER_ERROR`を含む結果' "$success_case/c
 
 "$success_case/bin/glm-worker" --verify-auto-resume 2>&1 \
     | grep -Fq 'usage: glm-worker --verify-auto-resume'
+
+# 旧5.2/5.1 managed installからのupgradeでmanaged model keyだけ5.3へ置き換わる
+upgrade_source="$test_root/upgrade-source"
+upgrade_case="$test_root/upgrade-case"
+copy_source "$upgrade_source"
+mkdir -p "$upgrade_case/codex/rules" "$upgrade_case/claude"
+printf '%s\n' 'model = "local-model"' >"$upgrade_case/codex/config.toml"
+printf '%s\n' 'local rule' >"$upgrade_case/codex/rules/default.rules"
+printf '%s\n' '{"local_setting":"keep","env":{"LOCAL_ENV":"keep","ANTHROPIC_BASE_URL":"https://api.z.ai/api/anthropic","ANTHROPIC_DEFAULT_HAIKU_MODEL":"glm-4.7","ANTHROPIC_DEFAULT_SONNET_MODEL":"glm-5.1","ANTHROPIC_DEFAULT_OPUS_MODEL":"glm-5.2"}}' >"$upgrade_case/claude/settings.json"
+
+run_installer "$upgrade_source" "$upgrade_case"
+
+grep -Fq '"ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.3"' "$upgrade_case/claude/settings.json"
+grep -Fq '"ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.3"' "$upgrade_case/claude/settings.json"
+grep -Fq '"ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.7"' "$upgrade_case/claude/settings.json"
+if grep -Fq 'glm-5.2' "$upgrade_case/claude/settings.json" || grep -Fq 'glm-5.1' "$upgrade_case/claude/settings.json"; then
+    printf '%s\n' 'upgrade must replace old managed model values' >&2
+    exit 1
+fi
+grep -Fq '"local_setting": "keep"' "$upgrade_case/claude/settings.json"
+grep -Fq '"LOCAL_ENV": "keep"' "$upgrade_case/claude/settings.json"
+
+cp "$upgrade_case/claude/settings.json" "$upgrade_case/first.json"
+run_installer "$upgrade_source" "$upgrade_case"
+if ! cmp -s "$upgrade_case/first.json" "$upgrade_case/claude/settings.json"; then
+    printf '%s\n' 'upgrade install is not idempotent' >&2
+    exit 1
+fi
 
 failure_source="$test_root/failure-source"
 failure_case="$test_root/failure-case"
@@ -178,7 +206,7 @@ if grep -Fq '"ANTHROPIC_BASE_URL"' "$override_case/claude/settings.json"; then
     printf '%s\n' 'override null should delete ANTHROPIC_BASE_URL' >&2
     exit 1
 fi
-grep -Fq '"ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2"' "$override_case/claude/settings.json"
+grep -Fq '"ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.3"' "$override_case/claude/settings.json"
 
 cp "$override_case/claude/settings.json" "$override_case/first.json"
 HOME="$override_case/home" \

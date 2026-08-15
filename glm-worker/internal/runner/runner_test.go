@@ -58,7 +58,7 @@ func TestClaudeRunnerRunStartsThenResumesSession(t *testing.T) {
 
 	argumentsPath := filepath.Join(t.TempDir(), "args")
 	commandPath := filepath.Join(t.TempDir(), "fake-claude")
-	commandScript := "#!/bin/sh\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_FILE\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"runner output\\n\",\"duration_ms\":1200,\"duration_api_ms\":900,\"num_turns\":2,\"usage\":{\"input_tokens\":11,\"cache_creation_input_tokens\":12,\"cache_read_input_tokens\":13,\"output_tokens\":14},\"modelUsage\":{\"glm-5.2\":{\"inputTokens\":11,\"cacheCreationInputTokens\":12,\"cacheReadInputTokens\":13,\"outputTokens\":14}}}'\n"
+	commandScript := "#!/bin/sh\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_FILE\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"runner output\\n\",\"duration_ms\":1200,\"duration_api_ms\":900,\"num_turns\":2,\"usage\":{\"input_tokens\":11,\"cache_creation_input_tokens\":12,\"cache_read_input_tokens\":13,\"output_tokens\":14},\"modelUsage\":{\"glm-5.3\":{\"inputTokens\":11,\"cacheCreationInputTokens\":12,\"cacheReadInputTokens\":13,\"outputTokens\":14}}}'\n"
 	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestClaudeRunnerRunStartsThenResumesSession(t *testing.T) {
 	if firstResult.TopLevelUsage.InputTokens != 11 || firstResult.TopLevelUsage.CacheReadInputTokens != 13 || firstResult.TopLevelUsage.OutputTokens != 14 {
 		t.Fatalf("usage = %#v", firstResult.TopLevelUsage)
 	}
-	if firstResult.ModelUsage["glm-5.2"].OutputTokens != 14 || firstResult.SystemPromptSHA256 == "" || firstResult.SystemPrompt != "system" {
+	if firstResult.ModelUsage["glm-5.3"].OutputTokens != 14 || firstResult.SystemPromptSHA256 == "" || firstResult.SystemPrompt != "system" {
 		t.Fatalf("run result = %#v", firstResult)
 	}
 
@@ -266,7 +266,7 @@ func TestClaudeRunnerRejectsInvalidJSONWithoutMarkingSessionReady(t *testing.T) 
 
 func TestParseClaudeJSONResultKeepsTopLevelAndTreeUsageSeparate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "result.json")
-	data := `{"type":"result","result":"packet","modelUsage":{"glm-4.7":{"inputTokens":3,"cacheCreationInputTokens":4,"cacheReadInputTokens":5,"outputTokens":6},"glm-5.1":{"inputTokens":7,"outputTokens":8}}}`
+	data := `{"type":"result","result":"packet","modelUsage":{"glm-4.7":{"inputTokens":3,"cacheCreationInputTokens":4,"cacheReadInputTokens":5,"outputTokens":6},"glm-5.3":{"inputTokens":7,"outputTokens":8}}}`
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestParseClaudeJSONResultKeepsTopLevelAndTreeUsageSeparate(t *testing.T) {
 	if result.Usage != (TokenUsage{}) {
 		t.Fatalf("top-level usage = %#v", result.Usage)
 	}
-	if result.ModelUsage["glm-4.7"].InputTokens != 3 || result.ModelUsage["glm-5.1"].OutputTokens != 8 {
+	if result.ModelUsage["glm-4.7"].InputTokens != 3 || result.ModelUsage["glm-5.3"].OutputTokens != 8 {
 		t.Fatalf("model usage = %#v", result.ModelUsage)
 	}
 }
@@ -497,7 +497,7 @@ func TestLoadSettingEnvExtractsOnlyAllowlistedKeys(t *testing.T) {
 		"env": map[string]any{
 			"ANTHROPIC_AUTH_TOKEN":                     "zai-token",
 			"ANTHROPIC_BASE_URL":                       "https://api.z.ai/api/anthropic",
-			"ANTHROPIC_DEFAULT_OPUS_MODEL":             "glm-5.2",
+			"ANTHROPIC_DEFAULT_OPUS_MODEL":             "glm-5.3",
 			"API_TIMEOUT_MS":                           "3000000",
 			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
 			"UNRELATED_ENV":                            "dropped",
@@ -520,7 +520,7 @@ func TestLoadSettingEnvExtractsOnlyAllowlistedKeys(t *testing.T) {
 	if result["ANTHROPIC_AUTH_TOKEN"] != "zai-token" || result["ANTHROPIC_BASE_URL"] != "https://api.z.ai/api/anthropic" {
 		t.Fatalf("Z.ai必須keyが抽出されていません: %#v", result)
 	}
-	if result["ANTHROPIC_DEFAULT_OPUS_MODEL"] != "glm-5.2" || result["API_TIMEOUT_MS"] != "3000000" {
+	if result["ANTHROPIC_DEFAULT_OPUS_MODEL"] != "glm-5.3" || result["API_TIMEOUT_MS"] != "3000000" {
 		t.Fatalf("model alias/runtime keyが抽出されていません: %#v", result)
 	}
 	for key, value := range result {

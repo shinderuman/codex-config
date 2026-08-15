@@ -47,8 +47,8 @@
 - workerはopus alias、通常reviewerはhaiku alias、高リスク・Sol判断後・自動修正後・明示fix後reviewerはsonnet aliasを利用する。
 - 通常effortはhigh、Sol判断後/明示fixはmax。
 - auto-compact windowは500K。
-- managed model mappingはopus=glm-5.2、haiku=glm-4.7、sonnet=glm-5.1。
-- `RISK: LOW`の初回reviewは4.7、高リスク・Sol判断後・自動修正後・明示fix後のreviewは5.1を1回だけ選ぶ。
+- managed model mappingはopus=glm-5.3、haiku=glm-4.7、sonnet=glm-5.3。
+- `RISK: LOW`の初回reviewは4.7、高リスク・Sol判断後・自動修正後・明示fix後のreviewは5.3を1回だけ選ぶ。
 - reviewerはAgent/subagentを利用せず、reviewerモデルから上位モデルへの暗黙な再委譲を行わない。
 - rate limit後のresumeでもcheckpointへ保存したreviewer modelを維持する。
 - version 1のresume checkpointを受理せず、model欠落時にroleから補完しない。

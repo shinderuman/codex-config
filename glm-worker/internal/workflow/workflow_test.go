@@ -195,7 +195,7 @@ func TestRunModelRecordsPromptResponseAndUsage(t *testing.T) {
 				OutputTokens:         3,
 			},
 			ModelUsage: map[string]runner.ModelUsage{
-				"glm-5.2": {InputTokens: 10, CacheCreationInputTokens: 20, CacheReadInputTokens: 30, OutputTokens: 40},
+				"glm-5.3": {InputTokens: 10, CacheCreationInputTokens: 20, CacheReadInputTokens: 30, OutputTokens: 40},
 				"glm-4.7": {InputTokens: 5, CacheReadInputTokens: 7, OutputTokens: 8},
 			},
 			DurationMS:    1200,
@@ -236,11 +236,11 @@ func TestRunModelRecordsPromptResponseAndUsage(t *testing.T) {
 	if !strings.Contains(r.prompts[0], artifactPromptMarker) {
 		t.Fatalf("artifact保存先がrunner promptにありません: %q", r.prompts[0])
 	}
-	if got.TopLevelUsage.CacheReadInputTokens != 2 || got.TreeUsage.CacheReadInputTokens != 37 || got.ResolvedModelUsage["glm-5.2"].OutputTokens != 40 {
+	if got.TopLevelUsage.CacheReadInputTokens != 2 || got.TreeUsage.CacheReadInputTokens != 37 || got.ResolvedModelUsage["glm-5.3"].OutputTokens != 40 {
 		t.Fatalf("telemetry usage = %#v", got)
 	}
 	stats := currentStats(t, st)
-	if stats.CacheReadInputTokensByAlias["opus"] != 37 || stats.OutputTokensByAlias["opus"] != 48 || stats.OutputTokensByResolvedModel["glm-5.2"] != 40 {
+	if stats.CacheReadInputTokensByAlias["opus"] != 37 || stats.OutputTokensByAlias["opus"] != 48 || stats.OutputTokensByResolvedModel["glm-5.3"] != 40 {
 		t.Fatalf("token stats = %#v", stats)
 	}
 }

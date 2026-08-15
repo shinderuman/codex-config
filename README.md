@@ -231,10 +231,10 @@ glm-worker --resume
 
 ## GLM実行の軽量化
 
-- worker: `opus` alias → `glm-5.2`
+- worker: `opus` alias → `glm-5.3`
 - 通常reviewer: `haiku` alias → `glm-4.7`
-- `RISK: HIGH`、Sol判断後、自動修正後、明示fix後のreviewer: `sonnet` alias → `glm-5.1`
-- reviewerは4.7と5.1を直列実行せず、worker packetと自動修正履歴から一方だけを選ぶ。
+- `RISK: HIGH`、Sol判断後、自動修正後、明示fix後のreviewer: `sonnet` alias → `glm-5.3`
+- reviewerは4.7と5.3を直列実行せず、worker packetと自動修正履歴から一方だけを選ぶ。
 - reviewerはAgent/subagentへ委譲せず、選択されたreviewerモデル自身で確認する。
 - 選択したmodel aliasはresume checkpointへ保存し、5時間上限後も同じモデルで再開する。
 - resume checkpointはversion 2でmodelを必須とする。旧versionの自動移行やroleからのmodel推定は行わない。
