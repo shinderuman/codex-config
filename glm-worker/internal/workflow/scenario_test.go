@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/packet"
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/runner"
@@ -92,6 +93,9 @@ type scenarioDoc struct {
 	ProbeResponses []string `json:"probe_responses,omitempty"`
 	// ProbeIsErrorはexit 0でもis_error=trueを返す偽陽性probeを再現する。
 	ProbeIsError bool `json:"probe_is_error,omitempty"`
+	// SleepAdvanceMinutesは各backoff待機後にfake clockを進める分数。
+	// backoff schedule合計では到達しないhard deadline経路など、時間経過を要するscenarioだけが設定する。
+	SleepAdvanceMinutes int `json:"sleep_advance_minutes,omitempty"`
 	// ReviewerMutatesWorktreeはreviewerがBash相当でrepositoryを変更するscenarioで有効化する。
 	ReviewerMutatesWorktree bool `json:"reviewer_mutates_worktree,omitempty"`
 	// ExpectedStatsは終端後のtask/probe呼出数集計の期待値。
@@ -100,6 +104,8 @@ type scenarioDoc struct {
 	ExpectedTelemetry *scenarioTelemetry `json:"expected_telemetry,omitempty"`
 	// ExpectedCheckpointは終端時のresume checkpoint状態(none/rate-limited/provider-unavailable)。
 	ExpectedCheckpoint string `json:"expected_checkpoint,omitempty"`
+	// ExpectedProviderClassificationはprovider-unavailable停止時のcheckpoint分類期待値。
+	ExpectedProviderClassification string `json:"expected_provider_classification,omitempty"`
 }
 
 type scenarioFile struct {
@@ -238,6 +244,12 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 		knownCheckpoint := map[string]bool{"": true, "none": true, "rate-limited": true, "provider-unavailable": true}
 		if !knownCheckpoint[s.ExpectedCheckpoint] {
 			return fmt.Errorf("scenario %s unknown expected checkpoint %q", s.ID, s.ExpectedCheckpoint)
+		}
+		if s.SleepAdvanceMinutes < 0 {
+			return fmt.Errorf("scenario %s negative sleep_advance_minutes", s.ID)
+		}
+		if s.ExpectedProviderClassification != "" && s.ExpectedCheckpoint != "provider-unavailable" {
+			return fmt.Errorf("scenario %s expected_provider_classification without provider-unavailable checkpoint", s.ID)
 		}
 		if es := s.ExpectedStats; es != nil {
 			if es.WorkerCalls+es.ReviewerCalls != es.ModelCalls {
@@ -466,6 +478,12 @@ func TestScenarioCorpusContractRejectsInvalid(t *testing.T) {
 		{"unknown expected checkpoint", func(sc *scenarioFile, _ *manifestFile) {
 			sc.Scenarios[0].ExpectedCheckpoint = "waiting"
 		}, "unknown expected checkpoint"},
+		{"negative sleep advance", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].SleepAdvanceMinutes = -1
+		}, "negative sleep_advance_minutes"},
+		{"classification without unavailable checkpoint", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].ExpectedProviderClassification = "probe-contract"
+		}, "without provider-unavailable checkpoint"},
 		{"stats role counts disagree", func(sc *scenarioFile, _ *manifestFile) {
 			sc.Scenarios[0].ExpectedStats = &scenarioStats{ModelCalls: 2, WorkerCalls: 2, ReviewerCalls: 1, TotalAICalls: 5, ProbeSuccess: 1, ProbeFailure: 2}
 		}, "worker+reviewer calls != model calls"},
@@ -551,6 +569,16 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 	r.probeResponses = doc.ProbeResponses
 	r.probeIsError = doc.ProbeIsError
 	w := newWorkflowT(t, st, r)
+	if doc.SleepAdvanceMinutes > 0 {
+		// 各待機でscheduleどおりの時間を記録しつつ、clockだけ大きく進めてdeadline経路へ入れる。
+		clock := newFakeClock()
+		step := time.Duration(doc.SleepAdvanceMinutes) * time.Minute
+		w.now = clock.nowFunc
+		w.sleep = func(d time.Duration) {
+			clock.sleeps = append(clock.sleeps, d)
+			clock.now = clock.now.Add(step)
+		}
+	}
 	buf := &bytes.Buffer{}
 	w.output = buf
 	var mutationRepoRoot string
@@ -696,6 +724,9 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 		case "provider-unavailable":
 			if cpErr != nil || !cp.ProviderUnavailable {
 				t.Fatalf("provider-unavailable checkpointが保存されていない: %#v err=%v", cp, cpErr)
+			}
+			if doc.ExpectedProviderClassification != "" && cp.ProviderUnavailableClassification != doc.ExpectedProviderClassification {
+				t.Fatalf("provider-unavailable分類 = %q want %q", cp.ProviderUnavailableClassification, doc.ExpectedProviderClassification)
 			}
 		}
 	}

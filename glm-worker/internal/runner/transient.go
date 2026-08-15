@@ -29,6 +29,44 @@ var transientNetworkSignals = []string{
 	"proxyconnect",
 }
 
+// probeFatalHTTPPatternはprobe応答本文中の認証・要求不正のHTTP statusを文脈付きで一致させる。
+// 裸の数字だけでは番号・容量等の誤検出が大きいため、HTTP/status/error/API error等の文脈が
+// 直近にあるか、401 Unauthorized/403 Forbidden/400 Bad Requestの組合せのときだけ一致させる。
+var probeFatalHTTPPattern = regexp.MustCompile(`(?i)\b(?:http|status|error|api)[^\n]{0,24}\b(?:400|401|403)\b|\b(?:400|401|403)\b[^\n]{0,24}\b(?:bad request|unauthorized|forbidden)\b`)
+
+// probeFatalSignalsはretry不能なauth/config障害の明示的な文字列信号。
+// authentication単独等の一般語は文脈で容易に誤検出するため、明示表現だけを列挙する。
+var probeFatalSignals = []string{
+	"unauthorized",
+	"forbidden",
+	"invalid api key",
+	"invalid_api_key",
+	"invalid x-api-key",
+	"api key not valid",
+	"authentication failed",
+	"authentication required",
+	"permission denied",
+	"invalid model",
+	"model not found",
+}
+
+// DetectProbeFatalSignalはprobe応答本文中の明示的なauth/config系非retry信号だけを検出する。
+// exit 0 + is_errorやsentinel不一致で返った応答でもこれらの信号を含む場合はsemantic invalid
+// (probe-contract)としてbackoffせず、既存classifierと同じfatal経路へfail closedさせる。
+// 呼出し側は5h上限→transientの分類を先に適用し、この検出はその後に使う。
+func DetectProbeFatalSignal(text string) bool {
+	if probeFatalHTTPPattern.MatchString(text) {
+		return true
+	}
+	lower := strings.ToLower(text)
+	for _, signal := range probeFatalSignals {
+		if strings.Contains(lower, signal) {
+			return true
+		}
+	}
+	return false
+}
+
 // ClassifyTransientFailureはClaude CLIの出力本文からZ.ai 5h上限以外の一時障害を分類する。
 // 502/503/504/529のHTTP statusか明確な一時ネットワーク障害のときだけtransient=trueを返す。
 // auth(401/403)・invalid request(400)・generic 429・session破損・不明errorはtransient扱いせず、
@@ -66,7 +104,10 @@ const (
 	ProviderFailureZaiFiveHour = "zai-5h"
 	ProviderFailureTransient   = "transient"
 	ProviderFailureFatal       = "fatal"
-	// ProbeContractFailureはprobe応答の契約違反で、transientとは再試行可否が逆の排他的分類。
+	// ProbeContractFailureはprobe応答の契約違反(is_error・sentinel不一致・malformed)の分類。
+	// 明示的なauth/config信号(DetectProbeFatalSignal)を含まない限り即fatalにせずtransientな
+	// probe失敗と同じbackoff/retry対象で、回復しないまま上限・deadline到達時のprovider-unavailable
+	// 停止分類として応答契約違反を区別する。
 	ProbeContractFailure = "probe-contract"
 )
 

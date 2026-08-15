@@ -63,11 +63,12 @@
 ## provider障害回復・probe gate
 
 - probe成功はJSON正常・type=result・is_error=false・応答trim後sentinel `GLM_WORKER_PROBE_OK`完全一致・usage出力tokenありの全成立だけとする。probe promptはreasoning不要のsentinel返却だけを要求する固定文にする。
-- process exit 0でもis_error=trueやsentinel不一致を成功扱いせず、probe-contract分類で追加probeのAI costなく初回provider-unavailableへfail closedし元task/session/checkpointを保持する。
+- process exit 0でもis_error=trueやsentinel不一致を成功扱いせずsaved taskのresumeへ進めない。semantic invalidだけで即fatalにせず通常のtransient probe失敗と同じ既存backoff/retryを継続し、probe上限・hard deadlineの先に到達した側でprobe-contract分類のprovider-unavailable停止へ移行して元task/session/checkpointを保持する。
+- probe応答の分類優先度はtask呼出と共通に5h→transient→明示fatalの順とし、5h上限signatureはrate-limited経路へ、503等のtransient信号とauth語の混在応答はtransientとしてretryする(corpus `provider-transient-probe-mixed-transient-priority-resumes-task`)。明示fatalは裸の数字・一般語を除く限定信号(401 Unauthorized/403 Forbidden/400 Bad Requestの組合せ、HTTP/status/API error文脈付きの同status、authentication failed/required・invalid api key・invalid model等の明示表現)だけとし、検出時のみ既存fatal classificationでfail closedする。通常文中の裸400を含むsentinel mismatchはprobe-contract retryのままで、不可逆なcheckpoint/session破棄の偽陽性を防ぐ。
 - 偽陽性がreviewを通過した原因はexit codeと非空responseのpositive testへの偏り、成功後resume境界のnegative caseとsentinel契約のscenario欠落であるため、gate変更ではfalse-positive caseを独立testとscenario(corpus `provider-resume-probe-*`)へ要求する。追加AI callやstatus page依存でprobeを補強しない。
 - Task Work Call(worker/reviewerの本task呼出)とProvider Probe Callを明確に分離する。worker/reviewerのtask call数・実行時間・token集計へprobeを混ぜず、probe成功後の本task再開実行をrole別task callとして毎回数える。probe呼出数・transient retry数・resume回数・total AI call数(task+probe)が重複・欠落なく導出できる。
 - probeはClaude CLIが既に返すinput/output/cache token・cost・resolved model・API/wall durationを追加AI callなしで既存telemetry(JSONL)へ記録する。取得不能値は未観測(零値)のまま推測しない。
-- transient→probe失敗→backoff→probe成功→saved task resume→success、およびprobe成功→resume→5h limitの2経路を、checkpoint/task status/task・probe呼出数・token/cost・final status込みでscenario corpus(`provider-transient-probe-fail-then-success-resumes-task`・`provider-resume-probe-success-then-five-hour-limit`)へ固定する。
+- transient→probe失敗→backoff→probe成功→saved task resume→success、probe成功→resume→5h limit、transient→probe semantic invalid→backoff→再試行成功→saved task resume、transient→semantic invalid継続→hard deadline→resumable provider-unavailable、transient→probe応答5h signature→rate-limited優先の5経路を、checkpoint(停止分類込)・task status・task・probe呼出数・token/cost・final status込みでscenario corpus(`provider-transient-probe-fail-then-success-resumes-task`・`provider-resume-probe-success-then-five-hour-limit`・`provider-transient-probe-invalid-then-success-resumes-task`・`provider-transient-probe-invalid-until-deadline-unavailable`・`provider-transient-probe-five-hour-signature-routes-rate-limited`)へ固定する。明示的auth/config信号による即時fail closedはnew_task・resume両経路を`provider-transient-probe-auth-error-fails-closed`・`provider-resume-probe-auth-error-fails-closed`で固定する。
 
 
 ## 統計

@@ -135,3 +135,43 @@ func TestProviderUnavailableErrorFormat(t *testing.T) {
 		}
 	}
 }
+
+// probe応答内の明示的auth/config信号だけを検出し、sentinel不一致・malformed等の
+// semantic invalid(default fatalへ落ちる)や裸の数字・一般語とは区別する。
+func TestDetectProbeFatalSignal(t *testing.T) {
+	fatal := []string{
+		"401 Unauthorized: invalid api key",
+		"HTTP/1.1 403 Forbidden",
+		"400 Bad Request: invalid_request_error",
+		"API Error: 401 · invalid_api_key",
+		"status code 403 returned",
+		"invalid x-api-key provided",
+		"API key not valid. Please renew.",
+		"authentication failed for this request",
+		"authentication required before continuing",
+		"invalid model: glm-unknown",
+		"model not found: glm-unknown",
+	}
+	for _, text := range fatal {
+		if !DetectProbeFatalSignal(text) {
+			t.Fatalf("明示的auth/config信号を検出すべき: %q", text)
+		}
+	}
+	notFatal := []string{
+		"",
+		"GLM_WORKER_PROBE_OK",
+		"Scheduled maintenance is in progress. Please retry later.",
+		"probe不正応答(opus): 応答がsentinel \"GLM_WORKER_PROBE_OK\"と一致しません: \"\"",
+		"API Error: 503 Service Unavailable",
+		"retry failed after waiting 400 ms",
+		"queued 403 jobs behind the maintenance window",
+		"authentication service unavailable",
+		"connecting to localhost:4001 failed",
+		"metrics: 4003 requests",
+	}
+	for _, text := range notFatal {
+		if DetectProbeFatalSignal(text) {
+			t.Fatalf("semantic invalid・裸の数字・一般語をfatalへ誤分類: %q", text)
+		}
+	}
+}

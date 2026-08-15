@@ -420,8 +420,8 @@
       "forbidden_error_status": "PROVIDER_UNAVAILABLE"
     },
     {
-      "id": "provider-probe-invalid-response-fails-closed-first-probe",
-      "behavior": "probeがexit 0でも固定疎通応答の契約(本文・usage検証)を通らない偽陽性は一時通信障害と区別し、追加probeのAI costを費やさず初回でprovider-unavailableへfail closedして元task/session/checkpointを保持する。502/503/504/529や明確な一時network errorだけがbackoffを継続する",
+      "id": "provider-probe-invalid-response-retries-to-unavailable",
+      "behavior": "probeがexit 0でも固定疎通応答の契約(本文・usage検証)を通らない偽陽性は正常probeと認めずsaved taskのresumeへ進めない。semantic invalidだけで即fatalにせず通常のprobe失敗として既存backoff/retryを継続し、probe上限到達でprobe-contract分類のprovider-unavailable停止へ移行して元task/session/checkpointを保持する",
       "request": "通常の実装タスク",
       "entry": "new_task",
       "instruction_files": [
@@ -440,8 +440,32 @@
       "must_not_pass": true,
       "expected_error_status": "PROVIDER_UNAVAILABLE",
       "probe_blank": true,
-      "expected_probe_count": 1,
-      "expected_run_count": 1
+      "expected_probe_count": 4,
+      "expected_run_count": 1,
+      "expected_checkpoint": "provider-unavailable",
+      "expected_provider_classification": "probe-contract",
+      "expected_stats": {
+        "model_calls": 1,
+        "worker_calls": 1,
+        "reviewer_calls": 0,
+        "transient_retries": 0,
+        "resume_commands": 0,
+        "probe_success": 0,
+        "probe_failure": 4,
+        "total_ai_calls": 5
+      },
+      "expected_telemetry": {
+        "task_calls": 1,
+        "probe_calls": 4,
+        "event_calls": 1,
+        "task_input_tokens": 0,
+        "task_output_tokens": 0,
+        "task_cost_usd": 0,
+        "probe_input_tokens": 4,
+        "probe_output_tokens": 4,
+        "probe_cost_usd": 0.04,
+        "probe_resolved_model": "glm-5.3"
+      }
     },
     {
       "id": "provider-resume-probe-success-resumes-once",
@@ -490,7 +514,7 @@
     },
     {
       "id": "provider-resume-probe-is-error-exit-zero-stays-unavailable",
-      "behavior": "resumeのprobe gateはprocess exit 0でtype=resultのJSONでもis_error=trueを成功扱いせず本taskを実行せず、probe-contract分類で初回provider-unavailableへfail closedする",
+      "behavior": "resumeのprobe gateはprocess exit 0でtype=resultのJSONでもis_error=trueを成功扱いせず本taskを実行しない。semantic invalidだけで即fatalにせずbackoff/retryを継続し、probe上限到達でprobe-contract分類のprovider-unavailableを再保存する",
       "request": "通常の実装タスク",
       "entry": "resume",
       "instruction_files": [
@@ -509,12 +533,36 @@
       "must_not_pass": true,
       "expected_error_status": "PROVIDER_UNAVAILABLE",
       "probe_is_error": true,
-      "expected_probe_count": 1,
-      "expected_run_count": 0
+      "expected_probe_count": 4,
+      "expected_run_count": 0,
+      "expected_checkpoint": "provider-unavailable",
+      "expected_provider_classification": "probe-contract",
+      "expected_stats": {
+        "model_calls": 0,
+        "worker_calls": 0,
+        "reviewer_calls": 0,
+        "transient_retries": 0,
+        "resume_commands": 1,
+        "probe_success": 0,
+        "probe_failure": 4,
+        "total_ai_calls": 4
+      },
+      "expected_telemetry": {
+        "task_calls": 0,
+        "probe_calls": 4,
+        "event_calls": 1,
+        "task_input_tokens": 0,
+        "task_output_tokens": 0,
+        "task_cost_usd": 0,
+        "probe_input_tokens": 4,
+        "probe_output_tokens": 4,
+        "probe_cost_usd": 0.04,
+        "probe_resolved_model": "glm-5.3"
+      }
     },
     {
       "id": "provider-resume-probe-sentinel-mismatch-stays-unavailable",
-      "behavior": "resumeのprobe gateはJSON正常・usageありでも応答本文が固定sentinelと完全一致しないmaintenance/access denied/proxy guard等のsentinel以外の予期しない本文を成功扱いせず、probe-contract分類で初回provider-unavailableへfail closedする",
+      "behavior": "resumeのprobe gateはJSON正常・usageありでも応答本文が固定sentinelと完全一致しないmaintenance/access denied/proxy guard等の予期しない本文を成功扱いせず本taskを実行しない。semantic invalidだけで即fatalにせずbackoff/retryを継続し、probe上限到達でprobe-contract分類のprovider-unavailableを再保存する",
       "request": "通常の実装タスク",
       "entry": "resume",
       "instruction_files": [
@@ -532,9 +580,33 @@
       "expected_task_status": "provider-unavailable",
       "must_not_pass": true,
       "expected_error_status": "PROVIDER_UNAVAILABLE",
-      "probe_responses": ["Scheduled maintenance is in progress. Please retry later."],
-      "expected_probe_count": 1,
-      "expected_run_count": 0
+      "probe_responses": ["Scheduled maintenance is in progress. Please retry later.", "Scheduled maintenance is in progress. Please retry later.", "Scheduled maintenance is in progress. Please retry later.", "Scheduled maintenance is in progress. Please retry later."],
+      "expected_probe_count": 4,
+      "expected_run_count": 0,
+      "expected_checkpoint": "provider-unavailable",
+      "expected_provider_classification": "probe-contract",
+      "expected_stats": {
+        "model_calls": 0,
+        "worker_calls": 0,
+        "reviewer_calls": 0,
+        "transient_retries": 0,
+        "resume_commands": 1,
+        "probe_success": 0,
+        "probe_failure": 4,
+        "total_ai_calls": 4
+      },
+      "expected_telemetry": {
+        "task_calls": 0,
+        "probe_calls": 4,
+        "event_calls": 1,
+        "task_input_tokens": 0,
+        "task_output_tokens": 0,
+        "task_cost_usd": 0,
+        "probe_input_tokens": 4,
+        "probe_output_tokens": 4,
+        "probe_cost_usd": 0.04,
+        "probe_resolved_model": "glm-5.3"
+      }
     },
     {
       "id": "provider-transient-probe-fail-then-success-resumes-task",
@@ -627,6 +699,290 @@
         "probe_input_tokens": 1,
         "probe_output_tokens": 1,
         "probe_cost_usd": 0.01,
+        "probe_resolved_model": "glm-5.3"
+      }
+    },
+    {
+      "id": "provider-transient-probe-invalid-then-success-resumes-task",
+      "behavior": "transient障害→probe応答のsentinel不一致(semantic invalid)→backoff→probe再試行成功→同一session/checkpointでsaved taskを再開→worker→reviewerへ成功する経路を固定する。semantic invalidだけでfatalにもprovider-unavailableにもせず通常のprobe失敗としてbackoff/retryを継続し、task/probe呼出数・token・cost・checkpoint解除・final statusまでを加法整合的に検証する",
+      "request": "通常の実装タスク",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": ["README.md"],
+      "runner_steps": [
+        {"signal": "API Error: 503 Service Unavailable"},
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: recovered", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"], "usage": {"input_tokens": 10, "output_tokens": 5}, "cost_usd": 0.03},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: pass", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"], "usage": {"input_tokens": 7, "output_tokens": 3}, "cost_usd": 0.02}
+      ],
+      "expected_models": ["opus", "opus", "haiku"],
+      "expected_packet_status": "PASS",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "complete",
+      "must_not_pass": false,
+      "probe_responses": [""],
+      "expected_probe_count": 2,
+      "expected_checkpoint": "none",
+      "expected_stats": {
+        "model_calls": 3,
+        "worker_calls": 2,
+        "reviewer_calls": 1,
+        "transient_retries": 1,
+        "resume_commands": 0,
+        "probe_success": 1,
+        "probe_failure": 1,
+        "total_ai_calls": 5
+      },
+      "expected_telemetry": {
+        "task_calls": 3,
+        "probe_calls": 2,
+        "event_calls": 0,
+        "task_input_tokens": 17,
+        "task_output_tokens": 8,
+        "task_cost_usd": 0.05,
+        "probe_input_tokens": 2,
+        "probe_output_tokens": 2,
+        "probe_cost_usd": 0.02,
+        "probe_resolved_model": "glm-5.3"
+      }
+    },
+    {
+      "id": "provider-transient-probe-invalid-until-deadline-unavailable",
+      "behavior": "transient障害→semantic invalidなprobe応答がhard deadlineまで継続→resumable provider-unavailableへ遷移する経路を固定する。probe上限4回到達とは異なりdeadline側で停止すること、停止分類がprobe-contractであること、本taskを再実行せず同一session/checkpointを保持することを検証する",
+      "request": "通常の実装タスク",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": ["README.md"],
+      "runner_steps": [
+        {"signal": "API Error: 503 Service Unavailable"}
+      ],
+      "expected_models": ["opus"],
+      "expected_packet_status": "IMPLEMENTED",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "provider-unavailable",
+      "must_not_pass": true,
+      "expected_error_status": "PROVIDER_UNAVAILABLE",
+      "probe_responses": ["Scheduled maintenance is in progress. Please retry later.", "Scheduled maintenance is in progress. Please retry later.", "Scheduled maintenance is in progress. Please retry later.", "Scheduled maintenance is in progress. Please retry later."],
+      "sleep_advance_minutes": 90,
+      "expected_probe_count": 2,
+      "expected_run_count": 1,
+      "expected_checkpoint": "provider-unavailable",
+      "expected_provider_classification": "probe-contract",
+      "expected_stats": {
+        "model_calls": 1,
+        "worker_calls": 1,
+        "reviewer_calls": 0,
+        "transient_retries": 0,
+        "resume_commands": 0,
+        "probe_success": 0,
+        "probe_failure": 2,
+        "total_ai_calls": 3
+      },
+      "expected_telemetry": {
+        "task_calls": 1,
+        "probe_calls": 2,
+        "event_calls": 1,
+        "task_input_tokens": 0,
+        "task_output_tokens": 0,
+        "task_cost_usd": 0,
+        "probe_input_tokens": 2,
+        "probe_output_tokens": 2,
+        "probe_cost_usd": 0.02,
+        "probe_resolved_model": "glm-5.3"
+      }
+    },
+    {
+      "id": "provider-transient-probe-five-hour-signature-routes-rate-limited",
+      "behavior": "transient障害の回復中にprobe応答へZ.ai 5h上限signature(is_error・sentinel不一致を含む)が返った場合、semantic invalid扱いでbackoffを継続せず5h rate-limit経路を優先する。rate-limited checkpoint保存・status切替・reset時刻・本taskの追加実行なし・probe回数を固定する",
+      "request": "通常の実装タスク",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": ["README.md"],
+      "runner_steps": [
+        {"signal": "API Error: 503 Service Unavailable"}
+      ],
+      "expected_models": ["opus"],
+      "expected_packet_status": "IMPLEMENTED",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "rate-limited",
+      "must_not_pass": true,
+      "expected_error_status": "RATE_LIMITED",
+      "forbidden_error_status": "PROVIDER_UNAVAILABLE",
+      "probe_responses": ["API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour. Your limit will reset at 2026-07-22 14:06:34]"],
+      "probe_is_error": true,
+      "expected_probe_count": 1,
+      "expected_run_count": 1,
+      "expected_checkpoint": "rate-limited",
+      "expected_stats": {
+        "model_calls": 1,
+        "worker_calls": 1,
+        "reviewer_calls": 0,
+        "transient_retries": 0,
+        "resume_commands": 0,
+        "probe_success": 0,
+        "probe_failure": 1,
+        "total_ai_calls": 2
+      },
+      "expected_telemetry": {
+        "task_calls": 1,
+        "probe_calls": 1,
+        "event_calls": 0,
+        "task_input_tokens": 0,
+        "task_output_tokens": 0,
+        "task_cost_usd": 0,
+        "probe_input_tokens": 1,
+        "probe_output_tokens": 1,
+        "probe_cost_usd": 0.01,
+        "probe_resolved_model": "glm-5.3"
+      }
+    },
+    {
+      "id": "provider-transient-probe-auth-error-fails-closed",
+      "behavior": "transient障害の回復中にprobe応答がexit 0でもis_error=trueで明示的なauth/config信号(401 Unauthorized・invalid api key等)を含む場合、semantic invalidとしてbackoffせず既存fatal分類と同じWORKER_ERRORへ即時にfail closedする。本task再開も追加probeも行わず、初回runとprobe呼出だけを計上する",
+      "request": "通常の実装タスク",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": [
+        "README.md"
+      ],
+      "runner_steps": [
+        {"signal": "API Error: 503 Service Unavailable"}
+      ],
+      "expected_models": ["opus"],
+      "expected_packet_status": "IMPLEMENTED",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "active",
+      "must_not_pass": true,
+      "expected_error_status": "WORKER_ERROR",
+      "forbidden_error_status": "PROVIDER_UNAVAILABLE",
+      "probe_responses": ["401 Unauthorized: invalid api key"],
+      "probe_is_error": true,
+      "expected_probe_count": 1,
+      "expected_run_count": 1,
+      "expected_checkpoint": "none",
+      "expected_stats": {
+        "model_calls": 1,
+        "worker_calls": 1,
+        "reviewer_calls": 0,
+        "transient_retries": 0,
+        "resume_commands": 0,
+        "probe_success": 0,
+        "probe_failure": 1,
+        "total_ai_calls": 2
+      },
+      "expected_telemetry": {
+        "task_calls": 1,
+        "probe_calls": 1,
+        "event_calls": 0,
+        "task_input_tokens": 0,
+        "task_output_tokens": 0,
+        "task_cost_usd": 0,
+        "probe_input_tokens": 1,
+        "probe_output_tokens": 1,
+        "probe_cost_usd": 0.01,
+        "probe_resolved_model": "glm-5.3"
+      }
+    },
+    {
+      "id": "provider-resume-probe-auth-error-fails-closed",
+      "behavior": "provider-unavailableからのresumeでprobe gateがexit 0でもis_error=trueで明示的なauth/config信号(401 Unauthorized・invalid api key等)を含む応答を受け取った場合、本taskのresumeも追加probeもせず既存fatal分類と同じWORKER_ERRORへfail closedし、resume checkpointを破棄する",
+      "request": "通常の実装タスク",
+      "entry": "resume",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": [
+        "README.md"
+      ],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: never used", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus"],
+      "expected_packet_status": "IMPLEMENTED",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "active",
+      "must_not_pass": true,
+      "expected_error_status": "WORKER_ERROR",
+      "forbidden_error_status": "PROVIDER_UNAVAILABLE",
+      "probe_responses": ["401 Unauthorized: invalid api key"],
+      "probe_is_error": true,
+      "expected_probe_count": 1,
+      "expected_run_count": 0,
+      "expected_checkpoint": "none",
+      "expected_stats": {
+        "model_calls": 0,
+        "worker_calls": 0,
+        "reviewer_calls": 0,
+        "transient_retries": 0,
+        "resume_commands": 1,
+        "probe_success": 0,
+        "probe_failure": 1,
+        "total_ai_calls": 1
+      },
+      "expected_telemetry": {
+        "task_calls": 0,
+        "probe_calls": 1,
+        "event_calls": 0,
+        "task_input_tokens": 0,
+        "task_output_tokens": 0,
+        "task_cost_usd": 0,
+        "probe_input_tokens": 1,
+        "probe_output_tokens": 1,
+        "probe_cost_usd": 0.01,
+        "probe_resolved_model": "glm-5.3"
+      }
+    },
+    {
+      "id": "provider-transient-probe-mixed-transient-priority-resumes-task",
+      "behavior": "transient障害→503等のtransient信号とauth語の混在したprobe応答→既存classifierの優先順位(5h→transient→fatal)どおりtransientとしてbackoff→probe再試行成功→同一session/checkpointでsaved taskを再開→worker→reviewerへ成功する経路を固定する。混在信号をfatal誤判定してcheckpoint/sessionを破棄しない",
+      "request": "通常の実装タスク",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": [
+        "README.md"
+      ],
+      "runner_steps": [
+        {"signal": "API Error: 503 Service Unavailable"},
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: recovered", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"], "usage": {"input_tokens": 10, "output_tokens": 5}, "cost_usd": 0.03},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: pass", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"], "usage": {"input_tokens": 7, "output_tokens": 3}, "cost_usd": 0.02}
+      ],
+      "expected_models": ["opus", "opus", "haiku"],
+      "expected_packet_status": "PASS",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "complete",
+      "must_not_pass": false,
+      "probe_responses": ["API Error: 503 Service Unavailable · authentication failed"],
+      "expected_probe_count": 2,
+      "expected_checkpoint": "none",
+      "expected_stats": {
+        "model_calls": 3,
+        "worker_calls": 2,
+        "reviewer_calls": 1,
+        "transient_retries": 1,
+        "resume_commands": 0,
+        "probe_success": 1,
+        "probe_failure": 1,
+        "total_ai_calls": 5
+      },
+      "expected_telemetry": {
+        "task_calls": 3,
+        "probe_calls": 2,
+        "event_calls": 0,
+        "task_input_tokens": 17,
+        "task_output_tokens": 8,
+        "task_cost_usd": 0.05,
+        "probe_input_tokens": 2,
+        "probe_output_tokens": 2,
+        "probe_cost_usd": 0.02,
         "probe_resolved_model": "glm-5.3"
       }
     },

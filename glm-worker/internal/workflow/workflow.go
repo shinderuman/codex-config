@@ -257,9 +257,14 @@ func (w *Workflow) ExecuteResume() error {
 				if errors.As(err, &pErr) {
 					return err
 				}
+				var limitErr runner.ZaiRateLimitError
+				if errors.As(err, &limitErr) {
+					return err
+				}
 				_ = w.state.ClearResumeCheckpoint()
 				_ = w.state.RemoveUnreadySession(checkpoint.Role)
-				return err
+				// gate上のfatal(auth/config・state異常等)は本task再開せず従来のWORKER_ERROR終端へ出す。
+				return fmt.Errorf("STATUS: WORKER_ERROR\nPHASE: %s\nERROR: %v", checkpoint.Phase, err)
 			}
 		}
 		// review工程resume時は5h上限の時間経過を挟んでreview-start snapshotと現在状態を再照合する。
@@ -730,6 +735,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	// Z.ai 5h上限以外の一時障害(502/503/504/529・明確な一時network障害)は同じsession/checkpointと
 	// Git snapshotを保持した上限付きbackoffで回復する。auth/invalid request/session破損/不明errorは
 	// 非transientのためここへ入らず、従来どおり下段のWORKER_ERROR分岐へ進む。
+	recoveryFatal := false
 	if failureClass.Kind == runner.ProviderFailureTransient {
 		recovered, resumeResult, resumeStartedAt, resumeCompletedAt, recErr := w.recoverTransient(
 			checkpoint, outputPath, failureClass.Detail, runResult, startedAt, completedAt,
@@ -755,6 +761,9 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 			startedAt = resumeStartedAt
 			completedAt = resumeCompletedAt
 			runErr = recErr
+			// recovery中のfatal errorは初回transient runとprobe呼出をそれぞれ記録済みのため、
+			// Runしていないtask呼出をphantom記録として二重計上しない。
+			recoveryFatal = true
 		}
 	}
 
@@ -763,7 +772,9 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 		return packet.Packet{}, err
 	}
 	if runErr != nil {
-		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "error", "", runErr, outputPath, callDiagnostics{})
+		if !recoveryFatal {
+			w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "error", "", runErr, outputPath, callDiagnostics{})
+		}
 		_ = w.state.ClearResumeCheckpoint()
 		_ = w.state.RemoveUnreadySession(checkpoint.Role)
 		return packet.Packet{}, workerError(
@@ -823,22 +834,11 @@ func (w *Workflow) saveRateLimitedState(
 	if err := w.state.MarkReady(checkpoint.Role); err != nil {
 		return err
 	}
-
-	checkpoint.RateLimited = true
-	checkpoint.ResetAtCST = limit.ResetAtCST
-	checkpoint.ResetAtRFC3339 = limit.ResetAtRFC3339
-	if err := w.state.SaveResumeCheckpoint(checkpoint); err != nil {
-		return err
-	}
-	if err := w.state.SetTaskStatus(state.TaskStatusRateLimited); err != nil {
-		return err
-	}
-	w.state.RecordRateLimit(checkpoint.Model)
-
-	taskID, err := w.state.TaskID()
+	taskID, err := w.persistRateLimitedStop(checkpoint, limit)
 	if err != nil {
 		return err
 	}
+
 	artifactErr := w.state.SecureArtifactDir()
 	telemetryErr := runErr
 	artifactWarning := ""
@@ -854,6 +854,47 @@ func (w *Workflow) saveRateLimitedState(
 		RepoRoot:        w.config.RepoRoot,
 		RepoShort:       w.config.RepoShort,
 		ArtifactWarning: artifactWarning,
+	}
+}
+
+// persistRateLimitedStopは5h上限の再開可能停止へcheckpointとtask statusを保存する。
+// provider-unavailable停止fieldは排他させてクリアし、resume理由の誤分類を防ぐ。
+func (w *Workflow) persistRateLimitedStop(checkpoint state.ResumeCheckpoint, limit runner.ZaiFiveHourLimit) (string, error) {
+	checkpoint.RateLimited = true
+	checkpoint.ResetAtCST = limit.ResetAtCST
+	checkpoint.ResetAtRFC3339 = limit.ResetAtRFC3339
+	checkpoint.ProviderUnavailable = false
+	checkpoint.ProviderUnavailableClassification = ""
+	checkpoint.ProviderUnavailableProbes = 0
+	checkpoint.ProviderUnavailableStartedAt = time.Time{}
+	if err := w.state.SaveResumeCheckpoint(checkpoint); err != nil {
+		return "", err
+	}
+	if err := w.state.SetTaskStatus(state.TaskStatusRateLimited); err != nil {
+		return "", err
+	}
+	w.state.RecordRateLimit(checkpoint.Model)
+	taskID, err := w.state.TaskID()
+	if err != nil {
+		return "", err
+	}
+	return taskID, nil
+}
+
+// saveProbeRateLimitedはprobe応答から5h上限を検出した時点でrate-limited停止へ保存する。
+// probe呼出はrecordProbeCallで記録済みのため、task呼出のtelemetry記録は追加しない。
+func (w *Workflow) saveProbeRateLimited(checkpoint state.ResumeCheckpoint, limit runner.ZaiFiveHourLimit) error {
+	taskID, err := w.persistRateLimitedStop(checkpoint, limit)
+	if err != nil {
+		return err
+	}
+	_ = w.state.SecureArtifactDir()
+	return runner.ZaiRateLimitError{
+		Phase:    checkpoint.Phase,
+		Limit:    limit,
+		TaskID:   taskID,
+		RepoRoot: w.config.RepoRoot,
+		RepoShort: w.config.RepoShort,
 	}
 }
 
@@ -916,6 +957,10 @@ func (w *Workflow) runResumedTask(checkpoint state.ResumeCheckpoint, outputPath 
 }
 
 // recoveryLoopは上限付きbackoffでprobeを繰り返し、transientだけ再試行する。
+// probe応答の契約違反(semantic invalid)もsaved taskのresumeへ進めない通常のprobe失敗として
+// 同じbackoff/retryへ戻し、probe上限・hard deadlineの先に到達した側でprovider-unavailableへ保存する。
+// probe応答の分類優先度は5h→transient→明示fatalの順でtask呼出と共通の既存classifierと一致させ、
+// 明示的なauth/config信号のときだけfatal経路へ即時にfail closedする。
 func (w *Workflow) recoveryLoop(
 	checkpoint state.ResumeCheckpoint,
 	classification string,
@@ -926,6 +971,8 @@ func (w *Workflow) recoveryLoop(
 	deadline := recoveryStart.Add(providerUnavailableDeadline)
 	probes := 0
 	sleeps := 0
+	// 停止時分類は初期障害分類で開始し、probe応答の契約違反観測で上書きする。
+	exhaustClassification := classification
 
 	for {
 		if probes >= maxTransientProbes {
@@ -948,7 +995,6 @@ func (w *Workflow) recoveryLoop(
 		probeResult, probeErr := w.runner.Probe(checkpoint.Model)
 		probeCompletedAt := w.now().UTC()
 		// fake runnerはreal runnerの応答検証を通らないため、gate側でも契約を強制する。
-		var probeInvalid *runner.ProbeInvalidResponseError
 		if probeErr == nil {
 			if contractErr := runner.ValidateProbeResult(probeResult); contractErr != nil {
 				probeErr = &runner.ProbeInvalidResponseError{
@@ -960,17 +1006,28 @@ func (w *Workflow) recoveryLoop(
 		w.recordProbeCall(checkpoint, probeResult, probes, probeStartedAt, probeCompletedAt, probeErr)
 
 		if probeErr != nil {
+			class := runner.ClassifyProviderFailureText(probeErr.Error())
+			// 5h上限signatureはprobe応答でも他分類へより優先しrate-limited停止へ保存する。
+			if class.Kind == runner.ProviderFailureZaiFiveHour {
+				err := w.saveProbeRateLimited(checkpoint, class.FiveHourLimit)
+				return false, runner.RunResult{}, probeStartedAt, probeCompletedAt, err
+			}
+			// transient信号は明示fatal検出より優先し、既存classifierと同じbackoff/retryへ戻す。
+			// 503等とauth語の混在応答もここでtransientとして扱われる。
+			if class.Kind == runner.ProviderFailureTransient {
+				continue
+			}
+			var probeInvalid *runner.ProbeInvalidResponseError
 			if errors.As(probeErr, &probeInvalid) {
-				pErr, saveErr := w.saveProviderUnavailable(checkpoint, runner.ProbeContractFailure, probes, recoveryStart)
-				if saveErr != nil {
-					return false, runner.RunResult{}, time.Time{}, time.Time{}, saveErr
+				// 応答本文中の明示的なauth/config信号はsemantic invalidと区別し、
+				// 既存classifierと同じfatal経路へ直ちにfail closedする。
+				if runner.DetectProbeFatalSignal(probeErr.Error()) {
+					return false, runner.RunResult{}, probeStartedAt, probeCompletedAt, probeErr
 				}
-				return false, runner.RunResult{}, time.Time{}, time.Time{}, pErr
+				exhaustClassification = runner.ProbeContractFailure
+				continue
 			}
-			if class := runner.ClassifyProviderFailureText(probeErr.Error()); class.Kind != runner.ProviderFailureTransient {
-				return false, runner.RunResult{}, probeStartedAt, probeCompletedAt, probeErr
-			}
-			continue
+			return false, runner.RunResult{}, probeStartedAt, probeCompletedAt, probeErr
 		}
 
 		recovered, result, startedAt, completedAt, err := onProbeSuccess()
@@ -982,7 +1039,7 @@ func (w *Workflow) recoveryLoop(
 		}
 	}
 
-	pErr, saveErr := w.saveProviderUnavailable(checkpoint, classification, probes, recoveryStart)
+	pErr, saveErr := w.saveProviderUnavailable(checkpoint, exhaustClassification, probes, recoveryStart)
 	if saveErr != nil {
 		return false, runner.RunResult{}, time.Time{}, time.Time{}, saveErr
 	}
