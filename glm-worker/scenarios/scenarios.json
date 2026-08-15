@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "prompt/instruction変更の品質gateとして、fake runnerが返すpacket列に対するproduction workflow/prompt/gateの終端検証を行うscenario corpus。各scenarioはUSER_REQUEST・scripted packet列・期待model/routing/terminalを持ちproduction経路へ入力し、request/MODE伝達・risk/model routing・FIX_REQUIRED/NEEDS_SOL_REVIEW/NEEDS_SOL_DECISION終端・risk floor/self-protectionによるPASS拒否・NEEDS_SOL_REVIEWのTARGETS契約・FIX_REQUIREDのTARGETS: PACKET報告再出力分岐を決定論検証する。manifest.jsonは根拠instruction fileのSHA-256を固定し内容変更でhash mismatchによりtestを失敗させ影響scenarioの再確認を強制する。永続状態バグそのものの自動検出・modelの規則遵守の検証は行わず後続固定Evalの対象。install_smoke.shの配置grepとは役割を分ける。live model・networkは呼ばない。",
+  "description": "prompt/instruction変更の品質gateとして、fake runnerが返すpacket列に対するproduction workflow/prompt/gateの終端検証を行うscenario corpus。各scenarioはUSER_REQUEST・scripted packet列・期待model/routing/terminalを持ちproduction経路へ入力し、request/MODE伝達・risk/model routing・FIX_REQUIRED/NEEDS_SOL_REVIEW/NEEDS_SOL_DECISION終端・risk floor/self-protectionによるPASS拒否・NEEDS_SOL_REVIEWのTARGETS契約・FIX_REQUIREDのTARGETS: PACKET報告再出力分岐を決定論検証する。manifest.jsonは根拠instruction fileのSHA-256を固定し内容変更でhash mismatchによりtestを失敗させ影響scenarioの再確認を強制する。永続状態バグそのものの自動検出・modelの規則遵守の検証は行わず後続固定Evalの対象。install_smoke.shの配置grepとは役割を分ける。live model・networkは呼ばない。feasibility-gate-*はwrapperのSTATUS/risk終端検証例に限定し、親Codexがfeasibility-gate.mdを読み委譲・受領を制御する行動の証明ではない。親orchestration行動の固定Evalは未実行で、EVAL.mdの完了条件を満たすまで完了扱いにしない。",
   "scenarios": [
     {
       "id": "state-residual-after-removal",
@@ -1703,6 +1703,191 @@
       "expected_packet_risk": "HIGH",
       "expected_task_status": "waiting-sol-review",
       "must_not_pass": true
+    },
+    {
+      "id": "feasibility-gate-production-beyond-unverified-viability-returns-to-sol",
+      "behavior": "wrapper終端検証(親Codex行動証明ではない): transport成功だけを根拠にPoCからproduction/IaC実装へ進んだscripted worker完了申告に対し、reviewerのSol確認要求packetがwrapperをNEEDS_SOL_REVIEW/HIGHへ終端させPASS完結を拒否する",
+      "request": "外部書店サイトから書籍情報を自動取得する仕組みを本番運用へ展開する。PoCでHTTP 200と単発取得には成功しているため、この前提でproduction codeとIaCを実装する",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/AGENTS.md",
+        "codex/instructions/glm-execution.md",
+        "codex/instructions/feasibility-gate.md"
+      ],
+      "changed_paths": [
+        "src/acquisition/pipeline.go",
+        "iac/deploy/lambda.tf"
+      ],
+      "runner_steps": [
+        {
+          "lines": [
+            "STATUS: IMPLEMENTED",
+            "RISK: LOW",
+            "SUMMARY: 本番取得pipelineとdeploy IaCを実装し単発取得で動作確認した",
+            "REQUIREMENT_COVERAGE: covered",
+            "TESTS: deploy成功・process exit 0・1回の取得成功でHTTP 200を確認",
+            "UNVERIFIED: none",
+            "ARTIFACTS: none"
+          ]
+        },
+        {
+          "lines": [
+            "STATUS: NEEDS_SOL_REVIEW",
+            "RISK: HIGH",
+            "SUMMARY: transport成功だけを外部成立性の証拠とした本番展開をSol確認へ昇格する",
+            "REQUIREMENT_COVERAGE: 継続取得可能性が未検証のまま本番前提へ進んでいる",
+            "INVARIANTS: 意味的成功条件と代表caseのterminal outcomeが未検証のままproduction実装へ進んでいる",
+            "TEST_EVIDENCE: worker報告はHTTP 200・process exit 0・単発取得のみで観測期間・試行回数の記録がない",
+            "ISSUES: critical assumption列挙・必要試行回数・観測期間・Go/No-Go・撤退条件が未確定のままproduction/IaCへ進んだ",
+            "RESIDUAL_RISK: 前提崩壊時の後続コストが大きい",
+            "TARGETS: src/acquisition/pipeline.goの取得成功判定とiac/deploy/lambda.tfの展開条件",
+            "ARTIFACTS: none",
+            "SOL_QUESTION: 外部成立性のGo/No-Goと観測条件をSol/ユーザーが判断する"
+          ]
+        }
+      ],
+      "expected_models": [
+        "opus",
+        "haiku"
+      ],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true
+    },
+    {
+      "id": "feasibility-gate-premise-collapse-stops-further-implementation",
+      "behavior": "wrapper終端検証(親Codex行動証明ではない): 観測中に前提が崩れたscripted caseで、workerのNEEDS_SOL_DECISION packetがwrapperをwaiting-decisionへ終端させる。前提崩壊時に親Codexが追加実装を止める行動は未実行の親behavioral Eval対象",
+      "request": "外部取得方式の成立性PoCとして代表caseの継続観測とterminal outcome確認を行う。前提が崩れた場合は追加実装を止め判断をSolへ渡す",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/AGENTS.md",
+        "codex/instructions/glm-execution.md",
+        "codex/instructions/feasibility-gate.md"
+      ],
+      "changed_paths": [
+        "docs/poc-observation.md"
+      ],
+      "runner_steps": [
+        {
+          "lines": [
+            "STATUS: NEEDS_SOL_DECISION",
+            "RISK: HIGH",
+            "DECISION: 前提崩壊後の継続・取得方式再設計・撤退のGo/No-Go",
+            "EVIDENCE: 観測中に取得blockが間欠発生し単発成功は継続成立性を意味しない",
+            "OPTIONS: 観測条件を変えて再試行 / 取得方式の再設計 / 撤退",
+            "RECOMMENDATION: workaroundの追加実装を止め観測事実をSol/ユーザー判断へ戻す",
+            "TEST_OBLIGATIONS: 判断後の設計で意味的成功条件と代表caseのterminal outcomeを検証する",
+            "TARGETS: docs/poc-observation.md",
+            "ARTIFACTS: none"
+          ]
+        }
+      ],
+      "expected_models": [
+        "opus"
+      ],
+      "expected_packet_status": "NEEDS_SOL_DECISION",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-decision",
+      "must_not_pass": true
+    },
+    {
+      "id": "feasibility-gate-short-semantic-verification-completes",
+      "behavior": "wrapper終端検証(親Codex行動証明ではない): 短時間の意味的検証で足りる対象のscripted通常taskがrisk floor等へ掛からずPASS/LOWで完遂する正面制御。固定観測期間を要求しない親Codexの委譲内容の証明ではない",
+      "request": "新規外部APIのschema確認、実行環境からの到達確認、認証方式の成立確認を短時間の意味的検証として行う。production実装は別taskとする",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/AGENTS.md",
+        "codex/instructions/glm-execution.md",
+        "codex/instructions/feasibility-gate.md"
+      ],
+      "changed_paths": [
+        "docs/external-api-verification.md"
+      ],
+      "runner_steps": [
+        {
+          "lines": [
+            "STATUS: IMPLEMENTED",
+            "RISK: LOW",
+            "SUMMARY: schema必須field・実行環境からの到達・認証成立を意味的検証し結果を文書化した",
+            "REQUIREMENT_COVERAGE: covered",
+            "TESTS: 実API応答の意味的検証で必須field・認証token・到達を確認",
+            "UNVERIFIED: none",
+            "ARTIFACTS: none"
+          ]
+        },
+        {
+          "lines": [
+            "STATUS: PASS",
+            "RISK: LOW",
+            "SUMMARY: 短時間の意味的検証でcritical assumptionが解消されている",
+            "REQUIREMENT_COVERAGE: covered",
+            "INVARIANTS: preserved",
+            "TEST_EVIDENCE: schema・到達・認証の検証記録を確認",
+            "ISSUES: none",
+            "RESIDUAL_RISK: none",
+            "TARGETS: none",
+            "ARTIFACTS: none"
+          ]
+        }
+      ],
+      "expected_models": [
+        "opus",
+        "haiku"
+      ],
+      "expected_packet_status": "PASS",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "complete",
+      "must_not_pass": false
+    },
+    {
+      "id": "feasibility-gate-established-premise-change-completes",
+      "behavior": "wrapper終端検証(親Codex行動証明ではない): 確立済み前提内変更のscripted通常taskがPASS/LOWで完遂する正面制御。形式的PoCを要求しない親Codex判断の証明ではない",
+      "request": "本番稼働中の外部API連携について、既存契約・認証方式・実行環境を変えずに保守修正のみを行う",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/AGENTS.md",
+        "codex/instructions/glm-execution.md",
+        "codex/instructions/feasibility-gate.md"
+      ],
+      "changed_paths": [
+        "src/integration/client.go"
+      ],
+      "runner_steps": [
+        {
+          "lines": [
+            "STATUS: IMPLEMENTED",
+            "RISK: LOW",
+            "SUMMARY: 既存契約・認証・実行環境を維持した保守修正を実装した",
+            "REQUIREMENT_COVERAGE: covered",
+            "TESTS: unit testと既存integration testが成功",
+            "UNVERIFIED: none",
+            "ARTIFACTS: none"
+          ]
+        },
+        {
+          "lines": [
+            "STATUS: PASS",
+            "RISK: LOW",
+            "SUMMARY: gate対象外の確立済み前提内変更を通常reviewで完遂する",
+            "REQUIREMENT_COVERAGE: covered",
+            "INVARIANTS: preserved",
+            "TEST_EVIDENCE: 既存契約・認証・実行環境が変更されていないことを確認",
+            "ISSUES: none",
+            "RESIDUAL_RISK: none",
+            "TARGETS: none",
+            "ARTIFACTS: none"
+          ]
+        }
+      ],
+      "expected_models": [
+        "opus",
+        "haiku"
+      ],
+      "expected_packet_status": "PASS",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "complete",
+      "must_not_pass": false
     }
   ]
 }

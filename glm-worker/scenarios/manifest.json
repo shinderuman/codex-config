@@ -106,6 +106,36 @@
         "implementation-plan-absent-fabrication-returns-fix-required",
         "repo-agents-root-change-escalates-self-protection-high"
       ]
+    },
+    {
+      "path": "codex/instructions/feasibility-gate.md",
+      "sha256": "f4993b418ad38258001f55b7d6703938dfb7c341dcb5c940900874567eccb446",
+      "scenarios": [
+        "feasibility-gate-production-beyond-unverified-viability-returns-to-sol",
+        "feasibility-gate-premise-collapse-stops-further-implementation",
+        "feasibility-gate-short-semantic-verification-completes",
+        "feasibility-gate-established-premise-change-completes"
+      ]
+    },
+    {
+      "path": "codex/AGENTS.md",
+      "sha256": "d0f1973867f583bcff3d399414a91a43580ed4367fcd0b7835c3e8cb9538b61d",
+      "scenarios": [
+        "feasibility-gate-production-beyond-unverified-viability-returns-to-sol",
+        "feasibility-gate-premise-collapse-stops-further-implementation",
+        "feasibility-gate-short-semantic-verification-completes",
+        "feasibility-gate-established-premise-change-completes"
+      ]
+    },
+    {
+      "path": "codex/instructions/glm-execution.md",
+      "sha256": "0c3e978156fd970e3aa6293707832f458bdc86258ae19f82b9e28dacf87a72f0",
+      "scenarios": [
+        "feasibility-gate-production-beyond-unverified-viability-returns-to-sol",
+        "feasibility-gate-premise-collapse-stops-further-implementation",
+        "feasibility-gate-short-semantic-verification-completes",
+        "feasibility-gate-established-premise-change-completes"
+      ]
     }
   ]
 }

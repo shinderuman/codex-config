@@ -103,6 +103,17 @@
 - 漏れ側の行動固定はscenario corpus(`orchestrator-critical-low-self-declare`・`repo-agents-root-change-escalates-self-protection-high`・`install-merge-path-escalates-self-protection-high`・`managed-settings-content-escalates-self-protection-high`・`autoresume-verifier-escalates-self-protection-high`・`future-internal-package-escalates-self-protection-high`・`cmd-entrypoint-escalates-self-protection-high`)、非対象側は`low-risk-non-critical-pass`・`test-and-docs-only-stay-low-risk`で固定する。manifest hash pin変更時は該当scenarioの期待結果を現物へ再照合する。
 
 
+## 外部成立性feasibility gate
+
+- `codex/instructions/feasibility-gate.md`は、外部service・取得方式・実行環境等の未検証critical assumptionがproduction code・IaC・運用展開の設計前提になり後続コストが大きい場合だけ適用する親Codex orchestration contractである。worker/reviewerへの個別checklist追加で解決しない。
+- gateはcritical assumption列挙・最小PoC・代表case・transport成功を含まない意味的成功条件・対象固有の必要試行回数/観測期間・Go/No-Go・撤退条件を、対象の不確実性・変動性・継続成立性の重要度に応じて明示する。
+- HTTP 200・process exit 0・単発取得等のtransport成功だけを成立性の証明にしない。Amazon取得PoCの48〜72時間は対象固有の観測条件であり一般contractへ固定しない。外部API schema確認・実行環境からの到達確認・認証方式の成立確認など短時間の意味的検証で足りる対象へ長時間試験を要求せず、通常の局所変更・確立済み前提へ形式的PoCを要求しない。
+- 観測中に前提が崩れた場合はworkaroundの追加実装を止め、観測事実をSol/ユーザー判断へ戻す。PoC・観測taskとproduction実装taskを分離し、Go/No-GoをGLMだけで確定させない。
+- 親側production routingの決定論検証は`internal/workflow`の`TestFeasibilityGateContractWiring`が担う。`codex/AGENTS.md`の条件付きrouting・品質gate項目、`codex/instructions/glm-execution.md`の委譲前読込指示、`feasibility-gate.md`本文の必須契約文のいずれかが欠けるとtestが失敗する。install後の3 file配置・相互参照は`tests/install_smoke.sh`の配置grepが検証する。
+- scenario corpus(`feasibility-gate-*`)はwrapperのSTATUS/risk終端検証例に限定する。未検証外部成立性を越えたPoCからproduction/IaCへの進行に対する`NEEDS_SOL_REVIEW`終端とPASS完結拒否(`feasibility-gate-production-beyond-unverified-viability-returns-to-sol`)、前提崩壊時の`NEEDS_SOL_DECISION`終端(`feasibility-gate-premise-collapse-stops-further-implementation`)、短時間の意味的検証と確立済み前提変更の通常完遂(`feasibility-gate-short-semantic-verification-completes`・`feasibility-gate-established-premise-change-completes`)。scripted packet列に対するwrapper終端検証であり、親Codexがgateを読み委譲・受領を制御する行動の証明ではない。根拠instructionとして`codex/AGENTS.md`・`codex/instructions/glm-execution.md`・`codex/instructions/feasibility-gate.md`の3 fileをmanifest hash pinし、変更時は該当scenarioの期待結果を現物へ再照合する。
+- 親Codex behavioral Evalは未実行の固定Eval caseとする。positive case: 未検証外部成立性のproduction/IaC委譲をfeasibility gate根拠で止めPoC・観測taskへ分割する。negative case: 短時間の意味的検証で足りる対象へ固定観測期間を要求しない。完了条件: 親Codexのrouting判断・委譲内容・gate読込をraw telemetry・task log等の一次証拠で照合できる検証形態が整備されること。live model呼出しを要するためユーザーの明示指示後だけ実行し、完了条件を満たすまでは本項を完了扱いにしない。新規巨大harness・無意味なlive callは作らない。
+
+
 ## Go品質ゲート
 
 - `go test ./...`が成功する。

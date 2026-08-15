@@ -48,6 +48,7 @@ USER_REQUEST・`SPECIFICATION.md`・既存`AGENTS.md`・直前のSol判断で未
 
 - アーキテクチャ、責務、公開API・CLI、データモデル・永続化形式、依存方向・新規外部依存、後方互換性
 - 原因不明バグの根本原因、セキュリティ・データ破損・不可逆操作
+- 未検証の外部成立性を本番設計の前提へ進める変更のGo/No-Goと撤退判断
 - 複数案の選択が将来構造へ意味のある差を生む場合
 
 これらは実装前`NEEDS_SOL_DECISION`または最終`NEEDS_SOL_REVIEW`でSol Highを通す。
@@ -69,5 +70,6 @@ USER_REQUEST・`SPECIFICATION.md`・既存`AGENTS.md`・直前のSol判断で未
 - GLM実行・待機 → `~/.codex/instructions/glm-execution.md`
 - GLM packet・WORKER_ERROR処理 → `~/.codex/instructions/glm-packets.md`
 - GLM rate limit自動再開 → `~/.codex/instructions/glm-auto-resume.md`
+- 外部成立性のfeasibility gate → `~/.codex/instructions/feasibility-gate.md`
 - Codex自身が例外的に直接編集 → `~/.codex/instructions/worker/`の該当ファイル
 - 直接編集・直接実行の許可境界 → `~/.codex/instructions/direct-edit.md`
