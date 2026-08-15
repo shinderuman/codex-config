@@ -291,6 +291,142 @@
       "expected_task_status": "waiting-sol-review",
       "must_not_pass": true,
       "reviewer_mutates_worktree": true
+    },
+    {
+      "id": "provider-transient-exhausts-to-provider-unavailable",
+      "behavior": "502/503/504/529等の一時provider障害は同一session/checkpointでbackoffし、probe上限到達でprovider-unavailable停止へ移行する。新task/sessionの再実行と5h上限扱いをしない",
+      "request": "通常の実装タスク",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": [
+        "README.md"
+      ],
+      "runner_steps": [
+        {"signal": "API Error: 503 Service Unavailable"}
+      ],
+      "expected_models": ["opus"],
+      "expected_packet_status": "IMPLEMENTED",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "provider-unavailable",
+      "must_not_pass": true,
+      "expected_error_status": "PROVIDER_UNAVAILABLE",
+      "forbidden_error_status": "RATE_LIMITED",
+      "probe_errors": ["API Error: 503 Service Unavailable", "API Error: 503 Service Unavailable", "API Error: 503 Service Unavailable", "API Error: 503 Service Unavailable"]
+    },
+    {
+      "id": "provider-zai-5h-limit-routes-to-rate-limited",
+      "behavior": "Z.ai 5h上限signalは一時障害backoffへ入らずrate-limited停止として保存する。provider-unavailable扱いにしない",
+      "request": "通常の実装タスク",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": [
+        "README.md"
+      ],
+      "runner_steps": [
+        {"signal": "API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour. Your limit will reset at 2026-07-22 14:06:34]"}
+      ],
+      "expected_models": ["opus"],
+      "expected_packet_status": "IMPLEMENTED",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "rate-limited",
+      "must_not_pass": true,
+      "expected_error_status": "RATE_LIMITED",
+      "forbidden_error_status": "PROVIDER_UNAVAILABLE"
+    },
+    {
+      "id": "provider-non-transient-error-fails-closed",
+      "behavior": "auth失敗など非一時errorはbackoffにも5h上限扱いにもせず、従来どおりWORKER_ERRORでfail closedする",
+      "request": "通常の実装タスク",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": [
+        "README.md"
+      ],
+      "runner_steps": [
+        {"signal": "401 Unauthorized: invalid api key"}
+      ],
+      "expected_models": ["opus"],
+      "expected_packet_status": "IMPLEMENTED",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "active",
+      "must_not_pass": true,
+      "expected_error_status": "WORKER_ERROR",
+      "forbidden_error_status": "PROVIDER_UNAVAILABLE"
+    },
+    {
+      "id": "provider-probe-invalid-response-fails-closed-first-probe",
+      "behavior": "probeがexit 0でも固定疎通応答の契約(本文・usage検証)を通らない偽陽性は一時通信障害と区別し、追加probeのAI costを費やさず初回でprovider-unavailableへfail closedして元task/session/checkpointを保持する。502/503/504/529や明確な一時network errorだけがbackoffを継続する",
+      "request": "通常の実装タスク",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": [
+        "README.md"
+      ],
+      "runner_steps": [
+        {"signal": "API Error: 503 Service Unavailable"}
+      ],
+      "expected_models": ["opus"],
+      "expected_packet_status": "IMPLEMENTED",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "provider-unavailable",
+      "must_not_pass": true,
+      "expected_error_status": "PROVIDER_UNAVAILABLE",
+      "probe_blank": true,
+      "expected_probe_count": 1,
+      "expected_run_count": 1
+    },
+    {
+      "id": "provider-resume-probe-success-resumes-once",
+      "behavior": "provider-unavailableからのresumeはprobe成功後に保存taskを同一sessionへ1回だけ再開し、worker→reviewerの正規routingへ復帰する",
+      "request": "通常の実装タスク",
+      "entry": "resume",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": [
+        "README.md"
+      ],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: done", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: pass", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus", "haiku"],
+      "expected_packet_status": "PASS",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "complete",
+      "must_not_pass": false
+    },
+    {
+      "id": "provider-resume-probe-still-down-zero-full-runs",
+      "behavior": "provider未回復のままのresumeはprobe gateでbackoffし、本taskを一度も実行せずprovider-unavailable状態を再保存する",
+      "request": "通常の実装タスク",
+      "entry": "resume",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": [
+        "README.md"
+      ],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: never used", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus"],
+      "expected_packet_status": "IMPLEMENTED",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "provider-unavailable",
+      "must_not_pass": true,
+      "expected_error_status": "PROVIDER_UNAVAILABLE",
+      "probe_errors": ["API Error: 503 Service Unavailable", "API Error: 503 Service Unavailable", "API Error: 503 Service Unavailable", "API Error: 503 Service Unavailable"],
+      "expected_probe_count": 4,
+      "expected_run_count": 0
     }
   ]
 }

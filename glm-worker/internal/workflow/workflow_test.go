@@ -24,9 +24,12 @@ type runnerStep struct {
 type scriptedRunner struct {
 	steps     []runnerStep
 	probeErrs []error
-	prompts   []string
-	models    []string
-	probes    []string
+	// probeResponsesは成功probeの応答本文。未指定indexは正常応答"ok"へfall backする。
+	probeResponses     []string
+	probeBlankResponse bool
+	prompts            []string
+	models             []string
+	probes             []string
 }
 
 func (r *scriptedRunner) Run(
@@ -63,7 +66,16 @@ func (r *scriptedRunner) Probe(model string) (runner.ProbeResult, error) {
 	if index < len(r.probeErrs) {
 		err = r.probeErrs[index]
 	}
-	return runner.ProbeResult{}, err
+	response := "ok"
+	if r.probeBlankResponse {
+		response = ""
+	} else if index < len(r.probeResponses) {
+		response = r.probeResponses[index]
+	}
+	return runner.ProbeResult{
+		Response: response,
+		Usage:    runner.TokenUsage{InputTokens: 1, OutputTokens: 1},
+	}, err
 }
 
 func implementedPacket(summary string) string {

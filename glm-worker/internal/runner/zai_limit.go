@@ -26,8 +26,10 @@ func DetectZaiFiveHourLimit(path string) (ZaiFiveHourLimit, bool) {
 	if err != nil {
 		return ZaiFiveHourLimit{}, false
 	}
+	return DetectZaiFiveHourLimitText(string(data))
+}
 
-	output := string(data)
+func DetectZaiFiveHourLimitText(output string) (ZaiFiveHourLimit, bool) {
 	if !strings.Contains(output, "Request rejected (429)") {
 		return ZaiFiveHourLimit{}, false
 	}

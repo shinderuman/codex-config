@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 type ProbeResult struct {
@@ -104,7 +105,34 @@ func (r *ClaudeRunner) Probe(model string) (ProbeResult, error) {
 		stderrText, _ := os.ReadFile(stderrPath)
 		return result, fmt.Errorf("probe失敗(%s): %w%s", model, runErr, probeDiagnostic(rawOutputPath, stderrPath, stderrText))
 	}
+	if err := validateProbeResult(result); err != nil {
+		return result, &ProbeInvalidResponseError{Model: model, Reason: err}
+	}
 	return result, nil
+}
+
+// ProbeInvalidResponseErrorはprobe呼出自体は終了したが応答が固定疎通確認の契約を満たさない構成不整合。
+type ProbeInvalidResponseError struct {
+	Model  string
+	Reason error
+}
+
+func (e *ProbeInvalidResponseError) Error() string {
+	return fmt.Sprintf("probe不正応答(%s): %v", e.Model, e.Reason)
+}
+
+func (e *ProbeInvalidResponseError) Unwrap() error {
+	return e.Reason
+}
+
+func validateProbeResult(result ProbeResult) error {
+	if strings.TrimSpace(result.Response) == "" {
+		return fmt.Errorf("応答本文が空です")
+	}
+	if result.Usage.OutputTokens <= 0 {
+		return fmt.Errorf("model usageが出力tokenを含みません(output_tokens=%d)", result.Usage.OutputTokens)
+	}
+	return nil
 }
 
 func probeDiagnostic(rawOutputPath, stderrPath string, stderrText []byte) string {

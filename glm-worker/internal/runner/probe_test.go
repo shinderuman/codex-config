@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -90,6 +91,84 @@ func TestProbeIsolationAndNoSessionPersistence(t *testing.T) {
 	}
 	if !st.Exists("worker.ready") {
 		t.Fatal("probeがworker.readyを変更しました")
+	}
+}
+
+func TestProbeRejectsMalformedSuccessResponses(t *testing.T) {
+	cases := []struct {
+		name    string
+		script  string
+		wantErr string
+		// typedはexit 0でも契約不通過ならProbeInvalidResponseErrorになるかの期待値。
+		typed bool
+	}{
+		{
+			name:    "not json",
+			script:  "#!/bin/sh\nprintf '%s\\n' 'ok'\n",
+			wantErr: "probe不正応答",
+			typed:   true,
+		},
+		{
+			name:    "empty result",
+			script:  "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n",
+			wantErr: "応答本文が空です",
+			typed:   true,
+		},
+		{
+			name:    "blank result",
+			script:  "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"  \\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n",
+			wantErr: "応答本文が空です",
+			typed:   true,
+		},
+		{
+			name:    "zero output tokens",
+			script:  "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}'\n",
+			wantErr: "usageが出力tokenを含みません",
+			typed:   true,
+		},
+		{
+			name:    "is_error true",
+			script:  "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"error\",\"is_error\":true,\"result\":\"API Error: 503\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\nexit 1\n",
+			wantErr: "probe失敗",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if runtime.GOOS == "windows" {
+				t.Skip("shell fixtureはUnix系環境向け")
+			}
+			promptDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(promptDir, "WORKER.md"), []byte("system"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			commandPath := filepath.Join(t.TempDir(), "fake-claude")
+			if err := os.WriteFile(commandPath, []byte(tc.script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			st := newTestStateStore(t)
+			if err := st.Write("task.id", "12345678-aaaa-bbbb-cccc-dddddddddddd"); err != nil {
+				t.Fatal(err)
+			}
+			r := NewClaudeRunner(config.AppConfig{
+				RepoRoot:        t.TempDir(),
+				RepoShort:       "abcdef123456",
+				PromptDir:       promptDir,
+				ClaudeBin:       commandPath,
+				ClaudeConfigDir: filepath.Join(t.TempDir(), "claude-home"),
+			}, st)
+
+			_, err := r.Probe("opus")
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v, want substring %q", err, tc.wantErr)
+			}
+			var typed *ProbeInvalidResponseError
+			if tc.typed && !errors.As(err, &typed) {
+				t.Fatalf("検証不通過はProbeInvalidResponseErrorであるべき: %v", err)
+			}
+			if !tc.typed && errors.As(err, &typed) {
+				t.Fatalf("このcaseはtyped不正応答でないべき: %v", err)
+			}
+		})
 	}
 }
 

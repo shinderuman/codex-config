@@ -19,6 +19,8 @@ import (
 type scenarioStep struct {
 	Lines []string `json:"lines"`
 	Error string   `json:"error"`
+	// Signalは出力fileへ書くprovider障害signal本文。packet行とは共存しない。
+	Signal string `json:"signal,omitempty"`
 }
 
 type scenarioDoc struct {
@@ -34,6 +36,18 @@ type scenarioDoc struct {
 	ExpectedPacketRisk   string         `json:"expected_packet_risk"`
 	ExpectedTaskStatus   string         `json:"expected_task_status"`
 	MustNotPass          bool           `json:"must_not_pass"`
+	// ExpectedErrorStatusはerror terminal終端scenarioの期待STATUS。設定時はpacket終端を検証しない。
+	ExpectedErrorStatus string `json:"expected_error_status,omitempty"`
+	// ExpectedProbeCountはprobe呼出の期待回数。
+	ExpectedProbeCount int `json:"expected_probe_count,omitempty"`
+	// ExpectedRunCountは本task Run呼出の期待回数。未設定時はrunner_steps通り検証する。
+	ExpectedRunCount *int `json:"expected_run_count,omitempty"`
+	// ForbiddenErrorStatusはerror terminalの誤分類検出用の排他STATUS。
+	ForbiddenErrorStatus string `json:"forbidden_error_status,omitempty"`
+	// ProbeErrorsはprobe呼出へ順に返すerror本文。空要素は成功probeを表す。
+	ProbeErrors []string `json:"probe_errors,omitempty"`
+	// ProbeBlankは成功probeが空応答を返す偽陽性を再現する。
+	ProbeBlank bool `json:"probe_blank,omitempty"`
 	// ReviewerMutatesWorktreeはreviewerがBash相当でrepositoryを変更するscenarioで有効化する。
 	ReviewerMutatesWorktree bool `json:"reviewer_mutates_worktree,omitempty"`
 }
@@ -112,10 +126,11 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 		return fmt.Errorf("manifest version must be 1: got %d", mf.Version)
 	}
 
-	knownEntry := map[string]bool{"new_task": true}
+	knownEntry := map[string]bool{"new_task": true, "resume": true}
 	knownStatus := map[string]bool{"IMPLEMENTED": true, "PASS": true, "FIX_REQUIRED": true, "NEEDS_SOL_DECISION": true, "NEEDS_SOL_REVIEW": true}
+	knownError := map[string]bool{"PROVIDER_UNAVAILABLE": true, "RATE_LIMITED": true, "WORKER_ERROR": true}
 	knownRisk := map[string]bool{"LOW": true, "HIGH": true}
-	knownTask := map[string]bool{"active": true, "waiting-decision": true, "waiting-sol-review": true, "complete": true, "rate-limited": true}
+	knownTask := map[string]bool{"active": true, "waiting-decision": true, "waiting-sol-review": true, "complete": true, "rate-limited": true, "provider-unavailable": true}
 
 	seenID := make(map[string]bool, len(sc.Scenarios))
 	for _, s := range sc.Scenarios {
@@ -156,17 +171,38 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 		if s.MustNotPass && s.ExpectedPacketStatus == "PASS" {
 			return fmt.Errorf("scenario %s must_not_pass with expected PASS", s.ID)
 		}
+		if s.ExpectedErrorStatus != "" {
+			if !knownError[s.ExpectedErrorStatus] {
+				return fmt.Errorf("scenario %s unknown expected error status %q", s.ID, s.ExpectedErrorStatus)
+			}
+			if s.ForbiddenErrorStatus != "" && s.ForbiddenErrorStatus == s.ExpectedErrorStatus {
+				return fmt.Errorf("scenario %s forbidden error status equals expected", s.ID)
+			}
+		}
+		if s.ForbiddenErrorStatus != "" && !knownError[s.ForbiddenErrorStatus] {
+			return fmt.Errorf("scenario %s unknown forbidden error status %q", s.ID, s.ForbiddenErrorStatus)
+		}
+		if s.Entry == "resume" && s.ExpectedErrorStatus == "" && s.RunnerSteps[len(s.RunnerSteps)-1].Error == "" && s.RunnerSteps[len(s.RunnerSteps)-1].Signal == "" && len(s.RunnerSteps[len(s.RunnerSteps)-1].Lines) == 0 {
+			return fmt.Errorf("scenario %s empty terminal step", s.ID)
+		}
 		if len(s.RunnerSteps) != len(s.ExpectedModels) {
 			return fmt.Errorf("scenario %s runner_steps/expected_models count mismatch: %d vs %d", s.ID, len(s.RunnerSteps), len(s.ExpectedModels))
 		}
 		for i, step := range s.RunnerSteps {
 			hasLines := len(step.Lines) > 0
 			hasErr := step.Error != ""
-			if !hasLines && !hasErr {
+			hasSignal := step.Signal != ""
+			kinds := 0
+			for _, present := range []bool{hasLines, hasErr, hasSignal} {
+				if present {
+					kinds++
+				}
+			}
+			if kinds == 0 {
 				return fmt.Errorf("scenario %s step %d empty", s.ID, i)
 			}
-			if hasLines && hasErr {
-				return fmt.Errorf("scenario %s step %d has both packet and error", s.ID, i)
+			if kinds > 1 {
+				return fmt.Errorf("scenario %s step %d has multiple terminal kinds", s.ID, i)
 			}
 			if hasLines {
 				if err := packet.Validate(packet.FromLines(step.Lines)); err != nil {
@@ -316,7 +352,7 @@ func TestScenarioCorpusContractRejectsInvalid(t *testing.T) {
 		}, "duplicate scenario ID"},
 		{"empty behavior", func(sc *scenarioFile, _ *manifestFile) { sc.Scenarios[0].Behavior = "" }, "behavior empty"},
 		{"empty request", func(sc *scenarioFile, _ *manifestFile) { sc.Scenarios[0].Request = "" }, "request empty"},
-		{"unknown entry", func(sc *scenarioFile, _ *manifestFile) { sc.Scenarios[0].Entry = "resume" }, "unknown entry"},
+		{"unknown entry", func(sc *scenarioFile, _ *manifestFile) { sc.Scenarios[0].Entry = "decision" }, "unknown entry"},
 		{"empty instruction_files", func(sc *scenarioFile, _ *manifestFile) { sc.Scenarios[0].InstructionFiles = nil }, "instruction_files empty"},
 		{"empty runner_steps", func(sc *scenarioFile, _ *manifestFile) { sc.Scenarios[0].RunnerSteps = nil }, "runner_steps empty"},
 		{"empty expected_models", func(sc *scenarioFile, _ *manifestFile) { sc.Scenarios[0].ExpectedModels = nil }, "expected_models empty"},
@@ -330,7 +366,7 @@ func TestScenarioCorpusContractRejectsInvalid(t *testing.T) {
 		{"empty step", func(sc *scenarioFile, _ *manifestFile) { sc.Scenarios[0].RunnerSteps[0] = scenarioStep{} }, "step 0 empty"},
 		{"step both packet and error", func(sc *scenarioFile, _ *manifestFile) {
 			sc.Scenarios[0].RunnerSteps[0].Error = "boom"
-		}, "both packet and error"},
+		}, "multiple terminal kinds"},
 		{"step invalid packet", func(sc *scenarioFile, _ *manifestFile) {
 			sc.Scenarios[0].RunnerSteps[0] = scenarioStep{Lines: []string{"STATUS: PASS", "RISK: LOW", "SUMMARY: s"}}
 		}, "invalid packet"},
@@ -381,6 +417,10 @@ func stepsFromScenario(doc scenarioDoc) []runnerStep {
 		if s.Error != "" {
 			runErr = errors.New(s.Error)
 		}
+		if s.Signal != "" {
+			output = s.Signal
+			runErr = errors.New("exit status 1")
+		}
 		steps[i] = runnerStep{output: output, runErr: runErr}
 	}
 	return steps
@@ -405,6 +445,15 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 	t.Helper()
 	st := newStateStoreT(t)
 	r := &scriptedRunner{steps: stepsFromScenario(doc)}
+	if doc.ProbeErrors != nil {
+		r.probeErrs = make([]error, len(doc.ProbeErrors))
+		for i, text := range doc.ProbeErrors {
+			if text != "" {
+				r.probeErrs[i] = errors.New(text)
+			}
+		}
+	}
+	r.probeBlankResponse = doc.ProbeBlank
 	w := newWorkflowT(t, st, r)
 	buf := &bytes.Buffer{}
 	w.output = buf
@@ -427,11 +476,36 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 		w.collectChangedPaths = func(string, string) ([]string, error) { return changedPaths, nil }
 	}
 
+	var scenarioErr error
 	switch doc.Entry {
 	case "new_task":
-		if err := w.ExecuteNewTask(doc.Request); err != nil {
-			t.Fatalf("ExecuteNewTask: %v", err)
+		scenarioErr = w.ExecuteNewTask(doc.Request)
+	case "resume":
+		if err := st.Write("last-request", doc.Request); err != nil {
+			t.Fatal(err)
 		}
+		// new_taskのsignal stepで停止状態を自前で作る場合を除き、provider-unavailableをseedする。
+		if len(doc.RunnerSteps) > 0 && doc.RunnerSteps[0].Signal == "" {
+			if err := st.SaveResumeCheckpoint(state.ResumeCheckpoint{
+				Stage:                             state.ResumeStageWorker,
+				Phase:                             "worker-new",
+				Role:                              state.WorkerRole,
+				Model:                             "opus",
+				Effort:                            "high",
+				Prompt:                            "p",
+				OriginalPrompt:                    "p",
+				Request:                           doc.Request,
+				ProviderUnavailable:               true,
+				ProviderUnavailableClassification: "http-503",
+				ProviderUnavailableProbes:         4,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.SetTaskStatus(state.TaskStatusProviderUnavailable); err != nil {
+				t.Fatal(err)
+			}
+		}
+		scenarioErr = w.ExecuteResume()
 	default:
 		t.Fatalf("unsupported entry %q for scenario %s", doc.Entry, doc.ID)
 	}
@@ -444,40 +518,70 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 			t.Fatalf("reviewer mutationが保持されていません: %q %v", content, err)
 		}
 	}
-	if len(r.prompts) == 0 {
+	if len(r.prompts) == 0 && doc.ExpectedProbeCount == 0 {
 		t.Fatal("production runner was not invoked")
 	}
 	for i, p := range r.prompts {
 		isReformat := strings.Contains(p, "PACKETだけを再出力")
 		hasRequest := strings.Contains(p, doc.Request)
 		hasMode := strings.Contains(p, "MODE:") || strings.Contains(p, "REVIEW_MODE:")
-		if !(hasMode || isReformat) {
+		// resume promptは保存済み前回指示の再送であり、seed時のrequest文言は含まない。
+		isResume := strings.Contains(p, "再開してください")
+		if !(hasMode || isReformat || isResume) {
 			t.Fatalf("prompt %d is not a production-generated prompt:\n%s", i, p)
 		}
-		if !isReformat && !hasRequest {
+		if !isReformat && !isResume && !hasRequest {
 			t.Fatalf("prompt %d does not transmit USER_REQUEST:\n%s", i, p)
 		}
 	}
-	if !strings.Contains(r.prompts[0], "MODE:") || !strings.Contains(r.prompts[0], "USER_REQUEST:") {
-		t.Fatalf("worker prompt is not a production NEW_TASK prompt:\n%s", r.prompts[0])
+	if len(r.prompts) > 0 && !strings.Contains(r.prompts[0], "MODE:") && !strings.Contains(r.prompts[0], "再開してください") {
+		t.Fatalf("worker prompt is not a production NEW_TASK/RESUME prompt:\n%s", r.prompts[0])
 	}
 
-	if got, want := strings.Join(r.models, ","), strings.Join(doc.ExpectedModels, ","); got != want {
-		t.Fatalf("model routing = %q want %q", got, want)
+	if doc.ExpectedRunCount != nil {
+		if len(r.prompts) != *doc.ExpectedRunCount {
+			t.Fatalf("本task Run回数 = %d want %d", len(r.prompts), *doc.ExpectedRunCount)
+		}
+	}
+	if doc.ExpectedProbeCount > 0 {
+		if len(r.probes) != doc.ExpectedProbeCount {
+			t.Fatalf("probe回数 = %d want %d", len(r.probes), doc.ExpectedProbeCount)
+		}
+	}
+	// expected_run_count設定時は呼出回数自体を検証済みのためmodel列は検証しない。
+	if doc.ExpectedRunCount == nil {
+		if got, want := strings.Join(r.models, ","), strings.Join(doc.ExpectedModels, ","); got != want {
+			t.Fatalf("model routing = %q want %q", got, want)
+		}
 	}
 
-	pkt := lastPacketFromOutput(t, buf.String())
-	if err := packet.Validate(pkt); err != nil {
-		t.Fatalf("emitted packet fails production contract: %v", err)
-	}
-	if pkt.Status() != doc.ExpectedPacketStatus {
-		t.Fatalf("packet status = %q want %q", pkt.Status(), doc.ExpectedPacketStatus)
-	}
-	if pkt.Risk() != doc.ExpectedPacketRisk {
-		t.Fatalf("packet risk = %q want %q", pkt.Risk(), doc.ExpectedPacketRisk)
-	}
-	if doc.MustNotPass && pkt.Status() == "PASS" {
-		t.Fatalf("must_not_pass scenario ended in PASS")
+	if doc.ExpectedErrorStatus != "" {
+		if scenarioErr == nil {
+			t.Fatalf("expected error terminal %s, got success with packet:\n%s", doc.ExpectedErrorStatus, buf.String())
+		}
+		if !strings.Contains(scenarioErr.Error(), "STATUS: "+doc.ExpectedErrorStatus) {
+			t.Fatalf("error terminal = %q want STATUS: %s\n%s", scenarioErr.Error(), doc.ExpectedErrorStatus, scenarioErr)
+		}
+		if doc.ForbiddenErrorStatus != "" && strings.Contains(scenarioErr.Error(), "STATUS: "+doc.ForbiddenErrorStatus) {
+			t.Fatalf("error terminal must not be %s:\n%s", doc.ForbiddenErrorStatus, scenarioErr)
+		}
+	} else {
+		if scenarioErr != nil {
+			t.Fatalf("scenario execution error: %v", scenarioErr)
+		}
+		pkt := lastPacketFromOutput(t, buf.String())
+		if err := packet.Validate(pkt); err != nil {
+			t.Fatalf("emitted packet fails production contract: %v", err)
+		}
+		if pkt.Status() != doc.ExpectedPacketStatus {
+			t.Fatalf("packet status = %q want %q", pkt.Status(), doc.ExpectedPacketStatus)
+		}
+		if pkt.Risk() != doc.ExpectedPacketRisk {
+			t.Fatalf("packet risk = %q want %q", pkt.Risk(), doc.ExpectedPacketRisk)
+		}
+		if doc.MustNotPass && pkt.Status() == "PASS" {
+			t.Fatalf("must_not_pass scenario ended in PASS")
+		}
 	}
 	if got := string(st.TaskStatus()); got != doc.ExpectedTaskStatus {
 		t.Fatalf("task status = %q want %q", got, doc.ExpectedTaskStatus)

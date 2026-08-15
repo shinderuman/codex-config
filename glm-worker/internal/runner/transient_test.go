@@ -72,6 +72,37 @@ func TestReadTransientSignalMissingFile(t *testing.T) {
 	}
 }
 
+// 共通分類入口は5h上限→transient→非一時の順で排他的に判定する。
+func TestClassifyProviderFailureTextExclusive(t *testing.T) {
+	fiveHour := "API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour. Your limit will reset at 2026-07-22 14:06:34]"
+	tests := []struct {
+		name       string
+		text       string
+		wantKind   string
+		wantDetail string
+	}{
+		{"zai 5h limit", fiveHour, ProviderFailureZaiFiveHour, ""},
+		// 5h上限本文に503等の別signalが混在しても5h上限が優先する。
+		{"zai 5h with mixed 503", fiveHour + " upstream 503", ProviderFailureZaiFiveHour, ""},
+		{"http 502", "API Error: 502 Bad Gateway", ProviderFailureTransient, "http-502"},
+		{"network dial", "dial tcp: lookup api.z.ai: no such host", ProviderFailureTransient, "network:dial tcp"},
+		{"auth 401", "401 Unauthorized", ProviderFailureFatal, ""},
+		{"unknown", "boom fatal", ProviderFailureFatal, ""},
+		{"empty", "", ProviderFailureFatal, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ClassifyProviderFailureText(tt.text)
+			if got.Kind != tt.wantKind {
+				t.Fatalf("ClassifyProviderFailureText(%q) kind = %q want %q", tt.text, got.Kind, tt.wantKind)
+			}
+			if tt.wantDetail != "" && got.Detail != tt.wantDetail {
+				t.Fatalf("ClassifyProviderFailureText(%q) detail = %q want %q", tt.text, got.Detail, tt.wantDetail)
+			}
+		})
+	}
+}
+
 func TestProviderUnavailableErrorFormat(t *testing.T) {
 	err := &ProviderUnavailableError{
 		Phase:          "worker-new",

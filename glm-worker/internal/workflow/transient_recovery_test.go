@@ -156,8 +156,7 @@ func TestRecoveryStopsAtDeadline(t *testing.T) {
 	}
 	w, clock := newRecoveryWorkflowT(t, st, r)
 	w.temp = t.TempDir()
-	// recoveryStart基準の3h deadlineをbackoff中に到達させるため、各sleepで実時間より大きく時間を進める。
-	// identity jitterでもschedule合計(155m)では通常deadlineに届かないため、sleepを拡大してdeadline経路へ入れる。
+	// schedule合計(155m)ではdeadlineに届かないため、sleepあたり90分進めてdeadline経路へ入れる。
 	bigStep := 90 * time.Minute
 	w.sleep = func(d time.Duration) {
 		clock.sleeps = append(clock.sleeps, d)
@@ -499,5 +498,165 @@ func TestResumeProbeGateFailClosedOnNonTransientProbe(t *testing.T) {
 	}
 	if _, cerr := st.LoadResumeCheckpoint(); cerr == nil {
 		t.Fatal("fail closed時はresume checkpointがclearされるべき")
+	}
+}
+
+// 回復試行中の5h上限到達はtransient継続せずRATE_LIMITEDへ移行する。
+func TestRecoveryHitsFiveHourLimitSavesRateLimited(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{
+		steps: []runnerStep{
+			{output: "API Error: 503 Service Unavailable", runErr: errors.New("exit status 1")},
+			{output: zaiFiveHourLog, runErr: errors.New("exit status 1")},
+		},
+		probeErrs: []error{nil},
+	}
+	w, _ := newRecoveryWorkflowT(t, st, r)
+	w.temp = t.TempDir()
+	w.config.RepoRoot = "/repo"
+	w.config.RepoShort = "testrepo1234"
+
+	_, err := w.runModel(workerCheckpoint())
+	if err == nil || !strings.Contains(err.Error(), "STATUS: RATE_LIMITED") {
+		t.Fatalf("RATE_LIMITEDを期待: %v", err)
+	}
+	var pErr *runner.ProviderUnavailableError
+	if errors.As(err, &pErr) {
+		t.Fatalf("5h上限到達時はprovider-unavailableでない: %v", err)
+	}
+	cp, cerr := st.LoadResumeCheckpoint()
+	if cerr != nil || !cp.RateLimited || cp.ProviderUnavailable {
+		t.Fatalf("checkpoint = %#v err=%v", cp, cerr)
+	}
+	if st.TaskStatus() != state.TaskStatusRateLimited {
+		t.Fatalf("status = %q", st.TaskStatus())
+	}
+	if len(r.probes) != 1 || len(r.prompts) != 2 {
+		t.Fatalf("probes=%d prompts=%d", len(r.probes), len(r.prompts))
+	}
+}
+
+// probe契約不通過(空応答)は初回でfail closedし元taskを保持する。
+func TestRecoveryProbeBlankResponseFailsClosedImmediately(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{
+		steps:              []runnerStep{{output: "API Error: 503 Service Unavailable", runErr: errors.New("exit status 1")}},
+		probeBlankResponse: true,
+	}
+	w, clock := newRecoveryWorkflowT(t, st, r)
+	w.temp = t.TempDir()
+
+	_, err := w.runModel(workerCheckpoint())
+	var pErr *runner.ProviderUnavailableError
+	if !errors.As(err, &pErr) {
+		t.Fatalf("ProviderUnavailableErrorを期待: %v", err)
+	}
+	if pErr.Probes != 1 {
+		t.Fatalf("契約不通過は1回のprobeでfail closedすべき: probes=%d", pErr.Probes)
+	}
+	if pErr.Classification != runner.ProbeContractFailure {
+		t.Fatalf("classification = %q want %q", pErr.Classification, runner.ProbeContractFailure)
+	}
+	// 初回probe前の待機(5分)はschedule通り1回だけ発生し、以降のbackoff待機は行わない。
+	if len(clock.sleeps) != 1 || clock.sleeps[0] != transientBackoffSchedule[0] {
+		t.Fatalf("初回待機後の追加backoffを行うべきでない: %v", clock.sleeps)
+	}
+	if len(r.prompts) != 1 {
+		t.Fatalf("本task resumeは1回(初回)だけのべき: %d", len(r.prompts))
+	}
+	cp, cerr := st.LoadResumeCheckpoint()
+	if cerr != nil || !cp.ProviderUnavailable || cp.ProviderUnavailableClassification != runner.ProbeContractFailure {
+		t.Fatalf("checkpoint = %#v err=%v", cp, cerr)
+	}
+	if !st.Exists("worker.ready") {
+		t.Fatal("fail closedでも同一session/checkpointを保持すべき")
+	}
+}
+
+// --resumeのprobe gateでも空応答は回復済みと認めない。
+func TestResumeProbeGateBlankResponseNotRecovered(t *testing.T) {
+	st := newStateStoreT(t)
+	seedProviderUnavailableCheckpoint(t, st)
+	r := &scriptedRunner{
+		steps:              []runnerStep{{output: implementedPacket("never used")}},
+		probeBlankResponse: true,
+	}
+	w, _ := newRecoveryWorkflowT(t, st, r)
+
+	err := w.ExecuteResume()
+	var pErr *runner.ProviderUnavailableError
+	if !errors.As(err, &pErr) {
+		t.Fatalf("ProviderUnavailableErrorを期待: %v", err)
+	}
+	if len(r.prompts) != 0 {
+		t.Fatalf("本task Runが0回であるべき: %d", len(r.prompts))
+	}
+	if st.TaskStatus() != state.TaskStatusProviderUnavailable {
+		t.Fatalf("status = %q", st.TaskStatus())
+	}
+}
+
+// typedProbeRunnerはreal runnerと同じProbeInvalidResponseErrorを返すfake。
+type typedProbeRunner struct {
+	scriptedRunner
+}
+
+func (r *typedProbeRunner) Probe(model string) (runner.ProbeResult, error) {
+	r.probes = append(r.probes, model)
+	return runner.ProbeResult{}, &runner.ProbeInvalidResponseError{
+		Model:  model,
+		Reason: errors.New("応答本文が空です"),
+	}
+}
+
+func TestRecoveryTypedInvalidResponseErrorFailsClosed(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &typedProbeRunner{scriptedRunner{
+		steps: []runnerStep{{output: "API Error: 503 Service Unavailable", runErr: errors.New("exit status 1")}},
+	}}
+	w, clock := newRecoveryWorkflowT(t, st, &r.scriptedRunner)
+	w.runner = r
+	w.temp = t.TempDir()
+
+	_, err := w.runModel(workerCheckpoint())
+	var pErr *runner.ProviderUnavailableError
+	if !errors.As(err, &pErr) {
+		t.Fatalf("ProviderUnavailableErrorを期待: %v", err)
+	}
+	if pErr.Probes != 1 || pErr.Classification != runner.ProbeContractFailure {
+		t.Fatalf("typed不正応答は1回でfail closedすべき: probes=%d class=%q", pErr.Probes, pErr.Classification)
+	}
+	if len(clock.sleeps) != 1 || len(r.probes) != 1 {
+		t.Fatalf("追加probe/backoffを行うべきでない: sleeps=%d probes=%d", len(clock.sleeps), len(r.probes))
+	}
+	if _, cerr := st.LoadResumeCheckpoint(); cerr != nil || !st.Exists("worker.ready") {
+		t.Fatalf("fail closedで保存taskが失われた: %v", cerr)
+	}
+	if st.TaskStatus() != state.TaskStatusProviderUnavailable {
+		t.Fatalf("status = %q", st.TaskStatus())
+	}
+}
+
+// provider-unavailable resume中の5h上限到達はrate-limited状態で上書きする。
+func TestResumeFromProviderUnavailableHitsFiveHourLimit(t *testing.T) {
+	st := newStateStoreT(t)
+	seedProviderUnavailableCheckpoint(t, st)
+	r := &scriptedRunner{steps: []runnerStep{
+		{output: zaiFiveHourLog, runErr: errors.New("exit status 1")},
+	}}
+	w := newWorkflowT(t, st, r)
+	w.config.RepoRoot = "/repo"
+	w.config.RepoShort = "testrepo1234"
+
+	err := w.ExecuteResume()
+	if err == nil || !strings.Contains(err.Error(), "STATUS: RATE_LIMITED") {
+		t.Fatalf("RATE_LIMITEDを期待: %v", err)
+	}
+	cp, cerr := st.LoadResumeCheckpoint()
+	if cerr != nil || !cp.RateLimited || cp.ProviderUnavailable {
+		t.Fatalf("checkpoint = %#v err=%v", cp, cerr)
+	}
+	if st.TaskStatus() != state.TaskStatusRateLimited {
+		t.Fatalf("status = %q", st.TaskStatus())
 	}
 }

@@ -36,7 +36,13 @@
         "orchestrator-critical-low-self-declare",
         "low-risk-non-critical-pass",
         "reviewer-worktree-mutation-rejects-pass",
-        "reviewer-worktree-mutation-rejects-fix-required"
+        "reviewer-worktree-mutation-rejects-fix-required",
+        "provider-transient-exhausts-to-provider-unavailable",
+        "provider-zai-5h-limit-routes-to-rate-limited",
+        "provider-non-transient-error-fails-closed",
+        "provider-probe-invalid-response-fails-closed-first-probe",
+        "provider-resume-probe-success-resumes-once",
+        "provider-resume-probe-still-down-zero-full-runs"
       ]
     },
     {

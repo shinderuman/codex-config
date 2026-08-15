@@ -55,6 +55,32 @@ func ReadTransientSignal(outputPath string) string {
 	return string(data)
 }
 
+// ProviderFailureClassはKindが常に1つの停止理由だけを表す排他的な分類結果。
+type ProviderFailureClass struct {
+	Kind          string
+	Detail        string
+	FiveHourLimit ZaiFiveHourLimit
+}
+
+const (
+	ProviderFailureZaiFiveHour = "zai-5h"
+	ProviderFailureTransient   = "transient"
+	ProviderFailureFatal       = "fatal"
+	// ProbeContractFailureはprobe応答の契約違反で、transientとは再試行可否が逆の排他的分類。
+	ProbeContractFailure = "probe-contract"
+)
+
+// ClassifyProviderFailureTextは出力本文を5h上限→transient→fatalの順で排他的に分類する。
+func ClassifyProviderFailureText(text string) ProviderFailureClass {
+	if limit, ok := DetectZaiFiveHourLimitText(text); ok {
+		return ProviderFailureClass{Kind: ProviderFailureZaiFiveHour, FiveHourLimit: limit}
+	}
+	if classification, transient := ClassifyTransientFailure(text); transient {
+		return ProviderFailureClass{Kind: ProviderFailureTransient, Detail: classification}
+	}
+	return ProviderFailureClass{Kind: ProviderFailureFatal}
+}
+
 // ProviderUnavailableErrorは一時障害回復がprobe上限・deadlineに到達し、
 // WORKER_ERRORやRATE_LIMITEDとは独立した再開可能な停止状態へ移行したことを表す。
 // 5h上限のようなCodex heartbeat自動wakeは設定せず、利用者が--resumeで再開する。
