@@ -35,10 +35,10 @@ var transientNetworkSignals = []string{
 var probeFatalHTTPPattern = regexp.MustCompile(`(?i)\b(?:http|status|error|api)[^\n]{0,24}\b(?:400|401|403)\b|\b(?:400|401|403)\b[^\n]{0,24}\b(?:bad request|unauthorized|forbidden)\b`)
 
 // probeFatalSignalsはretry不能なauth/config障害の明示的な文字列信号。
-// authentication単独等の一般語は文脈で容易に誤検出するため、明示表現だけを列挙する。
+// unauthorized/forbidden/authentication等の文脈なし一般語は一般文・semantic-invalid応答で
+// fatalへ誤検出しcheckpoint/sessionを破棄させるため列挙しない。裸のunauthorized/forbiddenは
+// probeFatalHTTPPatternが400/401/403との組合せだけで検出する。
 var probeFatalSignals = []string{
-	"unauthorized",
-	"forbidden",
 	"invalid api key",
 	"invalid_api_key",
 	"invalid x-api-key",

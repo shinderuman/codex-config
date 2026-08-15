@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -140,15 +141,19 @@ func TestProviderUnavailableErrorFormat(t *testing.T) {
 // semantic invalid(default fatalへ落ちる)や裸の数字・一般語とは区別する。
 func TestDetectProbeFatalSignal(t *testing.T) {
 	fatal := []string{
+		"401 Unauthorized",
+		"403 Forbidden",
 		"401 Unauthorized: invalid api key",
 		"HTTP/1.1 403 Forbidden",
 		"400 Bad Request: invalid_request_error",
 		"API Error: 401 · invalid_api_key",
 		"status code 403 returned",
+		"invalid api key",
 		"invalid x-api-key provided",
 		"API key not valid. Please renew.",
 		"authentication failed for this request",
 		"authentication required before continuing",
+		"permission denied for this credential",
 		"invalid model: glm-unknown",
 		"model not found: glm-unknown",
 	}
@@ -168,10 +173,40 @@ func TestDetectProbeFatalSignal(t *testing.T) {
 		"authentication service unavailable",
 		"connecting to localhost:4001 failed",
 		"metrics: 4003 requests",
+		"unauthorized",
+		"Unauthorized",
+		"forbidden",
+		"Forbidden",
+		"This request is unauthorized for the current account",
+		"Access to this model is forbidden during maintenance",
+		"the caller was unauthorized and forbidden from reading the repository",
 	}
 	for _, text := range notFatal {
 		if DetectProbeFatalSignal(text) {
 			t.Fatalf("semantic invalid・裸の数字・一般語をfatalへ誤分類: %q", text)
+		}
+	}
+}
+
+// production matcherの全列挙signalを契約へ照合する。文脈なし一般語や数字だけの登録と、
+// 実際には一度も検出されない死にsignalの再登録を防ぐ。代表caseの存在で列挙値の妥当性を
+// 代替しない。
+func TestProbeFatalSignalsEnumerationMatchesContract(t *testing.T) {
+	bareWords := map[string]bool{
+		"unauthorized":   true,
+		"forbidden":      true,
+		"authentication": true,
+		"permission":     true,
+	}
+	for _, signal := range probeFatalSignals {
+		if bareWords[signal] {
+			t.Fatalf("probeFatalSignalsに文脈なし一般語%qを登録できない", signal)
+		}
+		if _, err := strconv.Atoi(strings.TrimSpace(signal)); err == nil {
+			t.Fatalf("probeFatalSignalsに数字だけのsignal %qを登録できない", signal)
+		}
+		if !DetectProbeFatalSignal(signal) {
+			t.Fatalf("列挙signal %qが実際にはfatal検出されない", signal)
 		}
 	}
 }

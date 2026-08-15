@@ -1154,3 +1154,114 @@ func TestRecoveryProbeMixedTransientAuthWordRetriesAsTransient(t *testing.T) {
 		t.Fatal("回復成功時はresume checkpointがclearされるべき")
 	}
 }
+
+// probe応答本文に裸のunauthorized/forbiddenを含むsemantic invalidはfatal誤判定せず、
+// 通常のprobe-contract失敗としてbackoff/retryし上限でprovider-unavailableへ保存する。
+// false positiveでresume checkpointとworker sessionを破棄しない。
+func TestRecoveryProbeBareAuthWordStaysProbeContract(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{
+		steps: []runnerStep{{output: "API Error: 503 Service Unavailable", runErr: errors.New("exit status 1")}},
+		probeResponses: []string{
+			"This request is unauthorized for the current account",
+			"Access to this model is forbidden during maintenance",
+			"This request is unauthorized for the current account",
+			"Access to this model is forbidden during maintenance",
+		},
+		probeIsError: true,
+	}
+	w, clock := newRecoveryWorkflowT(t, st, r)
+	w.temp = t.TempDir()
+
+	_, err := w.runModel(workerCheckpoint())
+	var pErr *runner.ProviderUnavailableError
+	if !errors.As(err, &pErr) {
+		t.Fatalf("裸語semantic invalidはWORKER_ERROR/fail-closedでなくprovider-unavailableへ: %v", err)
+	}
+	if pErr.Classification != runner.ProbeContractFailure || pErr.Probes != 4 {
+		t.Fatalf("classification/probes = %q/%d", pErr.Classification, pErr.Probes)
+	}
+	if !equalDurations(clock.sleeps, transientBackoffSchedule) {
+		t.Fatalf("backoff = %v want %v", clock.sleeps, transientBackoffSchedule)
+	}
+	if len(r.prompts) != 1 {
+		t.Fatalf("本task resumeは1回(初回)だけのべき: %d", len(r.prompts))
+	}
+	cp, cerr := st.LoadResumeCheckpoint()
+	if cerr != nil || !cp.ProviderUnavailable || cp.ProviderUnavailableClassification != runner.ProbeContractFailure ||
+		cp.ProviderUnavailableProbes != 4 || cp.RateLimited {
+		t.Fatalf("checkpoint = %#v err=%v", cp, cerr)
+	}
+	if !st.Exists("worker.ready") {
+		t.Fatal("停止時も同一session/checkpointを保持すべき: worker.readyが無い")
+	}
+	if st.TaskStatus() != state.TaskStatusProviderUnavailable {
+		t.Fatalf("status = %q", st.TaskStatus())
+	}
+}
+
+// provider-unavailable resumeのprobe gateでも裸のunauthorized/forbidden本文はfatalとせず、
+// probe上限でprovider-unavailableを再保存しresume checkpointとworker sessionを保持する。
+func TestResumeProbeGateBareAuthWordStaysUnavailable(t *testing.T) {
+	st := newStateStoreT(t)
+	seedProviderUnavailableCheckpoint(t, st)
+	r := &scriptedRunner{
+		steps: []runnerStep{{output: implementedPacket("never used")}},
+		probeResponses: []string{
+			"This request is unauthorized for the current account",
+			"Access to this model is forbidden during maintenance",
+			"This request is unauthorized for the current account",
+			"Access to this model is forbidden during maintenance",
+		},
+		probeIsError: true,
+	}
+	w, _ := newRecoveryWorkflowT(t, st, r)
+
+	err := w.ExecuteResume()
+	var pErr *runner.ProviderUnavailableError
+	if !errors.As(err, &pErr) {
+		t.Fatalf("ProviderUnavailableErrorを期待: %v", err)
+	}
+	if pErr.Classification != runner.ProbeContractFailure || pErr.Probes != 4 {
+		t.Fatalf("classification/probes = %q/%d", pErr.Classification, pErr.Probes)
+	}
+	if len(r.prompts) != 0 || len(r.probes) != 4 {
+		t.Fatalf("本task resumeも追加probe上限を超えない: prompts=%d probes=%d", len(r.prompts), len(r.probes))
+	}
+	cp, cerr := st.LoadResumeCheckpoint()
+	if cerr != nil || !cp.ProviderUnavailable || cp.ProviderUnavailableClassification != runner.ProbeContractFailure ||
+		cp.ProviderUnavailableProbes != 4 {
+		t.Fatalf("checkpoint = %#v err=%v", cp, cerr)
+	}
+	if st.TaskStatus() != state.TaskStatusProviderUnavailable {
+		t.Fatalf("status = %q", st.TaskStatus())
+	}
+}
+
+// 裸語をfatalから除外しても403+Forbidden等のstatus組合せは明示的auth信号のままで、
+// checkpoint clear・unready session remove・WORKER_ERRORへ従来どおりfail closedする。
+func TestRecoveryProbeStatusAuthPhraseFailsClosed(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{
+		steps:          []runnerStep{{output: "API Error: 503 Service Unavailable", runErr: errors.New("exit status 1")}},
+		probeResponses: []string{"403 Forbidden"},
+		probeIsError:   true,
+	}
+	w, _ := newRecoveryWorkflowT(t, st, r)
+	w.temp = t.TempDir()
+
+	_, err := w.runModel(workerCheckpoint())
+	if err == nil || !strings.Contains(err.Error(), "STATUS: WORKER_ERROR") {
+		t.Fatalf("WORKER_ERRORを期待: %v", err)
+	}
+	var pErr *runner.ProviderUnavailableError
+	if errors.As(err, &pErr) {
+		t.Fatalf("status組合せauth信号はprovider-unavailableでない: %v", err)
+	}
+	if len(r.probes) != 1 || len(r.prompts) != 1 {
+		t.Fatalf("追加probeも本task再開もしない: probes=%d prompts=%d", len(r.probes), len(r.prompts))
+	}
+	if _, cerr := st.LoadResumeCheckpoint(); cerr == nil {
+		t.Fatal("fail closed時はresume checkpointがclearされるべき")
+	}
+}
