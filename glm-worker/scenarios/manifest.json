@@ -119,22 +119,37 @@
     },
     {
       "path": "codex/AGENTS.md",
-      "sha256": "d0f1973867f583bcff3d399414a91a43580ed4367fcd0b7835c3e8cb9538b61d",
+      "sha256": "cfc5dbe0bc79ca004a3fb5a74a0969f12c83fb10618adb3dd39f919564dc8de4",
       "scenarios": [
         "feasibility-gate-production-beyond-unverified-viability-returns-to-sol",
         "feasibility-gate-premise-collapse-stops-further-implementation",
         "feasibility-gate-short-semantic-verification-completes",
-        "feasibility-gate-established-premise-change-completes"
+        "feasibility-gate-established-premise-change-completes",
+        "task-lifecycle-monitor-safe-stop-local-terminal-returns-to-sol",
+        "task-lifecycle-external-judgment-blocker-stops-with-state",
+        "task-lifecycle-explicitly-limited-deliverable-completes"
       ]
     },
     {
       "path": "codex/instructions/glm-execution.md",
-      "sha256": "0c3e978156fd970e3aa6293707832f458bdc86258ae19f82b9e28dacf87a72f0",
+      "sha256": "d666c3cdae74df965a2d97c5ec05d8c145f29f16726b5ada4577e3094743cc47",
       "scenarios": [
         "feasibility-gate-production-beyond-unverified-viability-returns-to-sol",
         "feasibility-gate-premise-collapse-stops-further-implementation",
         "feasibility-gate-short-semantic-verification-completes",
-        "feasibility-gate-established-premise-change-completes"
+        "feasibility-gate-established-premise-change-completes",
+        "task-lifecycle-monitor-safe-stop-local-terminal-returns-to-sol",
+        "task-lifecycle-external-judgment-blocker-stops-with-state",
+        "task-lifecycle-explicitly-limited-deliverable-completes"
+      ]
+    },
+    {
+      "path": "codex/instructions/task-lifecycle.md",
+      "sha256": "1eb854c8b641c3d4fea635d3901a66767eedd3c08751bbe40a3227060764f05c",
+      "scenarios": [
+        "task-lifecycle-monitor-safe-stop-local-terminal-returns-to-sol",
+        "task-lifecycle-external-judgment-blocker-stops-with-state",
+        "task-lifecycle-explicitly-limited-deliverable-completes"
       ]
     }
   ]

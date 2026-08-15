@@ -114,6 +114,17 @@
 - 親Codex behavioral Evalは未実行の固定Eval caseとする。positive case: 未検証外部成立性のproduction/IaC委譲をfeasibility gate根拠で止めPoC・観測taskへ分割する。negative case: 短時間の意味的検証で足りる対象へ固定観測期間を要求しない。完了条件: 親Codexのrouting判断・委譲内容・gate読込をraw telemetry・task log等の一次証拠で照合できる検証形態が整備されること。live model呼出しを要するためユーザーの明示指示後だけ実行し、完了条件を満たすまでは本項を完了扱いにしない。新規巨大harness・無意味なlive callは作らない。
 
 
+## 親USER_REQUEST lifecycle contract
+
+- `codex/instructions/task-lifecycle.md`は、monitor/automationの安全停止・GLM child task終端・個別commit/installを親USER_REQUEST全体の完了と同一視しない親Codex orchestration contractである。Kindle escaped caseと停止ミスの原因をworker/reviewer pipelineの個別checklist不足ではなく親lifecycle不足と分類しており、worker/reviewer promptへの個別checklist追加で解決しない。
+- 終端は3分類する。monitorのscheduler停止・queue/checkpoint保全・alarm報告の完了、GLM child taskのtask・review・commit・install個別完了は局所終端であり、親依頼本体とユーザー・automationが明示継続対象とした実装計画範囲の未解決作業解消だけが親USER_REQUEST完了。
+- 局所終端の直後に親依頼・計画の未解決作業と次の安全なin-scope操作を再評価し、原因修正・再開確認・後続改善等が残るなら同一Codex taskで継続する。monitorの安全停止完了後も元依頼に診断・修正・再開確認が残るcase、個別commit/install完了後も明示継続planが残るcaseを完了扱いしない。停止は新しい権限・Codex外の外部状態変化・意味あるユーザー判断が本当に必要な場合だけとし、checkpoint・session・working treeを保持して残作業とblockerを報告する。
+- 実装計画に長期roadmapが存在するだけで現在の親依頼範囲へ作業を勝手に拡張せず、ユーザー・automationが「後続へ継続」「停止しない」と明示した範囲を直近subtaskの局所終端で打ち切らない。
+- 親側production routingの決定論検証は`internal/workflow`の`TestTaskLifecycleContractWiring`が担う。`codex/AGENTS.md`のrouting、`codex/instructions/glm-execution.md`のpacket受理後読込指示、`task-lifecycle.md`本文の必須契約文のいずれかが欠けるとtestが失敗する。install後の3 file配置・相互参照は`tests/install_smoke.sh`の配置grepが検証する。
+- scenario corpus(`task-lifecycle-*`)はwrapperの局所終端例へのSTATUS/risk終端検証に限定する。monitor安全停止sub-deliverableの`NEEDS_SOL_REVIEW`終端とPASS完結拒否(`task-lifecycle-monitor-safe-stop-local-terminal-returns-to-sol`)、外部判断blockerの`NEEDS_SOL_DECISION`終端(`task-lifecycle-external-judgment-blocker-stops-with-state`)、依頼明示限定の局所成果物の通常完遂(`task-lifecycle-explicitly-limited-deliverable-completes`)。scripted packet列に対するwrapper終端検証であり、親Codexが局所終端後に未解決作業を再評価し同一taskで継続する行動の証明ではない。根拠instructionとして`codex/AGENTS.md`・`codex/instructions/glm-execution.md`・`codex/instructions/task-lifecycle.md`の3 fileをmanifest hash pinし、変更時は該当scenarioの期待結果を現物へ再照合する。
+- 親Codex behavioral Evalは未実行の固定Eval caseとする。positive case: monitorのscheduler停止・queue保全・alarm報告完了後も元依頼の診断・修正・再開確認へ同一Codex taskで継続する。個別commit/install完了後も明示継続planの次項へ継続する。negative case: 依頼が単一局所成果物へ明示限定される場合へ長期roadmapや依頼外診断を拡張しない。完了条件: 親Codexの継続・停止判断をraw telemetry・task log等の一次証拠で照合できる検証形態が整備されること。live model呼出しを要するためユーザーの明示指示後だけ実行し、完了条件を満たすまでは本項を完了扱いにしない。安全停止・状態保全だけで未解決の親USER_REQUESTを完了扱いする拒否caseは固定Eval残項目として本corpus外で管理する。
+
+
 ## Go品質ゲート
 
 - `go test ./...`が成功する。

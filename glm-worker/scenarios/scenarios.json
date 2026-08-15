@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "prompt/instruction変更の品質gateとして、fake runnerが返すpacket列に対するproduction workflow/prompt/gateの終端検証を行うscenario corpus。各scenarioはUSER_REQUEST・scripted packet列・期待model/routing/terminalを持ちproduction経路へ入力し、request/MODE伝達・risk/model routing・FIX_REQUIRED/NEEDS_SOL_REVIEW/NEEDS_SOL_DECISION終端・risk floor/self-protectionによるPASS拒否・NEEDS_SOL_REVIEWのTARGETS契約・FIX_REQUIREDのTARGETS: PACKET報告再出力分岐を決定論検証する。manifest.jsonは根拠instruction fileのSHA-256を固定し内容変更でhash mismatchによりtestを失敗させ影響scenarioの再確認を強制する。永続状態バグそのものの自動検出・modelの規則遵守の検証は行わず後続固定Evalの対象。install_smoke.shの配置grepとは役割を分ける。live model・networkは呼ばない。feasibility-gate-*はwrapperのSTATUS/risk終端検証例に限定し、親Codexがfeasibility-gate.mdを読み委譲・受領を制御する行動の証明ではない。親orchestration行動の固定Evalは未実行で、EVAL.mdの完了条件を満たすまで完了扱いにしない。",
+  "description": "prompt/instruction変更の品質gateとして、fake runnerが返すpacket列に対するproduction workflow/prompt/gateの終端検証を行うscenario corpus。各scenarioはUSER_REQUEST・scripted packet列・期待model/routing/terminalを持ちproduction経路へ入力し、request/MODE伝達・risk/model routing・FIX_REQUIRED/NEEDS_SOL_REVIEW/NEEDS_SOL_DECISION終端・risk floor/self-protectionによるPASS拒否・NEEDS_SOL_REVIEWのTARGETS契約・FIX_REQUIREDのTARGETS: PACKET報告再出力分岐を決定論検証する。manifest.jsonは根拠instruction fileのSHA-256を固定し内容変更でhash mismatchによりtestを失敗させ影響scenarioの再確認を強制する。永続状態バグそのものの自動検出・modelの規則遵守の検証は行わず後続固定Evalの対象。install_smoke.shの配置grepとは役割を分ける。live model・networkは呼ばない。feasibility-gate-*はwrapperのSTATUS/risk終端検証例に限定し、親Codexがfeasibility-gate.mdを読み委譲・受領を制御する行動の証明ではない。親orchestration行動の固定Evalは未実行で、EVAL.mdの完了条件を満たすまで完了扱いにしない。task-lifecycle-*はwrapperの局所終端例への終端検証に限定し、親Codexが局所終端後に親依頼の未解決作業を再評価し同一taskで継続する行動の証明ではない。",
   "scenarios": [
     {
       "id": "state-residual-after-removal",
@@ -1873,6 +1873,142 @@
             "REQUIREMENT_COVERAGE: covered",
             "INVARIANTS: preserved",
             "TEST_EVIDENCE: 既存契約・認証・実行環境が変更されていないことを確認",
+            "ISSUES: none",
+            "RESIDUAL_RISK: none",
+            "TARGETS: none",
+            "ARTIFACTS: none"
+          ]
+        }
+      ],
+      "expected_models": [
+        "opus",
+        "haiku"
+      ],
+      "expected_packet_status": "PASS",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "complete",
+      "must_not_pass": false
+    },
+    {
+      "id": "task-lifecycle-monitor-safe-stop-local-terminal-returns-to-sol",
+      "behavior": "wrapper終端検証(親Codex行動証明ではない): monitorのscheduler停止・queue/checkpoint保全・alarm報告までを局所終端として完了するscripted worker申告に対し、運用automation停止経路変更のreviewer packetがwrapperをNEEDS_SOL_REVIEW/HIGHへ終端させる。局所終端後に親Codexが元依頼の診断・修正・再開確認へ同一taskで継続する行動は未実行の親behavioral Eval対象",
+      "request": "誤検出ループを起こしたmonitorの安全停止として、scheduler停止・queue/checkpoint保全・alarm報告までを実装する。原因診断・修正・再開確認は親依頼に残る別作業であり本taskには含めない",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/AGENTS.md",
+        "codex/instructions/glm-execution.md",
+        "codex/instructions/task-lifecycle.md"
+      ],
+      "changed_paths": [
+        "src/monitor/scheduler.go",
+        "src/monitor/alarm.go"
+      ],
+      "runner_steps": [
+        {
+          "lines": [
+            "STATUS: IMPLEMENTED",
+            "RISK: LOW",
+            "SUMMARY: monitorのscheduler停止・queue/checkpoint保全・alarm報告を安全停止実装として完了した",
+            "REQUIREMENT_COVERAGE: 安全停止範囲はcovered。原因診断・修正・再開確認は親依頼側の別作業として本task対象外",
+            "TESTS: 停止後のqueue残存・checkpoint保全・alarm報告送信をunit testで確認",
+            "UNVERIFIED: 原因診断・修正・再開確認は未実施(親依頼の残作業)",
+            "ARTIFACTS: none"
+          ]
+        },
+        {
+          "lines": [
+            "STATUS: NEEDS_SOL_REVIEW",
+            "RISK: HIGH",
+            "SUMMARY: 運用monitorの安全停止経路変更をSol確認へ昇格する",
+            "REQUIREMENT_COVERAGE: 安全停止実装は依頼範囲どおりで、局所終端の範囲明示が保持されている",
+            "INVARIANTS: scheduler停止がqueue/checkpoint保全とalarm報告を壊していない",
+            "TEST_EVIDENCE: 停止後queue残存・checkpoint保全・alarm送信のtestを確認",
+            "ISSUES: none",
+            "RESIDUAL_RISK: 停止条件の誤作動・停止漏れが運用監視へ与える影響",
+            "TARGETS: src/monitor/scheduler.goの停止条件とsrc/monitor/alarm.goの報告経路",
+            "ARTIFACTS: none",
+            "SOL_QUESTION: 安全停止経路の昇格条件と運用影響をSolが確認する"
+          ]
+        }
+      ],
+      "expected_models": [
+        "opus",
+        "haiku"
+      ],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true
+    },
+    {
+      "id": "task-lifecycle-external-judgment-blocker-stops-with-state",
+      "behavior": "wrapper終端検証(親Codex行動証明ではない): 継続に新しい権限・外部状態・意味あるユーザー判断が本当に必要なscripted caseで、workerのNEEDS_SOL_DECISION packetがwrapperをwaiting-decisionへ終端させる。checkpoint・session・working tree保持と残作業・blocker報告はlifecycle contract停止条件の局所終端例",
+      "request": "外部API障害で停止した自動取得について、安全停止・queue保全・原因切り分けと再開確認を行う。再開には利用者だけが操作できる認証更新が必要",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/AGENTS.md",
+        "codex/instructions/glm-execution.md",
+        "codex/instructions/task-lifecycle.md"
+      ],
+      "changed_paths": [
+        "docs/incident-note.md"
+      ],
+      "runner_steps": [
+        {
+          "lines": [
+            "STATUS: NEEDS_SOL_DECISION",
+            "RISK: HIGH",
+            "DECISION: 利用者による認証更新後の再開可否と再開時期",
+            "EVIDENCE: 安全停止・queue保全・原因切り分けは完了したが、再開には利用者だけが操作できる認証更新が必要",
+            "OPTIONS: 利用者の認証更新後に再開 / 認証方式の変更へ切り替え",
+            "RECOMMENDATION: checkpoint・session・working treeを保持したまま残作業とblockerを報告し、再開確認を継続対象へ残す",
+            "TEST_OBLIGATIONS: 再開後に取得成功とqueue消化を確認する",
+            "TARGETS: docs/incident-note.md",
+            "ARTIFACTS: none"
+          ]
+        }
+      ],
+      "expected_models": [
+        "opus"
+      ],
+      "expected_packet_status": "NEEDS_SOL_DECISION",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-decision",
+      "must_not_pass": true
+    },
+    {
+      "id": "task-lifecycle-explicitly-limited-deliverable-completes",
+      "behavior": "wrapper終端検証(親Codex行動証明ではない): 依頼が単一の局所成果物へ明示限定されるscripted通常taskがPASS/LOWで完遂する正面制御。長期roadmapや依頼外の診断へ親Codexが範囲を拡張しない行動の証明ではない",
+      "request": "本taskはmonitorの安全停止とqueue保全の実装のみを行う。原因診断・修正・再開確認は別依頼とし本taskでは行わない",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/AGENTS.md",
+        "codex/instructions/glm-execution.md",
+        "codex/instructions/task-lifecycle.md"
+      ],
+      "changed_paths": [
+        "src/monitor/stop.go"
+      ],
+      "runner_steps": [
+        {
+          "lines": [
+            "STATUS: IMPLEMENTED",
+            "RISK: LOW",
+            "SUMMARY: 依頼限定どおりmonitorの安全停止とqueue保全だけを実装した",
+            "REQUIREMENT_COVERAGE: covered。原因診断・修正・再開確認は依頼文どおり本task対象外",
+            "TESTS: 停止後のqueue残存とcheckpoint保全をunit testで確認",
+            "UNVERIFIED: none",
+            "ARTIFACTS: none"
+          ]
+        },
+        {
+          "lines": [
+            "STATUS: PASS",
+            "RISK: LOW",
+            "SUMMARY: 依頼へ明示限定された局所成果物を通常reviewで完遂する",
+            "REQUIREMENT_COVERAGE: covered",
+            "INVARIANTS: preserved",
+            "TEST_EVIDENCE: 停止後queue残存・checkpoint保全のtestを確認",
             "ISSUES: none",
             "RESIDUAL_RISK: none",
             "TARGETS: none",
