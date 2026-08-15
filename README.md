@@ -88,6 +88,7 @@ overrideを追加・変更・削除したときは、必ず`install.sh`を再実
 
 ```text
 codex-worker-orchestrator/
+├── AGENTS.md                 # このリポジトリの作業bootstrap規則
 ├── install.sh
 ├── codex/
 │   ├── AGENTS.md

@@ -49,7 +49,10 @@
         "provider-resume-probe-is-error-exit-zero-stays-unavailable",
         "provider-resume-probe-sentinel-mismatch-stays-unavailable",
         "provider-transient-probe-fail-then-success-resumes-task",
-        "provider-resume-probe-success-then-five-hour-limit"
+        "provider-resume-probe-success-then-five-hour-limit",
+        "implementation-plan-present-ignored-returns-fix-required",
+        "implementation-plan-absent-fabrication-returns-fix-required",
+        "repo-agents-root-change-escalates-self-protection-high"
       ]
     },
     {
@@ -65,7 +68,19 @@
         "orchestrator-critical-low-self-declare",
         "low-risk-non-critical-pass",
         "reviewer-worktree-mutation-rejects-pass",
-        "reviewer-worktree-mutation-rejects-fix-required"
+        "reviewer-worktree-mutation-rejects-fix-required",
+        "implementation-plan-present-ignored-returns-fix-required",
+        "implementation-plan-absent-fabrication-returns-fix-required",
+        "repo-agents-root-change-escalates-self-protection-high"
+      ]
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "3ffbc8324f9fd4afa8ce8de12d3fdcbaacfe73f1fb517c6e61ec8b2b18bea1da",
+      "scenarios": [
+        "implementation-plan-present-ignored-returns-fix-required",
+        "implementation-plan-absent-fabrication-returns-fix-required",
+        "repo-agents-root-change-escalates-self-protection-high"
       ]
     }
   ]

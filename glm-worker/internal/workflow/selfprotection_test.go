@@ -47,6 +47,8 @@ func TestIsCriticalPath(t *testing.T) {
 		{"glm-packets contract rule", "codex/instructions/glm-packets.md", true, "managed-instructions"},
 		{"rules file", "codex/rules/glm-worker.rules", true, "managed-rules"},
 		{"managed AGENTS quality gate", "codex/AGENTS.md", true, "managed-agents"},
+		{"repository root AGENTS bootstrap contract", "AGENTS.md", true, "repo-agents"},
+		{"nested AGENTS outside repo root contract", "docs/AGENTS.md", false, ""},
 
 		{"test files excluded keeps test-only 4.7", "glm-worker/internal/workflow/workflow_test.go", false, ""},
 		{"packet test excluded", "glm-worker/internal/packet/packet_test.go", false, ""},

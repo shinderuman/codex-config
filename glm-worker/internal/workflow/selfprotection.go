@@ -19,7 +19,8 @@ type selfProtectionDecision struct {
 }
 
 // IsCriticalPathは自己保護のHIGH対象pathかを判定する。全fileがQA-criticalなpackage(workflow/packet/runner/app/config)
-// はproduction .goをpackage-level対象、観測fileと混在するstateは明示file、managed品質規則は対象とする。
+// はproduction .goをpackage-level対象、観測fileと混在するstateは明示file、managed品質規則と
+// repository rootのAGENTS.md(task継続契約のbootstrap規則)は対象とする。
 // scenario corpusはprompt/instruction意味変更検証の契約source of truthのため専用categoryでHIGHにする。
 // policy file自身はworkflow packageに含まれ本policy変更が自動HIGHとなり、将来追加fileのfail-openを防ぐ。
 func IsCriticalPath(path string) (bool, string) {
@@ -49,6 +50,8 @@ func IsCriticalPath(path string) (bool, string) {
 		return true, "managed-rules"
 	case path == "codex/AGENTS.md":
 		return true, "managed-agents"
+	case path == "AGENTS.md":
+		return true, "repo-agents"
 	}
 	return false, ""
 }
