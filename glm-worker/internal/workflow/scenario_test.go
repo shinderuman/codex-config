@@ -64,6 +64,14 @@ type scenarioTelemetry struct {
 	ProbeResolvedModel string  `json:"probe_resolved_model"`
 }
 
+// promptExpectationはscripted終端へ至るまでのproduction prompt選択(dispatch因果)を直接検証する
+// 期待値。予約markerによるprompt分岐など、終端期待だけでは観測できない選択を固定する。
+type promptExpectation struct {
+	Index       int      `json:"index"`
+	Contains    []string `json:"contains"`
+	NotContains []string `json:"not_contains,omitempty"`
+}
+
 type scenarioDoc struct {
 	ID                   string         `json:"id"`
 	Behavior             string         `json:"behavior"`
@@ -77,6 +85,9 @@ type scenarioDoc struct {
 	ExpectedPacketRisk   string         `json:"expected_packet_risk"`
 	ExpectedTaskStatus   string         `json:"expected_task_status"`
 	MustNotPass          bool           `json:"must_not_pass"`
+	// ExpectedPromptsはprompt呼出indexごとの期待内容。FIX_REQUIREDのTARGETS予約値が
+	// production dispatchで専用promptを選んだ因果を終端期待と独立に検証する。
+	ExpectedPrompts []promptExpectation `json:"expected_prompts,omitempty"`
 	// ExpectedErrorStatusはerror terminal終端scenarioの期待STATUS。設定時はpacket終端を検証しない。
 	ExpectedErrorStatus string `json:"expected_error_status,omitempty"`
 	// ExpectedProbeCountはprobe呼出の期待回数。
@@ -290,6 +301,24 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 				}
 			}
 		}
+		for i, exp := range s.ExpectedPrompts {
+			if exp.Index < 0 {
+				return fmt.Errorf("scenario %s expected_prompts %d negative index", s.ID, i)
+			}
+			if len(exp.Contains) == 0 {
+				return fmt.Errorf("scenario %s expected_prompts %d contains empty", s.ID, i)
+			}
+			for _, want := range exp.Contains {
+				if want == "" {
+					return fmt.Errorf("scenario %s expected_prompts %d empty contains entry", s.ID, i)
+				}
+			}
+			for _, forbidden := range exp.NotContains {
+				if forbidden == "" {
+					return fmt.Errorf("scenario %s expected_prompts %d empty not_contains entry", s.ID, i)
+				}
+			}
+		}
 	}
 
 	manifestPaths := make(map[string]manifestEntry, len(mf.InstructionFiles))
@@ -494,6 +523,12 @@ func TestScenarioCorpusContractRejectsInvalid(t *testing.T) {
 			sc.Scenarios[0].ExpectedStats = &scenarioStats{ModelCalls: 2, WorkerCalls: 1, ReviewerCalls: 1, TotalAICalls: 2}
 			sc.Scenarios[0].ExpectedTelemetry = &scenarioTelemetry{TaskCalls: 3, ProbeCalls: 0}
 		}, "telemetry call counts disagree"},
+		{"expected prompts negative index", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].ExpectedPrompts = []promptExpectation{{Index: -1, Contains: []string{"MODE:"}}}
+		}, "negative index"},
+		{"expected prompts empty contains", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].ExpectedPrompts = []promptExpectation{{Index: 0}}
+		}, "contains empty"},
 	}
 	for _, c := range cases {
 		c := c
@@ -676,6 +711,24 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 	if doc.ExpectedRunCount == nil {
 		if got, want := strings.Join(r.models, ","), strings.Join(doc.ExpectedModels, ","); got != want {
 			t.Fatalf("model routing = %q want %q", got, want)
+		}
+	}
+	// expected_promptsはproduction dispatchがscripted packet列の予約値から期待promptを選んだ
+	// 因果を直接検証する。終端STATUS/routing期待とは独立したgate。
+	for _, exp := range doc.ExpectedPrompts {
+		if exp.Index >= len(r.prompts) {
+			t.Fatalf("expected_prompts index %d out of range: prompts=%d", exp.Index, len(r.prompts))
+		}
+		got := r.prompts[exp.Index]
+		for _, want := range exp.Contains {
+			if !strings.Contains(got, want) {
+				t.Fatalf("prompt %d does not contain %q:\n%s", exp.Index, want, got)
+			}
+		}
+		for _, forbidden := range exp.NotContains {
+			if strings.Contains(got, forbidden) {
+				t.Fatalf("prompt %d must not contain %q:\n%s", exp.Index, forbidden, got)
+			}
 		}
 	}
 

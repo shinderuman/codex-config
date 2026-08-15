@@ -72,7 +72,7 @@
     },
     {
       "path": "codex/glm-worker/prompts/REVIEWER.md",
-      "sha256": "277b0346b2b77c08ae73a789e24f50f0a6a67846ddc3ad5ee1a1b0c03b1c859d",
+      "sha256": "f21501902d9d98fd75319eef32a7add4451e61e0d2b9be15c61340365e2fd820",
       "scenarios": [
         "state-residual-after-removal",
         "state-deleted-value-reflow-alt-path",

@@ -12,7 +12,7 @@
 - `~/.codex/instructions/worker/`の該当規則を確認。
 - USER_REQUESTの各要求、範囲外変更、根本原因、テスト観点、既存互換性を独立確認。
 - 永続状態・設定・migration・upgrade・cache・manifest・sidecar・local fileへの変更は、workerのテスト一覧を前提にせず、USER_REQUESTとdiffから開始状態・2回目以降・解除後・旧version upgradeの遷移漏れを独立確認する(`state-transitions.md`)。
-- HIGH変更では、USER_REQUESTとdiffから独立して、最終packetにSolの判断へ必要な意味情報が圧縮されているかを確認する。変更前後の契約・失敗境界・主要状態遷移・telemetry/集計metricの意味と加法整合性・検証scenario・互換性/rollback/recovery懸念のうち該当する観点がworker報告にも自分の検証結果にもないときはPASSせず、FIX_REQUIREDで同一sessionへの再出力へ戻す。該当しない観点や低リスク変更へ形式的な文面を要求しない。
+- HIGH変更では、USER_REQUESTとdiffから独立して、最終packetにSolの判断へ必要な意味情報が圧縮されているかを確認する。変更前後の契約・失敗境界・主要状態遷移・telemetry/集計metricの意味と加法整合性・検証scenario・互換性/rollback/recovery懸念のうち該当する観点がworker報告にも自分の検証結果にもないときはPASSしない。このときコードとdiffが正しければ`TARGETS: PACKET`のFIX_REQUIREDで報告だけの再出力へ戻し、実装にも問題があれば通常のTARGETSで実装修正へ戻す。該当しない観点や低リスク変更へ形式的な文面を要求しない。
 - health/probe/readiness/validation/retry gateで成功後に本処理へ進む変更では、exit codeや非空応答だけのpositive確認を成功証明と認めず、成功境界のfalse-positive caseがtestとscenarioへ存在するかを確認する(probe偽陽性がpositive偏りでreview通過した実績による)。
 - 必要ならテスト・lint・buildを再実行。
 - PRE_TASK_BASELINEが提示されている場合は必要に応じて参照し、worker開始前から存在した未コミット変更を今回変更と誤認しない。
@@ -27,7 +27,7 @@
 - コンテキスト節約を理由に要求照合・互換性確認・必要テストを省略してはならない。
 
 ## 判定
-FIX_REQUIRED: Sol Highの新設計判断なしに直せる明確なバグ、要求漏れ、テスト不足、lint/build/test失敗、規約違反、範囲外変更、明確なエラーハンドリング不足、既存Sol判断との不一致、HIGH変更packetの意味情報欠落。
+FIX_REQUIRED: Sol Highの新設計判断なしに直せる明確なバグ、要求漏れ、テスト不足、lint/build/test失敗、規約違反、範囲外変更、明確なエラーハンドリング不足、既存Sol判断との不一致、HIGH変更packetの意味情報欠落。コード・diffが正しくworkerのPACKET/reportの意味情報だけが不足する場合は実装修正を要求せず`TARGETS: PACKET`だけを返す。`TARGETS: PACKET`は報告再出力専用の予約値であり、実装変更を求めるときに使わない。
 USER_REQUEST・`SPECIFICATION.md`・`AGENTS.md`・既存Sol判断で方向が確定している修正は、型・package・interface・互換性へ触れても、新しい意味判断が不要ならFIX_REQUIREDとしてworkerへ自動修正させる。作業分割・命名・明白な仕様準拠修正だけを理由にSolへ戻さない。
 
 NEEDS_SOL_REVIEW: アーキテクチャ、責務、公開API、データモデル、依存方向、互換性、原因不明バグの根本原因、preflight後の新規高リスク判断、セキュリティ・データ破損・不可逆性、実装前にSol判断を受けた高リスク変更、またはコードを見ないとSol Highが意味判断できない残余リスクがある場合。`TARGETS`を最小のfile:symbol/行範囲/論点へ絞る。SUMMARY/INVARIANTS/TEST_EVIDENCE/RESIDUAL_RISKへ該当する意味情報(変更前後の契約・失敗境界・主要状態遷移・telemetry/集計metricの意味と加法整合性・検証scenario・互換性/rollback/recovery懸念)を圧縮し、SolがTARGETSとSOL_QUESTIONだけの確認で採否できるようにする。永続fileへ触れただけの低リスク変更はPASS/FIX_REQUIREDとし、永続状態の意味変更・migration・既存形式やユーザー状態との互換・rollback/recovery意味論・upgrade破壊可能性で意味判断が必要な場合だけNEEDS_SOL_REVIEWとする。
@@ -50,7 +50,7 @@ INVARIANTS: <維持された重要既存挙動・互換性>
 TEST_EVIDENCE: <テスト観点と結果要約>
 ISSUES: none | <修正すべき問題>
 RESIDUAL_RISK: none | <Solが判断すべき残余リスク>
-TARGETS: none | <Solが読むべき最小file:symbol/行範囲。NEEDS_SOL_REVIEWではnoneにできない>
+TARGETS: none | <Solが読むべき最小file:symbol/行範囲。NEEDS_SOL_REVIEWではnoneにできない。FIX_REQUIREDでコード修正不要・報告の意味情報だけ不足するときはPACKET>
 ARTIFACTS: none | <worker報告にある大容量成果物のうち最終結果に必要な絶対パス。複数はセミコロン区切り。内容は再掲しない>
 SOL_QUESTION: <NEEDS_SOL_REVIEWの場合だけ、Solが最終確認すべき一点。他STATUSではこの行を省略>
 PACKET_END

@@ -102,6 +102,26 @@ INDEPENDENT_REVIEW:
 `, request, decision, reviewPacket.String())
 }
 
+// reportOnlyFixPromptはreviewerがコード・diffを正しいと確認しPACKET/reportの意味情報だけを
+// 不足と指摘した場合の専用prompt。実装修正・調査・検証の再実行を禁止し、現在の結果とdiffに基づく
+// 報告の再出力だけを求める。通常のimplementation fix文言を含めない。
+func reportOnlyFixPrompt(request string, decision string, reviewPacket packet.Packet) string {
+	return fmt.Sprintf(`MODE: APPLY_REVIEW_FIX
+
+ORIGINAL_USER_REQUEST:
+%s
+
+PREVIOUS_SOL_DECISION:
+%s
+
+INDEPENDENT_REVIEW:
+%s
+
+独立reviewerはコードとdiffを正しいと確認し、PACKET/reportへ圧縮された意味情報だけを不足と指摘しています。
+実装・working tree変更・追加調査・test/lint/build/self-reviewをやり直さず、現在の作業結果とdiffに基づいてPACKET/reportだけを再出力してください。
+`, request, decision, reviewPacket.String())
+}
+
 func packetCompressionPrompt(reason string) string {
 	return fmt.Sprintf(`直前の作業結果は有効ですが、最終PACKETが出力契約を満たしていません。
 作業・調査・テストをやり直さず、直前の結果を意味を失わない範囲で再圧縮し、PACKETだけを再出力してください。

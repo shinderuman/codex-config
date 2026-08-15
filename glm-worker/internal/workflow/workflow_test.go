@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -116,6 +117,10 @@ func needsSolDecisionPacket() string {
 
 func fixRequiredPacket() string {
 	return "PACKET_BEGIN\nSTATUS: FIX_REQUIRED\nRISK: HIGH\nSUMMARY: fix\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: i\nRESIDUAL_RISK: r\nTARGETS: t\nARTIFACTS: none\nPACKET_END\n"
+}
+
+func fixRequiredPacketWithTargets(targets string) string {
+	return "PACKET_BEGIN\nSTATUS: FIX_REQUIRED\nRISK: HIGH\nSUMMARY: fix\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: i\nRESIDUAL_RISK: r\nTARGETS: " + targets + "\nARTIFACTS: none\nPACKET_END\n"
 }
 
 func unknownStatusPacket() string {
@@ -1299,6 +1304,95 @@ func TestRiskFloorReemitPromptConstraints(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("reemit promptに%qがありません: %s", want, prompt)
 		}
+	}
+}
+
+func TestFixRequiredTargetsPacketDispatchesReportOnlyPrompt(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{steps: []runnerStep{
+		{output: implementedPacketWithRisk("high risk work", "HIGH")},
+		{output: fixRequiredPacketWithTargets("PACKET")},
+		{output: implementedPacketWithRisk("report re-emitted", "HIGH")},
+		{output: needsSolReviewPacket()},
+	}}
+	w := newWorkflowT(t, st, r)
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	if st.TaskStatus() != state.TaskStatusWaitingSolReview {
+		t.Fatalf("status = %q want waiting-sol-review", st.TaskStatus())
+	}
+	if got, want := strings.Join(r.models, ","), "opus,sonnet,opus,sonnet"; got != want {
+		t.Fatalf("model routing = %q want %q", got, want)
+	}
+	if len(r.prompts) != 4 {
+		t.Fatalf("prompt count = %d want 4", len(r.prompts))
+	}
+	reportOnly := r.prompts[2]
+	for _, want := range []string{
+		"PACKET/reportだけを再出力",
+		"実装・working tree変更・追加調査・test/lint/build/self-reviewをやり直さず",
+	} {
+		if !strings.Contains(reportOnly, want) {
+			t.Fatalf("report-only promptに%qがありません: %s", want, reportOnly)
+		}
+	}
+	for _, forbidden := range []string{
+		"独立reviewerの指摘を修正してください",
+		"修正後に必要なテスト・lint・build・自己レビューまで行ってください",
+	} {
+		if strings.Contains(reportOnly, forbidden) {
+			t.Fatalf("report-only promptにimplementation fix文言%qが入っています: %s", forbidden, reportOnly)
+		}
+	}
+	var reportOnlyPhases []string
+	for _, l := range taskLogs(t, st) {
+		if l.CallType == state.CallTypeTask {
+			reportOnlyPhases = append(reportOnlyPhases, l.Phase)
+		}
+	}
+	if !slices.Contains(reportOnlyPhases, "worker-report-only-1") {
+		t.Fatalf("telemetryへreport-only phaseが識別できません: %v", reportOnlyPhases)
+	}
+}
+
+func TestFixRequiredOtherTargetsKeepsImplementationAutoFix(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{steps: []runnerStep{
+		{output: implementedPacketWithRisk("high risk work", "HIGH")},
+		{output: fixRequiredPacketWithTargets("glm-worker/internal/state/store.go:Read")},
+		{output: implementedPacketWithRisk("fixed implementation", "HIGH")},
+		{output: needsSolReviewPacket()},
+	}}
+	w := newWorkflowT(t, st, r)
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	if st.TaskStatus() != state.TaskStatusWaitingSolReview {
+		t.Fatalf("status = %q want waiting-sol-review", st.TaskStatus())
+	}
+	implementation := r.prompts[2]
+	for _, want := range []string{
+		"独立reviewerの指摘を修正してください",
+		"修正後に必要なテスト・lint・build・自己レビューまで行ってください",
+	} {
+		if !strings.Contains(implementation, want) {
+			t.Fatalf("implementation auto-fix promptから%qが失われています: %s", want, implementation)
+		}
+	}
+	if strings.Contains(implementation, "PACKET/reportだけを再出力") {
+		t.Fatalf("通常FIX_REQUIREDへreport-only promptが使われています: %s", implementation)
+	}
+	var phases []string
+	for _, l := range taskLogs(t, st) {
+		if l.CallType == state.CallTypeTask {
+			phases = append(phases, l.Phase)
+		}
+	}
+	if !slices.Contains(phases, "worker-auto-fix-1") {
+		t.Fatalf("telemetryへimplementation auto-fix phaseがありません: %v", phases)
 	}
 }
 

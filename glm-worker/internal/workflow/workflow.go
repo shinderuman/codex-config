@@ -546,9 +546,17 @@ func (w *Workflow) handleReviewResult(
 		nextAutoFixes := autoFixes + 1
 		decision := w.state.ReadOr("last-decision", "none")
 		prompt := automaticFixPrompt(request, decision, reviewPacket)
+		phase := fmt.Sprintf("worker-auto-fix-%d", nextAutoFixes)
+		// TARGETS: PACKETはreviewerがコード・diffを正しいと確認しPACKET/reportの意味情報だけを
+		// 不足と指摘した予約marker。実装修正へ流さず報告再出力専用promptへ分岐する。
+		// 収束上限・risk floor・session/model routingは通常auto-fixと同じ枠で数える。
+		if isReportOnlyFix(reviewPacket) {
+			prompt = reportOnlyFixPrompt(request, decision, reviewPacket)
+			phase = fmt.Sprintf("worker-report-only-%d", nextAutoFixes)
+		}
 		checkpoint := state.ResumeCheckpoint{
 			Stage:          state.ResumeStageAutoFix,
-			Phase:          fmt.Sprintf("worker-auto-fix-%d", nextAutoFixes),
+			Phase:          phase,
 			Role:           state.WorkerRole,
 			Model:          w.config.WorkerModel,
 			ReadOnly:       false,
@@ -581,6 +589,15 @@ func (w *Workflow) handleReviewResult(
 
 func reviewNeedsHighRiskFloor(workerPacket packet.Packet, autoFixes int, hasDecision bool, hasPriorReview bool) bool {
 	return workerPacket.Risk() == "HIGH" || autoFixes > 0 || hasDecision || hasPriorReview
+}
+
+// reportOnlyFixTargetsはFIX_REQUIREDのTARGETS予約値。reviewerがコード・diffを正しいと確認し
+// workerのPACKET/reportの意味情報だけを不足と指摘するときに使い、productionは実装修正と
+// 報告再出力をこの値だけで機械識別する。自然言語の解釈は行わない。
+const reportOnlyFixTargets = "PACKET"
+
+func isReportOnlyFix(reviewPacket packet.Packet) bool {
+	return reviewPacket.Status() == "FIX_REQUIRED" && reviewPacket.Fields["TARGETS"] == reportOnlyFixTargets
 }
 
 // effectiveRiskはworker原文risk・既存floor信号(auto-fix/decision/prior-review)・自己保護を統合したwrapperの実効risk。
