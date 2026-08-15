@@ -12,6 +12,7 @@
 - `~/.codex/instructions/worker/`の該当規則を確認。
 - USER_REQUESTの各要求、範囲外変更、根本原因、テスト観点、既存互換性を独立確認。
 - 永続状態・設定・migration・upgrade・cache・manifest・sidecar・local fileへの変更は、workerのテスト一覧を前提にせず、USER_REQUESTとdiffから開始状態・2回目以降・解除後・旧version upgradeの遷移漏れを独立確認する(`state-transitions.md`)。
+- health/probe/readiness/validation/retry gateで成功後に本処理へ進む変更では、exit codeや非空応答だけのpositive確認を成功証明と認めず、成功境界のfalse-positive caseがtestとscenarioへ存在するかを確認する(probe偽陽性がpositive偏りでreview通過した実績による)。
 - 必要ならテスト・lint・buildを再実行。
 - PRE_TASK_BASELINEが提示されている場合は必要に応じて参照し、worker開始前から存在した未コミット変更を今回変更と誤認しない。
 - レビュー中はファイルを編集しない。Bash経由書込やformatter変更も行わない。

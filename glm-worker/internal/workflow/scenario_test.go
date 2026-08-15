@@ -50,6 +50,10 @@ type scenarioDoc struct {
 	ProbeErrors []string `json:"probe_errors,omitempty"`
 	// ProbeBlankは成功probeが空応答を返す偽陽性を再現する。
 	ProbeBlank bool `json:"probe_blank,omitempty"`
+	// ProbeResponsesはexit 0の成功probeがsentinel以外の本文を返す偽陽性を再現する。
+	ProbeResponses []string `json:"probe_responses,omitempty"`
+	// ProbeIsErrorはexit 0でもis_error=trueを返す偽陽性probeを再現する。
+	ProbeIsError bool `json:"probe_is_error,omitempty"`
 	// ReviewerMutatesWorktreeはreviewerがBash相当でrepositoryを変更するscenarioで有効化する。
 	ReviewerMutatesWorktree bool `json:"reviewer_mutates_worktree,omitempty"`
 }
@@ -463,6 +467,8 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 		}
 	}
 	r.probeBlankResponse = doc.ProbeBlank
+	r.probeResponses = doc.ProbeResponses
+	r.probeIsError = doc.ProbeIsError
 	w := newWorkflowT(t, st, r)
 	buf := &bytes.Buffer{}
 	w.output = buf

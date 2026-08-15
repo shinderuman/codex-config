@@ -946,12 +946,14 @@ func (w *Workflow) recoveryLoop(
 		probeCompletedAt := w.now().UTC()
 		w.state.RecordModelCall(checkpoint.Role, checkpoint.Model)
 		w.state.RecordModelDuration(checkpoint.Model, probeCompletedAt.Sub(probeStartedAt))
-		// fake runnerの検証不通過は空応答で現れるため、real runnerと同じtyped errorへ正規化する。
+		// fake runnerはreal runnerの応答検証を通らないため、gate側でも契約を強制する。
 		var probeInvalid *runner.ProbeInvalidResponseError
-		if probeErr == nil && strings.TrimSpace(probeResult.Response) == "" {
-			probeErr = &runner.ProbeInvalidResponseError{
-				Model:  checkpoint.Model,
-				Reason: fmt.Errorf("modelが空の応答を返しました"),
+		if probeErr == nil {
+			if contractErr := runner.ValidateProbeResult(probeResult); contractErr != nil {
+				probeErr = &runner.ProbeInvalidResponseError{
+					Model:  checkpoint.Model,
+					Reason: contractErr,
+				}
 			}
 		}
 		w.recordProbeCall(checkpoint, probeResult, probes, probeStartedAt, probeCompletedAt, probeErr)

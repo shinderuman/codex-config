@@ -45,12 +45,14 @@
         "provider-resume-probe-still-down-zero-full-runs",
         "packet-multi-complete-recompacts-to-single",
         "packet-recompact-repeat-multi-stops-worker-error",
-        "packet-resume-multi-complete-recompacts-to-single"
+        "packet-resume-multi-complete-recompacts-to-single",
+        "provider-resume-probe-is-error-exit-zero-stays-unavailable",
+        "provider-resume-probe-sentinel-mismatch-stays-unavailable"
       ]
     },
     {
       "path": "codex/glm-worker/prompts/REVIEWER.md",
-      "sha256": "c0b5f609c87f4e98ce143bb1b4567c28205a8987f2ac4d7cbcdf3c6848501538",
+      "sha256": "05c70a5bd807e9b631d65161e91d2132b22bda40b0239ae5be7d98c0cf36a03b",
       "scenarios": [
         "state-residual-after-removal",
         "state-deleted-value-reflow-alt-path",

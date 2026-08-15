@@ -78,7 +78,10 @@ func (r *mutatingRunner) Run(
 }
 
 func (r *mutatingRunner) Probe(model string) (runner.ProbeResult, error) {
-	return runner.ProbeResult{}, nil
+	return runner.ProbeResult{
+		Response: runner.ProbeSentinel,
+		Usage:    runner.TokenUsage{InputTokens: 1, OutputTokens: 1},
+	}, nil
 }
 
 func newMutationWorkflow(t *testing.T, repoRoot string, steps []runnerStep, mutate func(string) error) (*Workflow, *mutatingRunner, *bytes.Buffer) {

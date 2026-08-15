@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -25,7 +26,7 @@ func newProbeFixture(t *testing.T) (*ClaudeRunner, *state.StateStore, string) {
 	}
 	argumentsPath := filepath.Join(t.TempDir(), "args")
 	commandPath := filepath.Join(t.TempDir(), "fake-claude")
-	commandScript := "#!/bin/sh\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_FILE\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"duration_ms\":7,\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
+	commandScript := "#!/bin/sh\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_FILE\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"GLM_WORKER_PROBE_OK\\n\",\"duration_ms\":7,\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
 	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -111,18 +112,42 @@ func TestProbeRejectsMalformedSuccessResponses(t *testing.T) {
 		{
 			name:    "empty result",
 			script:  "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n",
-			wantErr: "応答本文が空です",
+			wantErr: "sentinel",
 			typed:   true,
 		},
 		{
 			name:    "blank result",
 			script:  "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"  \\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n",
-			wantErr: "応答本文が空です",
+			wantErr: "sentinel",
+			typed:   true,
+		},
+		{
+			name:    "maintenance text",
+			script:  "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"Scheduled maintenance is in progress. Please retry later.\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n",
+			wantErr: "sentinel",
+			typed:   true,
+		},
+		{
+			name:    "access denied text",
+			script:  "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"Access denied: authentication required\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n",
+			wantErr: "sentinel",
+			typed:   true,
+		},
+		{
+			name:    "proxy guard page",
+			script:  "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"<html>407 Proxy Authentication Required</html>\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n",
+			wantErr: "sentinel",
+			typed:   true,
+		},
+		{
+			name:    "sentinel with extra text",
+			script:  "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"GLM_WORKER_PROBE_OK The connection works.\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n",
+			wantErr: "sentinel",
 			typed:   true,
 		},
 		{
 			name:    "zero output tokens",
-			script:  "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}'\n",
+			script:  "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"GLM_WORKER_PROBE_OK\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}'\n",
 			wantErr: "usageが出力tokenを含みません",
 			typed:   true,
 		},
@@ -167,6 +192,64 @@ func TestProbeRejectsMalformedSuccessResponses(t *testing.T) {
 			}
 			if !tc.typed && errors.As(err, &typed) {
 				t.Fatalf("このcaseはtyped不正応答でないべき: %v", err)
+			}
+		})
+	}
+}
+
+func TestProbeRejectsIsErrorResultOnExitZero(t *testing.T) {
+	cases := []struct {
+		name   string
+		result string
+	}{
+		{"maintenance", "The service is temporarily unavailable due to scheduled maintenance."},
+		{"access denied", "Access denied"},
+		{"proxy guard", "Request blocked by proxy: please authenticate"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if runtime.GOOS == "windows" {
+				t.Skip("shell fixtureはUnix系環境向け")
+			}
+			promptDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(promptDir, "WORKER.md"), []byte("system"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			commandPath := filepath.Join(t.TempDir(), "fake-claude")
+			encoded, err := json.Marshal(map[string]any{
+				"type":        "result",
+				"subtype":     "error",
+				"is_error":    true,
+				"result":      tc.result,
+				"usage":       map[string]int{"input_tokens": 1, "output_tokens": 1},
+				"duration_ms": 5,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			commandScript := "#!/bin/sh\nprintf '%s\\n' '" + string(encoded) + "'\n"
+			if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			st := newTestStateStore(t)
+			if err := st.Write("task.id", "12345678-aaaa-bbbb-cccc-dddddddddddd"); err != nil {
+				t.Fatal(err)
+			}
+			r := NewClaudeRunner(config.AppConfig{
+				RepoRoot:        t.TempDir(),
+				RepoShort:       "abcdef123456",
+				PromptDir:       promptDir,
+				ClaudeBin:       commandPath,
+				ClaudeConfigDir: filepath.Join(t.TempDir(), "claude-home"),
+			}, st)
+
+			_, err = r.Probe("opus")
+			var typed *ProbeInvalidResponseError
+			if !errors.As(err, &typed) {
+				t.Fatalf("exit 0でもis_error=trueはProbeInvalidResponseErrorであるべき: %v", err)
+			}
+			if !strings.Contains(err.Error(), "is_error=true") {
+				t.Fatalf("err = %v, want is_error=true理由", err)
 			}
 		})
 	}

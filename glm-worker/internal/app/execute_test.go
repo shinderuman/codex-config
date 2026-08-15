@@ -57,7 +57,10 @@ func (r *fakeRunner) Probe(model string) (runner.ProbeResult, error) {
 	if index < len(r.probeErrs) {
 		err = r.probeErrs[index]
 	}
-	return runner.ProbeResult{}, err
+	return runner.ProbeResult{
+		Response: runner.ProbeSentinel,
+		Usage:    runner.TokenUsage{InputTokens: 1, OutputTokens: 1},
+	}, err
 }
 
 func (r *fakeRunner) factory() RunnerFactory {

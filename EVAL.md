@@ -60,6 +60,13 @@
 - worker errorの診断tailは6 KiBを超えない。
 
 
+## provider障害回復・probe gate
+
+- probe成功はJSON正常・type=result・is_error=false・応答trim後sentinel `GLM_WORKER_PROBE_OK`完全一致・usage出力tokenありの全成立だけとする。probe promptはreasoning不要のsentinel返却だけを要求する固定文にする。
+- process exit 0でもis_error=trueやsentinel不一致を成功扱いせず、probe-contract分類で追加probeのAI costなく初回provider-unavailableへfail closedし元task/session/checkpointを保持する。
+- 偽陽性がreviewを通過した原因はexit codeと非空responseのpositive testへの偏り、成功後resume境界のnegative caseとsentinel契約のscenario欠落であるため、gate変更ではfalse-positive caseを独立testとscenario(corpus `provider-resume-probe-*`)へ要求する。追加AI callやstatus page依存でprobeを補強しない。
+
+
 ## 統計
 
 - 新規タスク開始時とreset時に前タスク統計をarchiveする。

@@ -487,6 +487,54 @@
       "probe_errors": ["API Error: 503 Service Unavailable", "API Error: 503 Service Unavailable", "API Error: 503 Service Unavailable", "API Error: 503 Service Unavailable"],
       "expected_probe_count": 4,
       "expected_run_count": 0
+    },
+    {
+      "id": "provider-resume-probe-is-error-exit-zero-stays-unavailable",
+      "behavior": "resumeのprobe gateはprocess exit 0でtype=resultのJSONでもis_error=trueを成功扱いせず本taskを実行せず、probe-contract分類で初回provider-unavailableへfail closedする",
+      "request": "通常の実装タスク",
+      "entry": "resume",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": [
+        "README.md"
+      ],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: never used", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus"],
+      "expected_packet_status": "IMPLEMENTED",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "provider-unavailable",
+      "must_not_pass": true,
+      "expected_error_status": "PROVIDER_UNAVAILABLE",
+      "probe_is_error": true,
+      "expected_probe_count": 1,
+      "expected_run_count": 0
+    },
+    {
+      "id": "provider-resume-probe-sentinel-mismatch-stays-unavailable",
+      "behavior": "resumeのprobe gateはJSON正常・usageありでも応答本文が固定sentinelと完全一致しないmaintenance/access denied/proxy guard等のsentinel以外の予期しない本文を成功扱いせず、probe-contract分類で初回provider-unavailableへfail closedする",
+      "request": "通常の実装タスク",
+      "entry": "resume",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": [
+        "README.md"
+      ],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: never used", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus"],
+      "expected_packet_status": "IMPLEMENTED",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "provider-unavailable",
+      "must_not_pass": true,
+      "expected_error_status": "PROVIDER_UNAVAILABLE",
+      "probe_responses": ["Scheduled maintenance is in progress. Please retry later."],
+      "expected_probe_count": 1,
+      "expected_run_count": 0
     }
   ]
 }
