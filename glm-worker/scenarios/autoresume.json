@@ -1,0 +1,240 @@
+{
+  "version": 1,
+  "description": "glm-auto-resume.md予約契約のescaped bug corpus。automation tool応答・検証結果のfixture入力列に対し、internal/autoresume test内の契約実装が期待行動列(create/update/delete/verify/停止・成功報告可否)を決定論検証する。実障害5種(誤成功誤認・DTSTART付き即時create・placeholder残留・FAIL/UNAVAILABLE成功扱い・既存更新時新規placeholder)を必須scenarioで固定する。live model・network不使用。",
+  "scenarios": [
+    {
+      "id": "autoresume-existing-automation-updates-same-id-no-placeholder",
+      "behavior": "既存automationは同一ID直接updateで新規placeholderを作らない(障害5)",
+      "resume_at": "2026-08-12T20:01:20+09:00",
+      "existing_automation_id": "glm-worker-resume-testrepo12-12345678",
+      "create_responses": [],
+      "update_responses": ["Updated automation in the app. automation_id: glm-worker-resume-testrepo12-12345678, status ACTIVE"],
+      "delete_errors": [],
+      "verifications": [{"outcome": "PASS", "manual_app_confirmed": false}],
+      "expected_reserved": true,
+      "expected_actions": ["update_active:glm-worker-resume-testrepo12-12345678", "verify", "report_reserved"],
+      "expected_fallback_id": ""
+    },
+    {
+      "id": "autoresume-error-response-not-misread-as-success",
+      "behavior": "error/invalid応答を作成失敗とする(障害1)",
+      "resume_at": "2026-08-12T11:01:20Z",
+      "existing_automation_id": "",
+      "create_responses": ["Error: invalid arguments supplied to automation_update"],
+      "update_responses": [],
+      "delete_errors": [],
+      "verifications": [],
+      "expected_reserved": false,
+      "expected_actions": ["create_placeholder", "report_failure"],
+      "expected_fallback_id": ""
+    },
+    {
+      "id": "autoresume-empty-response-not-misread-as-success",
+      "behavior": "空応答を作成失敗とし第二段階へ進まない(障害1)",
+      "resume_at": "2026-08-12T11:01:20Z",
+      "existing_automation_id": "",
+      "create_responses": ["   \n"],
+      "update_responses": [],
+      "delete_errors": [],
+      "verifications": [],
+      "expected_reserved": false,
+      "expected_actions": ["create_placeholder", "report_failure"],
+      "expected_fallback_id": ""
+    },
+    {
+      "id": "autoresume-suggestion-card-response-not-success",
+      "behavior": "候補カード表示応答を作成失敗とする(障害1)",
+      "resume_at": "2026-08-12T11:01:20Z",
+      "existing_automation_id": "",
+      "create_responses": ["Rendered suggestion card for automation creation. suggested_create: glm-worker-resume-testrepo12-12345678"],
+      "update_responses": [],
+      "delete_errors": [],
+      "verifications": [],
+      "expected_reserved": false,
+      "expected_actions": ["create_placeholder", "report_failure"],
+      "expected_fallback_id": ""
+    },
+    {
+      "id": "autoresume-success-response-without-id-not-success",
+      "behavior": "成功応答でもautomation IDがなければ候補成功としない(障害1)",
+      "resume_at": "2026-08-12T11:01:20Z",
+      "existing_automation_id": "",
+      "create_responses": ["Created automation in the app"],
+      "update_responses": [],
+      "delete_errors": [],
+      "verifications": [],
+      "expected_reserved": false,
+      "expected_actions": ["create_placeholder", "report_failure"],
+      "expected_fallback_id": ""
+    },
+    {
+      "id": "autoresume-id-only-response-without-success-marker-not-success",
+      "behavior": "明示成功markerのないIDのみの応答を作成失敗とする(障害1)",
+      "resume_at": "2026-08-12T11:01:20Z",
+      "existing_automation_id": "",
+      "create_responses": ["automation_id: auto-e5b1"],
+      "update_responses": [],
+      "delete_errors": [],
+      "verifications": [],
+      "expected_reserved": false,
+      "expected_actions": ["create_placeholder", "report_failure"],
+      "expected_fallback_id": ""
+    },
+    {
+      "id": "autoresume-new-automation-two-stage-no-immediate-dtstart-create",
+      "behavior": "新規はDTSTARTなしPAUSED placeholder→応答ID→同一ID updateの二段階で即時DTSTART createを行わない(障害2)",
+      "resume_at": "2026-08-12T19:01:20+08:00",
+      "existing_automation_id": "",
+      "create_responses": ["Created automation in the app. Automation ID: auto-9f2c.placeholder"],
+      "update_responses": ["Updated automation in the app. automation_id: auto-9f2c.placeholder, status ACTIVE"],
+      "delete_errors": [],
+      "verifications": [{"outcome": "PASS", "manual_app_confirmed": false}],
+      "expected_reserved": true,
+      "expected_actions": ["create_placeholder", "update_active:auto-9f2c.placeholder", "verify", "report_reserved"],
+      "expected_fallback_id": ""
+    },
+    {
+      "id": "autoresume-update-failure-cleans-up-placeholder",
+      "behavior": "第二段階update失敗でplaceholderを削除し半端な予約を残さない(障害3)",
+      "resume_at": "2026-08-12T11:01:20Z",
+      "existing_automation_id": "",
+      "create_responses": ["Created automation in the app. Automation ID: auto-77ab"],
+      "update_responses": ["error: automation update rejected"],
+      "delete_errors": [""],
+      "verifications": [],
+      "expected_reserved": false,
+      "expected_actions": ["create_placeholder", "update_active:auto-77ab", "delete:auto-77ab", "report_failure"],
+      "expected_fallback_id": ""
+    },
+    {
+      "id": "autoresume-update-failure-delete-also-fails-reports-id",
+      "behavior": "削除も失敗した場合automation IDを手動fallback案内へ明示する(障害3)",
+      "resume_at": "2026-08-12T11:01:20Z",
+      "existing_automation_id": "",
+      "create_responses": ["Created automation in the app. Automation ID: auto-c31d"],
+      "update_responses": ["failed to update automation"],
+      "delete_errors": ["automation delete tool call failed"],
+      "verifications": [],
+      "expected_reserved": false,
+      "expected_actions": ["create_placeholder", "update_active:auto-c31d", "delete:auto-c31d", "report_failure"],
+      "expected_fallback_id": "auto-c31d"
+    },
+    {
+      "id": "autoresume-verify-fail-fail-closed-with-cleanup",
+      "behavior": "verify FAILは再試行1回後も成功扱いせず新規作成分を削除する(障害4)",
+      "resume_at": "2026-08-12T11:01:20Z",
+      "existing_automation_id": "",
+      "create_responses": ["Created automation in the app. Automation ID: auto-5e0f"],
+      "update_responses": [
+        "Updated automation in the app. automation_id: auto-5e0f, status ACTIVE",
+        "Updated automation in the app. automation_id: auto-5e0f, status ACTIVE"
+      ],
+      "delete_errors": [""],
+      "verifications": [
+        {"outcome": "FAIL", "manual_app_confirmed": false},
+        {"outcome": "FAIL", "manual_app_confirmed": false}
+      ],
+      "expected_reserved": false,
+      "expected_actions": [
+        "create_placeholder",
+        "update_active:auto-5e0f",
+        "verify",
+        "update_active:auto-5e0f",
+        "verify",
+        "delete:auto-5e0f",
+        "report_failure"
+      ],
+      "expected_fallback_id": ""
+    },
+    {
+      "id": "autoresume-verify-fail-single-retry-recovers",
+      "behavior": "verify FAIL後のupdate再試行は最大1回でPASSなら予約成功とする",
+      "resume_at": "2026-08-12T11:01:20Z",
+      "existing_automation_id": "",
+      "create_responses": ["Created automation in the app. Automation ID: auto-8b44"],
+      "update_responses": [
+        "Updated automation in the app. automation_id: auto-8b44, status ACTIVE",
+        "Updated automation in the app. automation_id: auto-8b44, status ACTIVE"
+      ],
+      "delete_errors": [],
+      "verifications": [
+        {"outcome": "FAIL", "manual_app_confirmed": false},
+        {"outcome": "PASS", "manual_app_confirmed": false}
+      ],
+      "expected_reserved": true,
+      "expected_actions": [
+        "create_placeholder",
+        "update_active:auto-8b44",
+        "verify",
+        "update_active:auto-8b44",
+        "verify",
+        "report_reserved"
+      ],
+      "expected_fallback_id": ""
+    },
+    {
+      "id": "autoresume-verify-unavailable-unconfirmed-is-failure",
+      "behavior": "UNAVAILABLEでapp確認不能なら予約成功としない(障害4)",
+      "resume_at": "2026-08-12T11:01:20Z",
+      "existing_automation_id": "",
+      "create_responses": ["Created automation in the app. Automation ID: auto-d90a"],
+      "update_responses": ["Updated automation in the app. automation_id: auto-d90a, status ACTIVE"],
+      "delete_errors": [""],
+      "verifications": [{"outcome": "UNAVAILABLE", "manual_app_confirmed": false}],
+      "expected_reserved": false,
+      "expected_actions": ["create_placeholder", "update_active:auto-d90a", "verify", "delete:auto-d90a", "report_failure"],
+      "expected_fallback_id": ""
+    },
+    {
+      "id": "autoresume-verify-unavailable-confirmed-app-is-reserved",
+      "behavior": "UNAVAILABLEでもapp表示確認済みの場合だけ予約成功とする",
+      "resume_at": "2026-08-12T11:01:20Z",
+      "existing_automation_id": "",
+      "create_responses": ["Created automation in the app. Automation ID: auto-a1e7"],
+      "update_responses": ["Updated automation in the app. automation_id: auto-a1e7, status ACTIVE"],
+      "delete_errors": [],
+      "verifications": [{"outcome": "UNAVAILABLE", "manual_app_confirmed": true}],
+      "expected_reserved": true,
+      "expected_actions": ["create_placeholder", "update_active:auto-a1e7", "verify", "report_reserved"],
+      "expected_fallback_id": ""
+    },
+    {
+      "id": "autoresume-existing-automation-verify-fail-retries-same-id-without-create",
+      "behavior": "既存automationのverify FAILでも新規placeholderを作らず同一ID再試行だけ行う(障害4・5)",
+      "resume_at": "2026-08-12T11:01:20Z",
+      "existing_automation_id": "glm-worker-resume-testrepo12-12345678",
+      "create_responses": [],
+      "update_responses": [
+        "Updated automation in the app. automation_id: glm-worker-resume-testrepo12-12345678, status ACTIVE",
+        "Updated automation in the app. automation_id: glm-worker-resume-testrepo12-12345678, status ACTIVE"
+      ],
+      "delete_errors": [],
+      "verifications": [
+        {"outcome": "FAIL", "manual_app_confirmed": false},
+        {"outcome": "PASS", "manual_app_confirmed": false}
+      ],
+      "expected_reserved": true,
+      "expected_actions": [
+        "update_active:glm-worker-resume-testrepo12-12345678",
+        "verify",
+        "update_active:glm-worker-resume-testrepo12-12345678",
+        "verify",
+        "report_reserved"
+      ],
+      "expected_fallback_id": ""
+    },
+    {
+      "id": "autoresume-invalid-resume-time-fails-without-tool-calls",
+      "behavior": "不正なRFC3339はtool呼出前に予約失敗とする",
+      "resume_at": "2026-08-12 20:01:20+09:00",
+      "existing_automation_id": "",
+      "create_responses": [],
+      "update_responses": [],
+      "delete_errors": [],
+      "verifications": [],
+      "expected_reserved": false,
+      "expected_actions": ["report_failure"],
+      "expected_fallback_id": ""
+    }
+  ]
+}

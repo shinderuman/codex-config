@@ -35,6 +35,8 @@
 - 候補成功後`glm-worker --verify-auto-resume`で保存済みTOML実体とSQLite rowのid・status ACTIVE・target thread・rrule完全契約(DTSTART+RRULE:FREQ=DAILY;COUNT=1)・`next_run_at`絶対時刻を照合する。未作成・row欠損・ID/status/thread/time/rrule不一致を決定論検出し、返り値検査の見落としを問わずpostconditionがFAILとなる二段防御とする。
 - `VERIFICATION: PASS`だけが予約成功の根拠となる。`VERIFICATION: FAIL`時はschema引数を修正してupdate(二段階作成の場合は第二段階)を最大1回再試行し、その後新規作成分のautomationを削除または停止して手動`glm-worker --resume`fallbackを明示する。
 - `VERIFICATION: UNAVAILABLE`時はCodex app表示で同じID・対象task・時刻を確認できた場合だけ予約成功とし、確認不能なら作成失敗とする。
+- 自動再開予約契約は`glm-worker/scenarios/autoresume.json`のescaped bug corpusと`internal/autoresume` test内の契約実装で固定Evalする。応答fixtureと検証結果に対する期待行動列(create/update/delete/verify/停止・成功報告可否)を決定論検証し、実障害5種を必須scenarioとして欠落時はtestが失敗する。成功応答は明示成功marker(Created/Updated automation in the app・success語幹)とautomation IDの両方を要求し、invalid/error/failed/候補カード/空・IDのみを失敗とする。
+- `autoresume-manifest.json`は`glm-auto-resume.md`のSHA-256を固定し、内容変更でhash mismatchにより期待行動の再照合を強制する。
 
 
 ## GLM軽量化
