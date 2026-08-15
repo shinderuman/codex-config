@@ -9,10 +9,24 @@
 - automation名は`AUTO_RESUME_KEY`を使い、同名があれば新規作成せず更新する。
 - 実行時刻は`AUTO_RESUME_AT_RFC3339`が表す絶対時刻とする。offsetを捨てずUTCへ変換し、時刻前の固定間隔pollingは行わない。
 - heartbeat schedulerは`DTSTART`の`TZID`を`next_run_at`計算へ反映せず、壁時計部分をUTCとして扱う。`DTSTART;TZID=Asia/Tokyo`は使わない。
-- 新規作成と既存更新のどちらでも、`AUTO_RESUME_AT_RFC3339`をUTCへ変換し、UTCの年月日時分秒を`DTSTART:YYYYMMDDTHHMMSS`、繰り返しを`RRULE:FREQ=DAILY;COUNT=1`とする1回限りの予約を同じautomation IDへ設定する。
-- 既存heartbeatの時刻更新でも、同じautomation IDへUTCへ変換した`DTSTART`を指定する。JSTやCSTの壁時計時刻をそのまま渡さない。
+- 絶対時刻の指定は、`AUTO_RESUME_AT_RFC3339`をUTCへ変換し、UTCの年月日時分秒を`DTSTART:YYYYMMDDTHHMMSS`、繰り返しを`RRULE:FREQ=DAILY;COUNT=1`とする1回限りの予約として設定する。JSTやCSTの壁時計時刻をそのまま渡さない。
 - automationの実行環境は`REPO_ROOT`と同じローカルcheckoutを選ぶ。別worktreeではrepo hashが変わりresume stateを参照できない。
 - 生のautomation directiveやRRULEを本文へ出力せず、利用可能なtool schemaに従う。
+
+### 既存automationの更新
+
+- 同名のheartbeat automationが既に存在する場合、そのautomation IDへ絶対時刻anchorの`DTSTART`と`RRULE:FREQ=DAILY;COUNT=1`を直接updateする。placeholderを作り直さない。
+
+### 新規automationの二段階作成
+
+- automationが存在しない場合、DTSTART付きの即時createはCodex appに`Immediate automation creates cannot include DTSTART`として拒否されるため、DTSTART付きの単一段階createは行わない。
+- 第一段階として、DTSTARTなし・status PAUSEDの最小placeholder scheduleでautomationを作成する。placeholder scheduleは時刻帯や現在時刻によらず常にfuture occurrenceを持つ`RRULE:FREQ=HOURLY`を使う。特定の壁時計時刻に依存する選び方はしない。PAUSEDのためplaceholderがそのまま実行されることはない。
+- `suggested_create`は候補カードの表示のみであり永続automationではない。第一段階でも`suggested_create`を呼ばない。
+- 第一段階の成功応答に含まれるautomation IDだけを正確なIDとして採用する。成功前にIDを推測・仮定しない。
+- 第二段階として、第一段階で得た同一IDへ絶対時刻anchorの`DTSTART`と`RRULE:FREQ=DAILY;COUNT=1`を設定し、statusをACTIVEへupdateする。
+- 第一段階のcreate失敗を成功扱いしない。失敗応答・automation IDを含まない応答の場合は第二段階へ進まず、作成失敗として扱う。
+- 第一段階成功後の第二段階update失敗の場合、作成済みplaceholder automationをbest-effortで削除し、PAUSEDの半端な予約を残さない。削除にも失敗した場合はそのautomation IDを手動fallback案内に明示する。
+- 二段階作成の最終verify失敗もfail closedとする。予約済みと報告せず、作成済みautomationを削除または停止してから手動`glm-worker --resume`fallbackを明示する。
 
 ### automation応答の検査
 
@@ -27,7 +41,7 @@
 - 候補成功後、ただちに同じtool orchestration内で`REPO_ROOT`において`glm-worker --verify-auto-resume <AUTO_RESUME_KEY> <AUTO_RESUME_AT_RFC3339> <現在のCodex task thread ID>`を実行する。thread IDは現在のCodexタスクのIDを使う。
 - この検証は保存済みautomation TOML実体(`~/.codex/automations/<key>/automation.toml`)のid・name・status ACTIVE・target_thread_id・rrule完全契約(UTC DTSTART + 改行 + `RRULE:FREQ=DAILY;COUNT=1`の正確な2行)と、`~/.codex/sqlite/codex-dev.db`の`automations.next_run_at`・id・status・rruleを期待ID・対象thread・status ACTIVE・絶対時刻で照合する。Codex appのSQLite automations表にthread_id列はなく、対象threadはTOMLのtarget_thread_idでのみ検証する。
 - `VERIFICATION: PASS`だけが予約成功の根拠となる。この時点で初めてrate limit停止を報告してよい。
-- `VERIFICATION: FAIL`の場合、予約済みと報告しない。検証理由からschema引数の誤りを特定し、引数を修正して`automation_update`のcreate/updateを再試行する。再試行は最大1回まで。再試行後もFAILの場合、作成不能として手動`glm-worker --resume`fallbackを明示する。
+- `VERIFICATION: FAIL`の場合、予約済みと報告しない。検証理由からschema引数の誤りを特定し、引数を修正して`automation_update`のupdate(二段階作成の場合は第二段階)を再試行する。再試行は最大1回まで。再試行後もFAILの場合、新規作成分のautomationを削除または停止し、作成不能として手動`glm-worker --resume`fallbackを明示する。
 - `VERIFICATION: UNAVAILABLE`の場合(sqlite3不在・DB/schema読取不能)、Codex app上のautomation表示で同じautomation ID・対象task・次回実行時刻が意図したJST時刻と一致することを確認した場合だけ予約成功とする。確認不能な場合は作成失敗とし、手動`glm-worker --resume`fallbackを明示する。
 
 ## wake時

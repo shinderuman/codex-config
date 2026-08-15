@@ -199,7 +199,7 @@ glm-worker --resume
 Codex appでthread heartbeat automationを利用できる場合は、reset時刻の2分後に現在のCodexタスクを自動でwakeする。
 wake時は同じローカルcheckoutでtask IDと`rate-limited`状態を照合してから`glm-worker --resume`を実行する。
 別worktree、reset済みtask、task IDが変わった状態では再開しない。再度rate limitになった場合は同じautomationを新しい時刻へ更新する。
-automation時刻はRFC3339のoffsetを保持してUTCへ変換する。heartbeat schedulerは`TZID`を`next_run_at`計算へ反映しないため、`DTSTART;TZID=Asia/Tokyo`は使わず、UTCの壁時計値を1回限りの`DTSTART`へ設定する。toolの成功応答だけで完了扱いせず、SQLiteの`automations.next_run_at`またはCodex app上の次回実行時刻が意図したJST時刻と一致することを確認する。
+automation時刻はRFC3339のoffsetを保持してUTCへ変換する。heartbeat schedulerは`TZID`を`next_run_at`計算へ反映しないため、`DTSTART;TZID=Asia/Tokyo`は使わず、UTCの壁時計値を1回限りの`DTSTART`へ設定する。既存automationは同一IDへ直接updateする。新規作成はDTSTART付き即時createがCodex appに拒否されるため、DTSTARTなし・PAUSED・常にfuture occurrenceを持つplaceholderを作成して成功応答から正確なIDを得て、同一IDを目的の絶対時刻DTSTARTと`COUNT=1`へupdateしてACTIVE化する二段階作成とする。update失敗時はplaceholderをbest-effort削除し、最終verify失敗もfail closedとする。toolの成功応答だけで完了扱いせず、SQLiteの`automations.next_run_at`またはCodex app上の次回実行時刻が意図したJST時刻と一致することを確認する。
 
 
 ## provider一時障害からの回復

@@ -26,12 +26,14 @@
 - rate limit出力にtask ID、repo root、2分の猶予を加えた自動再開時刻、重複防止keyを含める。
 - 自動再開automationは同じローカルCodexタスクへ紐づき、別worktreeを使わない。
 - wake時にtask IDと`rate-limited`状態を照合し、古い予約から`--resume`しない。
-- 新規作成・既存更新ともRFC3339時刻をUTCへ変換し、`TZID`なしの1回限りの`DTSTART`へ設定する。
+- 既存automationはRFC3339時刻をUTCへ変換し、`TZID`なしの1回限りの`DTSTART`を同一automation IDへ直接updateする。
+- 新規作成は二段階とする。DTSTART付き即時createは`Immediate automation creates cannot include DTSTART`で拒否されるため、第一段階でDTSTARTなし・PAUSED・常にfuture occurrenceを持つ`RRULE:FREQ=HOURLY`のplaceholderを作成して成功応答から正確なIDを得て、第二段階で同一IDを目的のUTC絶対時刻DTSTARTと`COUNT=1`へupdateしてACTIVE化する。
+- 二段階作成では、create失敗を成功扱いしない、成功前にIDを推測しない、create成功後のupdate失敗でplaceholderをbest-effort削除して半端な予約を残さない、最終verify失敗もfail closedとする。placeholderは特定の壁時計時刻に依存しない。
 - automation toolの成功応答だけで完了扱いせず、SQLiteの`automations.next_run_at`またはCodex app上の次回実行が意図したJST時刻と一致することを確認する。
 - `automation_update`の返り値全体を検査し、invalid/error/空/候補カード表示を作成失敗として扱う。過去にinvalid arguments文字列をcontentだけ読んで空出力と誤認した実障害がある。tool応答の行動検証はCodex tool境界の問題であり後続固定Evalの対象。
 - 明示的な作成・更新成功とautomation IDだけを候補成功とし、`suggested_create`を使わない。
 - 候補成功後`glm-worker --verify-auto-resume`で保存済みTOML実体とSQLite rowのid・status ACTIVE・target thread・rrule完全契約(DTSTART+RRULE:FREQ=DAILY;COUNT=1)・`next_run_at`絶対時刻を照合する。未作成・row欠損・ID/status/thread/time/rrule不一致を決定論検出し、返り値検査の見落としを問わずpostconditionがFAILとなる二段防御とする。
-- `VERIFICATION: PASS`だけが予約成功の根拠となる。`VERIFICATION: FAIL`時はschema引数を修正してcreate/updateを最大1回再試行し、その後手動`glm-worker --resume`fallbackを明示する。
+- `VERIFICATION: PASS`だけが予約成功の根拠となる。`VERIFICATION: FAIL`時はschema引数を修正してupdate(二段階作成の場合は第二段階)を最大1回再試行し、その後新規作成分のautomationを削除または停止して手動`glm-worker --resume`fallbackを明示する。
 - `VERIFICATION: UNAVAILABLE`時はCodex app表示で同じID・対象task・時刻を確認できた場合だけ予約成功とし、確認不能なら作成失敗とする。
 
 
