@@ -198,6 +198,114 @@ PACKET_END
 	}
 }
 
+func TestParseRejectsNeedsSolReviewWithNoneTargets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "output.txt")
+	content := `PACKET_BEGIN
+STATUS: NEEDS_SOL_REVIEW
+RISK: HIGH
+SUMMARY: review
+REQUIREMENT_COVERAGE: covered
+INVARIANTS: preserved
+TEST_EVIDENCE: pass
+ISSUES: none
+RESIDUAL_RISK: review required
+TARGETS: none
+ARTIFACTS: none
+SOL_QUESTION: q
+PACKET_END
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Parse(path)
+	if err == nil || !IsConstraintError(err) {
+		t.Fatalf("NEEDS_SOL_REVIEWのTARGETS: noneをpacket制約違反として拒否する必要があります: %v", err)
+	}
+	if !strings.Contains(err.Error(), "TARGETS") {
+		t.Fatalf("拒否理由がTARGETSへ言及していません: %v", err)
+	}
+	if got := RejectCategory(err); got != "targets-none" {
+		t.Fatalf("reject category = %q want targets-none", got)
+	}
+}
+
+func TestValidateAcceptsNoneTargetsOutsideNeedsSolReview(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines []string
+	}{
+		{
+			name: "pass",
+			lines: []string{
+				"STATUS: PASS", "RISK: LOW", "SUMMARY: s", "REQUIREMENT_COVERAGE: c",
+				"INVARIANTS: i", "TEST_EVIDENCE: e", "ISSUES: none", "RESIDUAL_RISK: none",
+				"TARGETS: none", "ARTIFACTS: none",
+			},
+		},
+		{
+			name: "fix required",
+			lines: []string{
+				"STATUS: FIX_REQUIRED", "RISK: HIGH", "SUMMARY: s", "REQUIREMENT_COVERAGE: c",
+				"INVARIANTS: i", "TEST_EVIDENCE: e", "ISSUES: i", "RESIDUAL_RISK: r",
+				"TARGETS: none", "ARTIFACTS: none",
+			},
+		},
+		{
+			name: "decision",
+			lines: []string{
+				"STATUS: NEEDS_SOL_DECISION", "RISK: HIGH", "DECISION: d", "EVIDENCE: e",
+				"OPTIONS: o", "RECOMMENDATION: r", "TEST_OBLIGATIONS: t",
+				"TARGETS: none", "ARTIFACTS: none",
+			},
+		},
+		{
+			name: "sol review with concrete targets",
+			lines: []string{
+				"STATUS: NEEDS_SOL_REVIEW", "RISK: HIGH", "SUMMARY: s", "REQUIREMENT_COVERAGE: c",
+				"INVARIANTS: i", "TEST_EVIDENCE: e", "ISSUES: i", "RESIDUAL_RISK: r",
+				"TARGETS: workflow.go:reviewUntilStable", "ARTIFACTS: none", "SOL_QUESTION: q",
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := Validate(FromLines(test.lines)); err != nil {
+				t.Fatalf("none TARGETSはNEEDS_SOL_REVIEW以外で許容されるべき: %v", err)
+			}
+		})
+	}
+}
+
+func TestRejectCategoryKeepsDuplicateTargetsInMalformed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "output.txt")
+	content := `PACKET_BEGIN
+STATUS: PASS
+RISK: LOW
+SUMMARY: s
+REQUIREMENT_COVERAGE: c
+INVARIANTS: i
+TEST_EVIDENCE: e
+ISSUES: none
+RESIDUAL_RISK: none
+TARGETS: none
+TARGETS: none
+ARTIFACTS: none
+PACKET_END
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Parse(path)
+	if err == nil || !strings.Contains(err.Error(), "TARGETSが重複") {
+		t.Fatalf("TARGETS重複を検出する必要があります: %v", err)
+	}
+	if got := RejectCategory(err); got != "malformed" {
+		t.Fatalf("重複TARGETSのreject category = %q want malformed", got)
+	}
+}
+
 func TestTailReturnsRequestedLines(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "output.txt")
 	if err := os.WriteFile(path, []byte("one\ntwo\nthree\nfour\n"), 0o600); err != nil {

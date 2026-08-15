@@ -55,6 +55,10 @@ func RejectCategory(err error) string {
 		return "size"
 	case strings.Contains(msg, "必須field"):
 		return "missing-field"
+	// 固有の理由句へmatchさせる。"TARGETS"だけだと重複field錯誤(packet field TARGETSが重複しています)を
+	// targets-noneへ誤集計し、新契約の拒否metricを汚染する。
+	case strings.Contains(msg, "TARGETSはnoneにできません"):
+		return "targets-none"
 	case strings.Contains(msg, "RISK"):
 		return "risk"
 	case strings.Contains(msg, "STATUS"):
@@ -198,6 +202,12 @@ func Validate(value Packet) error {
 	}
 	if status == "PASS" && value.Risk() != "LOW" {
 		return &constraintError{reason: "PASSのRISKはLOWにしてください。高リスクならNEEDS_SOL_REVIEWを返してください"}
+	}
+	// SolはNEEDS_SOL_REVIEWをTARGETSとSOL_QUESTIONに限定した確認で消費するため、
+	// noneはSolへ確認対象を与えず圧縮意味情報gateに反する。機械検証できる最小契約のみここへ置き、
+	// 自然言語の意味充足そのものはreviewer判断へ委ねる。
+	if status == "NEEDS_SOL_REVIEW" && strings.EqualFold(value.Fields["TARGETS"], "none") {
+		return &constraintError{reason: "NEEDS_SOL_REVIEWのTARGETSはnoneにできません: Solが読むべき最小対象をfile:symbol/行範囲で指定してください"}
 	}
 
 	for _, field := range required {

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "prompt/instruction変更の品質gateとして、fake runnerが返すpacket列に対するproduction workflow/prompt/gateの終端検証を行うscenario corpus。各scenarioはUSER_REQUEST・scripted packet列・期待model/routing/terminalを持ちproduction経路へ入力し、request/MODE伝達・risk/model routing・FIX_REQUIRED/NEEDS_SOL_REVIEW/NEEDS_SOL_DECISION終端・risk floor/self-protectionによるPASS拒否を決定論検証する。manifest.jsonは根拠instruction fileのSHA-256を固定し内容変更でhash mismatchによりtestを失敗させ影響scenarioの再確認を強制する。永続状態バグそのものの自動検出・modelの規則遵守の検証は行わず後続固定Evalの対象。install_smoke.shの配置grepとは役割を分ける。live model・networkは呼ばない。",
+  "description": "prompt/instruction変更の品質gateとして、fake runnerが返すpacket列に対するproduction workflow/prompt/gateの終端検証を行うscenario corpus。各scenarioはUSER_REQUEST・scripted packet列・期待model/routing/terminalを持ちproduction経路へ入力し、request/MODE伝達・risk/model routing・FIX_REQUIRED/NEEDS_SOL_REVIEW/NEEDS_SOL_DECISION終端・risk floor/self-protectionによるPASS拒否・NEEDS_SOL_REVIEWのTARGETS契約を決定論検証する。manifest.jsonは根拠instruction fileのSHA-256を固定し内容変更でhash mismatchによりtestを失敗させ影響scenarioの再確認を強制する。永続状態バグそのものの自動検出・modelの規則遵守の検証は行わず後続固定Evalの対象。install_smoke.shの配置grepとは役割を分ける。live model・networkは呼ばない。",
   "scenarios": [
     {
       "id": "state-residual-after-removal",
@@ -351,6 +351,52 @@
       "expected_packet_risk": "LOW",
       "expected_task_status": "complete",
       "must_not_pass": false
+    },
+    {
+      "id": "high-sol-review-targets-none-recompacts-to-concrete-targets",
+      "behavior": "HIGH変更のreviewerがTARGETS: noneのNEEDS_SOL_REVIEWを返した場合、wrapperはSolへ確認対象を与えない契約違反として採用せず、同一reviewer sessionでpacketだけの再圧縮を1回要求し、具体的TARGETS付きのNEEDS_SOL_REVIEWへ収束する",
+      "request": "provider呼出集計に新しいcall種別を加え、task集計とprobe集計の加法整合性を保つ",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md",
+        "codex/glm-worker/prompts/REVIEWER.md"
+      ],
+      "changed_paths": ["glm-worker/internal/state/telemetry.go"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: HIGH", "SUMMARY: 呼出種別を分離し変更前後でtask+probe=totalの集計契約を保存。失敗境界は種別未集計で加法不一致として検出される", "REQUIREMENT_COVERAGE: covered", "TESTS: scenarioで種別別和と加法整合性を検証", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"raw": "PACKET_BEGIN\nSTATUS: NEEDS_SOL_REVIEW\nRISK: HIGH\nSUMMARY: review without targets\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: i\nRESIDUAL_RISK: r\nTARGETS: none\nARTIFACTS: none\nSOL_QUESTION: q\nPACKET_END\n"},
+        {"lines": ["STATUS: NEEDS_SOL_REVIEW", "RISK: HIGH", "SUMMARY: 集計区分追加後もtask+probe=totalの加法整合性を維持する", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: 種別別集計の和が全体呼出数と一致する", "TEST_EVIDENCE: scenarioで種別別和・総和一致・重複計上なしを検証", "ISSUES: none", "RESIDUAL_RISK: 実運用での集計欠落観測は未実施", "TARGETS: glm-worker/internal/state/telemetry.go:RecordModelCallLog", "ARTIFACTS: none", "SOL_QUESTION: 集計区分の意味と加法整合性の維持方針を採否する"]}
+      ],
+      "expected_models": ["opus", "sonnet", "sonnet"],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true,
+      "expected_stats": {"model_calls": 3, "worker_calls": 1, "reviewer_calls": 2, "transient_retries": 0, "resume_commands": 0, "probe_success": 0, "probe_failure": 0, "total_ai_calls": 3}
+    },
+    {
+      "id": "high-semantic-info-gap-returns-fix-required-then-sol-review",
+      "behavior": "HIGH変更のworker報告へ変更前後の契約・失敗境界・主要状態遷移等の意味情報が圧縮されていない場合、reviewerはPASSせずFIX_REQUIREDで同一worker sessionの再出力へ戻し、意味情報を圧縮した後はNEEDS_SOL_REVIEWへ終端する",
+      "request": "永続state読込の失敗時挙動をsilent継続からfail closedへ変える",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/instructions/worker/state-transitions.md",
+        "codex/glm-worker/prompts/WORKER.md",
+        "codex/glm-worker/prompts/REVIEWER.md"
+      ],
+      "changed_paths": ["glm-worker/internal/state/store.go"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: HIGH", "SUMMARY: made load failure fail closed", "REQUIREMENT_COVERAGE: covered", "TESTS: unit pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: FIX_REQUIRED", "RISK: HIGH", "SUMMARY: HIGH変更の意味情報が報告へ圧縮されていない", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: USER_REQUESTとdiffから変更前後の契約・失敗境界・状態遷移を独立確認", "ISSUES: 変更前後の契約・失敗境界・主要状態遷移・rollback懸念がSUMMARY/TESTS/UNVERIFIEDへ圧縮されていない", "RESIDUAL_RISK: Solがdiff再読なしに判断できない", "TARGETS: glm-worker/internal/state/store.go:読込失敗境界", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: HIGH", "SUMMARY: 変更前は読込失敗で空値継続、変更後はfail closedで停止。失敗境界はstate破損・欠損検出時。主要状態遷移はfresh導入・既存state再実行で保存値を保持", "REQUIREMENT_COVERAGE: covered", "TESTS: 正常系・破損state・欠損state・再実行・rollback残留なしを検証", "UNVERIFIED: 旧version由来の部分欠損stateからのupgrade互換", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: NEEDS_SOL_REVIEW", "RISK: HIGH", "SUMMARY: 読込失敗時の契約をsilent継続からfail closedへ変更。失敗境界はstate破損・欠損検出時", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: 正常系の保存値保持と再実行で状態が崩れない", "TEST_EVIDENCE: fresh・既存・破損・欠損stateと再実行・rollback残留なしを検証", "ISSUES: none", "RESIDUAL_RISK: 旧versionの部分欠損stateからのupgrade挙動は未確認", "TARGETS: glm-worker/internal/state/store.go:読込失敗境界", "ARTIFACTS: none", "SOL_QUESTION: fail closed契約と部分欠損stateの取扱を採否する"]}
+      ],
+      "expected_models": ["opus", "sonnet", "opus", "sonnet"],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true,
+      "expected_stats": {"model_calls": 4, "worker_calls": 2, "reviewer_calls": 2, "transient_retries": 0, "resume_commands": 0, "probe_success": 0, "probe_failure": 0, "total_ai_calls": 4}
     },
     {
       "id": "provider-transient-exhausts-to-provider-unavailable",
@@ -1060,7 +1106,7 @@
             "TEST_EVIDENCE: 自動修正後reviewでplan項目完了を確認",
             "ISSUES: 自動修正を経たためSol確認へ昇格",
             "RESIDUAL_RISK: なし",
-            "TARGETS: none",
+            "TARGETS: README.mdの最終diffとIMPLEMENTATION_PLAN.local.md",
             "ARTIFACTS: none",
             "SOL_QUESTION: planに基づく修正結果を採否するか"
           ]
@@ -1152,7 +1198,7 @@
             "TEST_EVIDENCE: 自動修正後reviewでfile削除を確認",
             "ISSUES: 自動修正を経たためSol確認へ昇格",
             "RESIDUAL_RISK: なし",
-            "TARGETS: none",
+            "TARGETS: README.mdの最終diff",
             "ARTIFACTS: none",
             "SOL_QUESTION: 自動生成file削除後の結果を採否するか"
           ]

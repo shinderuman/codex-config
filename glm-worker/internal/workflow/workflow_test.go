@@ -1294,6 +1294,7 @@ func TestRiskFloorReemitPromptConstraints(t *testing.T) {
 		"NEEDS_SOL_REVIEW (RISK: HIGH) だけ",
 		"実装・調査・テストをやり直さず",
 		"PACKETだけを再出力",
+		"TARGETSにはnoneを指定できません",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("reemit promptに%qがありません: %s", want, prompt)

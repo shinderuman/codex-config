@@ -142,6 +142,7 @@ func riskFloorReemitPrompt() string {
 reviewerの自然言語判断だけではこの経路のriskを降格できません。
 実装・調査・テストをやり直さず、直前のreview結果の内容を保ったまま、PACKETだけを再出力してください。
 許容されるSTATUSは NEEDS_SOL_REVIEW (RISK: HIGH) だけです。PASS・FIX_REQUIRED・その他は許可されません。
+TARGETSにはnoneを指定できません。Solが読むべき最小対象をfile:symbol/行範囲で指定してください。
 PACKET_BEGINを最初の物理行、PACKET_ENDを最後の物理行にし、前後の説明・空行を出力しないでください。
 NEEDS_SOL_REVIEWの必須field(SUMMARY, REQUIREMENT_COVERAGE, INVARIANTS, TEST_EVIDENCE, ISSUES, RESIDUAL_RISK, TARGETS, ARTIFACTS, SOL_QUESTION)を省略しないでください。
 `

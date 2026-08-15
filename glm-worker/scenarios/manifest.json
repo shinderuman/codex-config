@@ -20,12 +20,13 @@
         "state-deleted-value-reflow-alt-path",
         "state-null-silent-no-op",
         "state-identifier-rename-compat",
-        "state-partial-loss-mislabeled-safe-recovery"
+        "state-partial-loss-mislabeled-safe-recovery",
+        "high-semantic-info-gap-returns-fix-required-then-sol-review"
       ]
     },
     {
       "path": "codex/glm-worker/prompts/WORKER.md",
-      "sha256": "21147ec71cddc2a3d36b15ffcb7bc8481b8a0b678efab1f4a77475238d66f06b",
+      "sha256": "296e78059ead123aef43a14fe064361f7d6afc67431f44ced3401cfef5b69462",
       "scenarios": [
         "state-residual-after-removal",
         "state-deleted-value-reflow-alt-path",
@@ -46,6 +47,8 @@
         "packet-multi-complete-recompacts-to-single",
         "packet-recompact-repeat-multi-stops-worker-error",
         "packet-resume-multi-complete-recompacts-to-single",
+        "high-sol-review-targets-none-recompacts-to-concrete-targets",
+        "high-semantic-info-gap-returns-fix-required-then-sol-review",
         "provider-resume-probe-is-error-exit-zero-stays-unavailable",
         "provider-resume-probe-sentinel-mismatch-stays-unavailable",
         "provider-transient-probe-fail-then-success-resumes-task",
@@ -69,7 +72,7 @@
     },
     {
       "path": "codex/glm-worker/prompts/REVIEWER.md",
-      "sha256": "05c70a5bd807e9b631d65161e91d2132b22bda40b0239ae5be7d98c0cf36a03b",
+      "sha256": "277b0346b2b77c08ae73a789e24f50f0a6a67846ddc3ad5ee1a1b0c03b1c859d",
       "scenarios": [
         "state-residual-after-removal",
         "state-deleted-value-reflow-alt-path",
@@ -81,6 +84,8 @@
         "low-risk-non-critical-pass",
         "reviewer-worktree-mutation-rejects-pass",
         "reviewer-worktree-mutation-rejects-fix-required",
+        "high-sol-review-targets-none-recompacts-to-concrete-targets",
+        "high-semantic-info-gap-returns-fix-required-then-sol-review",
         "implementation-plan-present-ignored-returns-fix-required",
         "implementation-plan-absent-fabrication-returns-fix-required",
         "repo-agents-root-change-escalates-self-protection-high",
