@@ -52,8 +52,10 @@
 - reviewerはAgent/subagentを利用せず、reviewerモデルから上位モデルへの暗黙な再委譲を行わない。
 - rate limit後のresumeでもcheckpointへ保存したreviewer modelを維持する。
 - version 1のresume checkpointを受理せず、model欠落時にroleから補完しない。
-- packetは15行・6 KiB・1行1536 bytes以内で、各fieldを1物理行に限定し、STATUS別必須field、RISK整合性、field重複を検証する。
+- packetは15行・6 KiB・1行1536 bytes以内で、各fieldを1物理行に限定し、STATUS別必須field、RISK整合性、field重複を検証する。完全なPACKET_BEGIN/PACKET_ENDの組は1回の応答にちょうど1組だけとし、複数完成packet・marker前後の非空本文・入れ子や対応しないmarkerを拒否する。
 - packet契約違反時は同一sessionへ再圧縮を1回だけ依頼し、作業を再実行しない。
+- packet構造の1組制限は`packet.Parse`の単一受理入口で全roleへ機械強制する。LLM instructionだけの保証を機械contract扱いしていた点がescaped reviewの原因のため、wrapper強制scenario(corpus `packet-*`)を欠落させない。
+- wrapperの最終stdoutは受理したpacketだけを1回出力する。再圧縮・risk floor再出力・resume前の旧応答を採用結果へ連結・再解析せず、model応答の受理は毎回新規の出力file経由でのみ行う。caller側echoの二重表示はrepo外のため検証対象外。
 - packetへ収まらない正確な成果物はtask別artifactへ保存し、packetではtask専用dir配下に実在する通常ファイルの絶対パスだけを返す。artifact dir外・欠落・directory・symlinkを拒否し、所有者限定権限を検証する。
 - worker errorの診断tailは6 KiBを超えない。
 

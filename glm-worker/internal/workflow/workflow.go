@@ -778,7 +778,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 		return packet.Packet{}, err
 	}
 
-	result, err := packet.ParseLast(outputPath)
+	result, err := packet.Parse(outputPath)
 	if err == nil {
 		taskID, taskErr := w.state.TaskID()
 		if taskErr != nil {

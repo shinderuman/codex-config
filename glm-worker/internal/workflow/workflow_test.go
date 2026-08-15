@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"os"
@@ -88,6 +89,10 @@ func implementedPacketWithArtifacts(summary string, artifacts string) string {
 
 func implementedPacketWithRisk(summary string, risk string) string {
 	return "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: " + risk + "\nSUMMARY: " + summary + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\n"
+}
+
+func duplicatedImplementedPacket() string {
+	return implementedPacket("first") + implementedPacket("second")
 }
 
 func passPacket() string {
@@ -331,6 +336,157 @@ func TestRunModelRecompactsInvalidPacketInSameRunner(t *testing.T) {
 	}
 	if len(logs) != 2 || logs[0].Outcome != "invalid_packet" || logs[1].Outcome != "success" {
 		t.Fatalf("packet compaction telemetry = %#v", logs)
+	}
+}
+
+func TestRunModelRecompactsMultipleCompletedPackets(t *testing.T) {
+	tests := []struct {
+		name     string
+		role     state.SessionRole
+		stage    state.ResumeStage
+		readOnly bool
+		phase    string
+		follow   string
+		status   string
+	}{
+		{name: "worker", role: state.WorkerRole, stage: state.ResumeStageWorker, phase: "worker-new", follow: implementedPacket("compacted"), status: "IMPLEMENTED"},
+		{name: "reviewer", role: state.ReviewerRole, stage: state.ResumeStageReview, readOnly: true, phase: "reviewer-1", follow: needsSolReviewPacket(), status: "NEEDS_SOL_REVIEW"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			st := newStateStoreT(t)
+			r := &scriptedRunner{steps: []runnerStep{
+				{output: duplicatedImplementedPacket()},
+				{output: test.follow},
+			}}
+			w := newWorkflowT(t, st, r)
+			w.temp = t.TempDir()
+
+			result, err := w.runModel(state.ResumeCheckpoint{
+				Stage:    test.stage,
+				Phase:    test.phase,
+				Role:     test.role,
+				ReadOnly: test.readOnly,
+				Model:    "opus",
+				Effort:   "high",
+				Prompt:   "original",
+				Request:  "request",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Status() != test.status {
+				t.Fatalf("status = %q want %q", result.Status(), test.status)
+			}
+			if len(r.prompts) != 2 || !strings.Contains(r.prompts[1], "再圧縮") {
+				t.Fatalf("same runnerで再圧縮されていません: %#v", r.prompts)
+			}
+			taskID, _ := st.TaskID()
+			logs, logErr := st.ReadModelCallLogs(taskID)
+			if logErr != nil {
+				t.Fatal(logErr)
+			}
+			if len(logs) != 2 || logs[0].Outcome != "invalid_packet" || logs[0].PacketRejectReason != "multiple-packets" {
+				t.Fatalf("multiple packet reject telemetry = %#v", logs)
+			}
+			if !strings.Contains(logs[0].Error, "複数検出") {
+				t.Fatalf("拒否理由がtelemetryへ記録されていません: %q", logs[0].Error)
+			}
+			stats := currentStats(t, st)
+			if stats.PacketCompactions != 1 || stats.PacketRejectByCategory["multiple-packets"] != 1 {
+				t.Fatalf("stats = %#v", stats)
+			}
+		})
+	}
+}
+
+func TestExecuteEmitsAcceptedPacketExactlyOnce(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{steps: []runnerStep{
+		{output: duplicatedImplementedPacket()},
+		{output: implementedPacketWithRisk("done", "HIGH")},
+		{output: passPacket()},
+		{output: needsSolReviewPacket()},
+	}}
+	w := newWorkflowT(t, st, r)
+	buf := &bytes.Buffer{}
+	w.output = buf
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(buf.String(), "STATUS: "); got != 1 {
+		t.Fatalf("受理packetの出力回数 = %d\n%s", got, buf.String())
+	}
+	if strings.Contains(buf.String(), "STATUS: PASS") || strings.Contains(buf.String(), "SUMMARY: first") || strings.Contains(buf.String(), "SUMMARY: second") {
+		t.Fatalf("旧応答が最終stdoutへ混入しています: %s", buf.String())
+	}
+	if st.TaskStatus() != state.TaskStatusWaitingSolReview {
+		t.Fatalf("status = %q", st.TaskStatus())
+	}
+	if len(r.prompts) != 4 {
+		t.Fatalf("再圧縮・再出力は各1回だけ: calls=%d", len(r.prompts))
+	}
+	if strings.Join(r.models, ",") != "opus,opus,sonnet,sonnet" {
+		t.Fatalf("models = %#v", r.models)
+	}
+}
+
+func TestRunModelStopsAfterRepeatedMultiplePackets(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{steps: []runnerStep{
+		{output: duplicatedImplementedPacket()},
+		{output: duplicatedImplementedPacket()},
+	}}
+	w := newWorkflowT(t, st, r)
+	w.temp = t.TempDir()
+
+	_, err := w.runModel(state.ResumeCheckpoint{
+		Stage:   state.ResumeStageWorker,
+		Phase:   "worker-new",
+		Role:    state.WorkerRole,
+		Model:   "opus",
+		Effort:  "high",
+		Prompt:  "original",
+		Request: "request",
+	})
+	if err == nil || !strings.Contains(err.Error(), "STATUS: WORKER_ERROR") || !strings.Contains(err.Error(), "複数検出") {
+		t.Fatalf("再圧縮後の複数packet停止を期待: %v", err)
+	}
+	if len(r.prompts) != 2 {
+		t.Fatalf("再圧縮は1回だけ実施する: calls=%d", len(r.prompts))
+	}
+}
+
+func TestRunModelPreservesMultiPacketRecompactAcrossRateLimit(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{steps: []runnerStep{
+		{output: duplicatedImplementedPacket()},
+		{output: zaiFiveHourLog, runErr: errors.New("exit status 1")},
+	}}
+	w := newWorkflowT(t, st, r)
+	w.temp = t.TempDir()
+
+	_, err := w.runModel(state.ResumeCheckpoint{
+		Stage:          state.ResumeStageWorker,
+		Phase:          "worker-new",
+		Role:           state.WorkerRole,
+		Model:          "opus",
+		Effort:         "high",
+		Prompt:         "original implementation prompt",
+		OriginalPrompt: "original implementation prompt",
+		Request:        "request",
+	})
+	if err == nil || !strings.Contains(err.Error(), "STATUS: RATE_LIMITED") {
+		t.Fatalf("再圧縮中のrate limit errorを期待: %v", err)
+	}
+
+	checkpoint, loadErr := st.LoadResumeCheckpoint()
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if !checkpoint.PacketCompacted || !strings.Contains(checkpoint.OriginalPrompt, "PACKETだけを再出力") {
+		t.Fatalf("再圧縮promptがcheckpointに保持されていません: %#v", checkpoint)
 	}
 }
 

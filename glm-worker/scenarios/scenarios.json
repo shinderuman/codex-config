@@ -293,6 +293,66 @@
       "reviewer_mutates_worktree": true
     },
     {
+      "id": "packet-multi-complete-recompacts-to-single",
+      "behavior": "1回の応答へ複数の完成PACKETが混入した場合、wrapperは最後のpacketを採用せずfail closedで拒否し、同一session・同一roleでpacketだけの再圧縮を1回要求して単一packetへ置き換えたうえで通常routingへ復帰する",
+      "request": "通常の実装タスク",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": ["README.md"],
+      "runner_steps": [
+        {"raw": "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: first\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\nPACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: second\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\n"},
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: compacted", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: pass", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus", "opus", "haiku"],
+      "expected_packet_status": "PASS",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "complete",
+      "must_not_pass": false
+    },
+    {
+      "id": "packet-recompact-repeat-multi-stops-worker-error",
+      "behavior": "再圧縮後の応答へ再び複数の完成PACKETが混入した場合、wrapperは既存の1回上限に従いWORKER_ERRORで停止し再圧縮を反復しない",
+      "request": "通常の実装タスク",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": ["README.md"],
+      "runner_steps": [
+        {"raw": "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: first\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\nPACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: second\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\n"},
+        {"raw": "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: first\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\nPACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: second\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\n"}
+      ],
+      "expected_models": ["opus", "opus"],
+      "expected_packet_status": "IMPLEMENTED",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "active",
+      "must_not_pass": true,
+      "expected_error_status": "WORKER_ERROR"
+    },
+    {
+      "id": "packet-resume-multi-complete-recompacts-to-single",
+      "behavior": "provider-unavailableからのresume直後の応答へ複数の完成PACKETが混入した場合も、同一sessionで再圧縮工程を1回だけ実施し単一packetへ置き換えて通常のworker→reviewer routingへ復帰する",
+      "request": "通常の実装タスク",
+      "entry": "resume",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": ["README.md"],
+      "runner_steps": [
+        {"raw": "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: first\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\nPACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: second\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\n"},
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: compacted after resume", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: pass", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: ev", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus", "opus", "haiku"],
+      "expected_packet_status": "PASS",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "complete",
+      "must_not_pass": false
+    },
+    {
       "id": "provider-transient-exhausts-to-provider-unavailable",
       "behavior": "502/503/504/529等の一時provider障害は同一session/checkpointでbackoffし、probe上限到達でprovider-unavailable停止へ移行する。新task/sessionの再実行と5h上限扱いをしない",
       "request": "通常の実装タスク",

@@ -42,7 +42,10 @@
         "provider-non-transient-error-fails-closed",
         "provider-probe-invalid-response-fails-closed-first-probe",
         "provider-resume-probe-success-resumes-once",
-        "provider-resume-probe-still-down-zero-full-runs"
+        "provider-resume-probe-still-down-zero-full-runs",
+        "packet-multi-complete-recompacts-to-single",
+        "packet-recompact-repeat-multi-stops-worker-error",
+        "packet-resume-multi-complete-recompacts-to-single"
       ]
     },
     {

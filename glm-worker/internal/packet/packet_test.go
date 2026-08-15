@@ -7,50 +7,100 @@ import (
 	"testing"
 )
 
-func TestParseLastUsesLastCompletePacket(t *testing.T) {
+func TestParseAcceptsSinglePacketWithSurroundingBlankLines(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "output.txt")
-	content := `noise
-PACKET_BEGIN
-STATUS: IMPLEMENTED
-RISK: LOW
-SUMMARY: first
-REQUIREMENT_COVERAGE: covered
-TESTS: pass
-UNVERIFIED: none
-ARTIFACTS: none
-PACKET_END
-more noise
-PACKET_BEGIN
-STATUS: NEEDS_SOL_REVIEW
-RISK: HIGH
-SUMMARY: review
-REQUIREMENT_COVERAGE: covered
-INVARIANTS: preserved
-TEST_EVIDENCE: pass
-ISSUES: none
-RESIDUAL_RISK: review required
-TARGETS: foo.go:Run
-ARTIFACTS: none
-SOL_QUESTION: architecture direction
-PACKET_END
-`
+	content := "\nPACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: done\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\n\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	p, err := ParseLast(path)
+	p, err := Parse(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Status() != "NEEDS_SOL_REVIEW" {
-		t.Fatalf("status = %q", p.Status())
-	}
-	if p.Risk() != "HIGH" {
-		t.Fatalf("risk = %q", p.Risk())
+	if p.Status() != "IMPLEMENTED" || p.Risk() != "LOW" {
+		t.Fatalf("status=%q risk=%q", p.Status(), p.Risk())
 	}
 }
 
-func TestParseLastRejectsOversizedPacket(t *testing.T) {
+func TestParseRejectsStructuralViolations(t *testing.T) {
+	implemented := "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: s\nREQUIREMENT_COVERAGE: c\nTESTS: t\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\n"
+	tests := []struct {
+		name     string
+		content  string
+		contains string
+		category string
+	}{
+		{
+			name:     "multiple completed packets",
+			content:  implemented + implemented,
+			contains: "複数検出",
+			category: "multiple-packets",
+		},
+		{
+			name:     "packet after closed packet",
+			content:  implemented + "\n" + implemented,
+			contains: "複数検出",
+			category: "multiple-packets",
+		},
+		{
+			name:     "non-empty body before packet",
+			content:  "作業を完了しました。\n" + implemented,
+			contains: "前に非空の本文",
+			category: "stray-body",
+		},
+		{
+			name:     "non-empty body after packet",
+			content:  implemented + "以上です。\n",
+			contains: "後に非空の本文",
+			category: "stray-body",
+		},
+		{
+			name:     "nested begin marker",
+			content:  "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nPACKET_BEGIN\nSUMMARY: s\nPACKET_END\n",
+			contains: "入れ子",
+			category: "nested-marker",
+		},
+		{
+			name:     "end marker without begin",
+			content:  "PACKET_END\n" + implemented,
+			contains: "対応するPACKET_BEGINがない",
+			category: "stray-marker",
+		},
+		{
+			name:     "second end marker after close",
+			content:  implemented + "PACKET_END\n",
+			contains: "対応するPACKET_BEGINがない",
+			category: "stray-marker",
+		},
+		{
+			name:     "unclosed begin marker",
+			content:  "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\n",
+			contains: "閉じられていません",
+			category: "unclosed-marker",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "output.txt")
+			if err := os.WriteFile(path, []byte(test.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Parse(path)
+			if err == nil || !IsConstraintError(err) {
+				t.Fatalf("構造違反をpacket制約違反として拒否する必要があります: %v", err)
+			}
+			if !strings.Contains(err.Error(), test.contains) {
+				t.Fatalf("拒否理由が異なります: %v", err)
+			}
+			if got := RejectCategory(err); got != test.category {
+				t.Fatalf("reject category = %q want %q", got, test.category)
+			}
+		})
+	}
+}
+
+func TestParseRejectsOversizedPacket(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "output.txt")
 	content := `PACKET_BEGIN
 STATUS: IMPLEMENTED
@@ -66,13 +116,13 @@ PACKET_END
 		t.Fatal(err)
 	}
 
-	_, err := ParseLast(path)
+	_, err := Parse(path)
 	if err == nil || !IsConstraintError(err) {
 		t.Fatalf("packet constraint errorを期待しました: %v", err)
 	}
 }
 
-func TestParseLastRejectsMissingRequiredField(t *testing.T) {
+func TestParseRejectsMissingRequiredField(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "output.txt")
 	content := `PACKET_BEGIN
 STATUS: IMPLEMENTED
@@ -87,12 +137,12 @@ PACKET_END
 		t.Fatal(err)
 	}
 
-	if _, err := ParseLast(path); err == nil || !IsConstraintError(err) {
+	if _, err := Parse(path); err == nil || !IsConstraintError(err) {
 		t.Fatalf("必須field欠落をpacket制約違反として拒否する必要があります: %v", err)
 	}
 }
 
-func TestParseLastRejectsMissingArtifactsField(t *testing.T) {
+func TestParseRejectsMissingArtifactsField(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "output.txt")
 	content := `PACKET_BEGIN
 STATUS: IMPLEMENTED
@@ -107,24 +157,24 @@ PACKET_END
 		t.Fatal(err)
 	}
 
-	_, err := ParseLast(path)
+	_, err := Parse(path)
 	if err == nil || !strings.Contains(err.Error(), "ARTIFACTS") {
 		t.Fatalf("ARTIFACTS欠落を明示して拒否する必要があります: %v", err)
 	}
 }
 
-func TestParseLastRejectsMissingPacket(t *testing.T) {
+func TestParseRejectsMissingPacket(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "output.txt")
 	if err := os.WriteFile(path, []byte("STATUS: PASS\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := ParseLast(path); err == nil || !IsConstraintError(err) {
+	if _, err := Parse(path); err == nil || !IsConstraintError(err) {
 		t.Fatalf("packet欠落をpacket制約違反として拒否する必要があります: %v", err)
 	}
 }
 
-func TestParseLastRejectsNeedsSolReviewWithoutSolQuestion(t *testing.T) {
+func TestParseRejectsNeedsSolReviewWithoutSolQuestion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "output.txt")
 	content := `PACKET_BEGIN
 STATUS: NEEDS_SOL_REVIEW
@@ -143,7 +193,7 @@ PACKET_END
 		t.Fatal(err)
 	}
 
-	if _, err := ParseLast(path); err == nil || !IsConstraintError(err) {
+	if _, err := Parse(path); err == nil || !IsConstraintError(err) {
 		t.Fatalf("NEEDS_SOL_REVIEWのSOL_QUESTION欠落をpacket制約違反として拒否する必要があります: %v", err)
 	}
 }

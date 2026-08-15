@@ -32,8 +32,7 @@ func IsConstraintError(err error) bool {
 }
 
 // RejectCategoryはpacket検証不合格のerrorを集計用の安定categoryへ分類する。
-// 理由文字列のphrasingに依存するが、これらはValidate/ValidateArtifacts内で固定済み。
-// 戻り値: size/missing-field/risk/status/malformed/artifacts/other。
+// 理由文字列のphrasingに依存するが、これらはParse/Validate/ValidateArtifacts内で固定済み。
 func RejectCategory(err error) string {
 	if err == nil {
 		return ""
@@ -42,6 +41,16 @@ func RejectCategory(err error) string {
 	switch {
 	case strings.Contains(msg, "ARTIFACTS") || strings.Contains(msg, "artifact"):
 		return "artifacts"
+	case strings.Contains(msg, "複数検出"):
+		return "multiple-packets"
+	case strings.Contains(msg, "非空の本文"):
+		return "stray-body"
+	case strings.Contains(msg, "入れ子"):
+		return "nested-marker"
+	case strings.Contains(msg, "対応するPACKET_BEGINがない"):
+		return "stray-marker"
+	case strings.Contains(msg, "閉じられていません"):
+		return "unclosed-marker"
 	case strings.Contains(msg, "行以内") || strings.Contains(msg, "bytes以内"):
 		return "size"
 	case strings.Contains(msg, "必須field"):
@@ -84,8 +93,8 @@ func FromLines(lines []string) Packet {
 	}
 }
 
-// ParseLastはpathから最後の完成PACKETを抽出し検証する。
-func ParseLast(path string) (Packet, error) {
+// ParseはpathからPACKETを抽出し検証する。完全なPACKET_BEGIN/PACKET_ENDの組は1応答にちょうど1組だけを許容し、他のmarker構造とmarker前後の非空本文をfail closedで拒否する。
+func Parse(path string) (Packet, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return Packet{}, err
@@ -95,35 +104,51 @@ func ParseLast(path string) (Packet, error) {
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 
-	inPacket := false
-	current := make([]string, 0)
-	var last []string
+	seenBegin := false
+	seenEnd := false
+	var body []string
 
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		switch line {
+		raw := scanner.Text()
+		switch strings.TrimSpace(raw) {
 		case "PACKET_BEGIN":
-			inPacket = true
-			current = current[:0]
+			switch {
+			case seenEnd:
+				return Packet{}, &constraintError{reason: "PACKETが複数検出されました: 完全なPACKET_BEGIN/PACKET_ENDの組は1回の応答にちょうど1組だけにしてください"}
+			case seenBegin:
+				return Packet{}, &constraintError{reason: "PACKET_BEGINが入れ子になっています: markerは1組だけにしてください"}
+			default:
+				seenBegin = true
+			}
 		case "PACKET_END":
-			if inPacket {
-				last = append([]string(nil), current...)
-				inPacket = false
+			if !seenBegin || seenEnd {
+				return Packet{}, &constraintError{reason: "対応するPACKET_BEGINがないPACKET_ENDが検出されました"}
 			}
+			seenEnd = true
 		default:
-			if inPacket {
-				current = append(current, scanner.Text())
+			if !seenBegin || seenEnd {
+				if strings.TrimSpace(raw) != "" {
+					if seenBegin {
+						return Packet{}, &constraintError{reason: "PACKET_ENDの後に非空の本文があります: PACKET_ENDを最後の物理行にしてください"}
+					}
+					return Packet{}, &constraintError{reason: "PACKET_BEGINの前に非空の本文があります: PACKET_BEGINを最初の物理行にしてください"}
+				}
+				continue
 			}
+			body = append(body, raw)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return Packet{}, err
 	}
-	if len(last) == 0 {
+	switch {
+	case !seenBegin:
 		return Packet{}, &constraintError{reason: "PACKET_BEGIN/PACKET_ENDで囲まれた出力がありません"}
+	case !seenEnd:
+		return Packet{}, &constraintError{reason: "PACKET_BEGINがPACKET_ENDで閉じられていません"}
 	}
 
-	result := FromLines(last)
+	result := FromLines(body)
 	if err := Validate(result); err != nil {
 		return Packet{}, err
 	}

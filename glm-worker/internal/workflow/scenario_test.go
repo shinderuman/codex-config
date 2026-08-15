@@ -21,6 +21,8 @@ type scenarioStep struct {
 	Error string   `json:"error"`
 	// Signalは出力fileへ書くprovider障害signal本文。packet行とは共存しない。
 	Signal string `json:"signal,omitempty"`
+	// Rawはpacket品質gate違反を再現する生の出力本文。packet.Validateを通らないmarker構造をscenarioへ入力する。
+	Raw string `json:"raw,omitempty"`
 }
 
 type scenarioDoc struct {
@@ -182,7 +184,7 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 		if s.ForbiddenErrorStatus != "" && !knownError[s.ForbiddenErrorStatus] {
 			return fmt.Errorf("scenario %s unknown forbidden error status %q", s.ID, s.ForbiddenErrorStatus)
 		}
-		if s.Entry == "resume" && s.ExpectedErrorStatus == "" && s.RunnerSteps[len(s.RunnerSteps)-1].Error == "" && s.RunnerSteps[len(s.RunnerSteps)-1].Signal == "" && len(s.RunnerSteps[len(s.RunnerSteps)-1].Lines) == 0 {
+		if s.Entry == "resume" && s.ExpectedErrorStatus == "" && s.RunnerSteps[len(s.RunnerSteps)-1].Error == "" && s.RunnerSteps[len(s.RunnerSteps)-1].Signal == "" && s.RunnerSteps[len(s.RunnerSteps)-1].Raw == "" && len(s.RunnerSteps[len(s.RunnerSteps)-1].Lines) == 0 {
 			return fmt.Errorf("scenario %s empty terminal step", s.ID)
 		}
 		if len(s.RunnerSteps) != len(s.ExpectedModels) {
@@ -192,8 +194,9 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 			hasLines := len(step.Lines) > 0
 			hasErr := step.Error != ""
 			hasSignal := step.Signal != ""
+			hasRaw := step.Raw != ""
 			kinds := 0
-			for _, present := range []bool{hasLines, hasErr, hasSignal} {
+			for _, present := range []bool{hasLines, hasErr, hasSignal, hasRaw} {
 				if present {
 					kinds++
 				}
@@ -367,6 +370,9 @@ func TestScenarioCorpusContractRejectsInvalid(t *testing.T) {
 		{"step both packet and error", func(sc *scenarioFile, _ *manifestFile) {
 			sc.Scenarios[0].RunnerSteps[0].Error = "boom"
 		}, "multiple terminal kinds"},
+		{"step both packet and raw", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].RunnerSteps[0].Raw = "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nPACKET_END\n"
+		}, "multiple terminal kinds"},
 		{"step invalid packet", func(sc *scenarioFile, _ *manifestFile) {
 			sc.Scenarios[0].RunnerSteps[0] = scenarioStep{Lines: []string{"STATUS: PASS", "RISK: LOW", "SUMMARY: s"}}
 		}, "invalid packet"},
@@ -420,6 +426,9 @@ func stepsFromScenario(doc scenarioDoc) []runnerStep {
 		if s.Signal != "" {
 			output = s.Signal
 			runErr = errors.New("exit status 1")
+		}
+		if s.Raw != "" {
+			output = s.Raw
 		}
 		steps[i] = runnerStep{output: output, runErr: runErr}
 	}
