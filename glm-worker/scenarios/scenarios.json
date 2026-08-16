@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "prompt/instruction変更の品質gateとして、fake runnerが返すpacket列に対するproduction workflow/prompt/gateの終端検証を行うscenario corpus。各scenarioはUSER_REQUEST・scripted packet列・期待model/routing/terminalを持ちproduction経路へ入力し、request/MODE伝達・risk/model routing・FIX_REQUIRED/NEEDS_SOL_REVIEW/NEEDS_SOL_DECISION終端・risk floor/self-protectionによるPASS拒否・NEEDS_SOL_REVIEWのTARGETS契約・FIX_REQUIREDのTARGETS: PACKET報告再出力分岐を決定論検証する。manifest.jsonは根拠instruction fileのSHA-256を固定し内容変更でhash mismatchによりtestを失敗させ影響scenarioの再確認を強制する。永続状態バグそのものの自動検出・modelの規則遵守の検証は行わず後続固定Evalの対象。install_smoke.shの配置grepとは役割を分ける。live model・networkは呼ばない。feasibility-gate-*はwrapperのSTATUS/risk終端検証例に限定し、親Codexがfeasibility-gate.mdを読み委譲・受領を制御する行動の証明ではない。親orchestration行動の固定Evalは未実行で、EVAL.mdの完了条件を満たすまで完了扱いにしない。task-lifecycle-*はwrapperの局所終端例への終端検証に限定し、親Codexが局所終端後に親依頼の未解決作業を再評価し同一taskで継続する行動の証明ではない。failure-evidence-*はwrapperのartifact packet/終端例への検証に限定し、親Codexが委譲前にevidence・sanitization・retention条件を構成し受理時に必要範囲だけ確認する行動の証明ではない。",
+  "description": "prompt/instruction変更の品質gateとして、fake runnerが返すpacket列に対するproduction workflow/prompt/gateの終端検証を行うscenario corpus。各scenarioはUSER_REQUEST・scripted packet列・期待model/routing/terminalを持ちproduction経路へ入力し、request/MODE伝達・risk/model routing・FIX_REQUIRED/NEEDS_SOL_REVIEW/NEEDS_SOL_DECISION終端・risk floor/self-protectionによるPASS拒否・NEEDS_SOL_REVIEWのTARGETS契約・FIX_REQUIREDのTARGETS: PACKET報告再出力分岐を決定論検証する。manifest.jsonは根拠instruction fileのSHA-256を固定し内容変更でhash mismatchによりtestを失敗させ影響scenarioの再確認を強制する。永続状態バグそのものの自動検出・modelの規則遵守の検証は行わず後続固定Evalの対象。install_smoke.shの配置grepとは役割を分ける。live model・networkは呼ばない。feasibility-gate-*はwrapperのSTATUS/risk終端検証例に限定し、親Codexがfeasibility-gate.mdを読み委譲・受領を制御する行動の証明ではない。親orchestration行動の固定Evalは未実行で、EVAL.mdの完了条件を満たすまで完了扱いにしない。task-lifecycle-*はwrapperの局所終端例への終端検証に限定し、親Codexが局所終端後に親依頼の未解決作業を再評価し同一taskで継続する行動の証明ではない。failure-evidence-*はwrapperのartifact packet/終端例への検証に限定し、親Codexが委譲前にevidence・sanitization・retention条件を構成し受理時に必要範囲だけ確認する行動の証明ではない。escaped-cause-layer-*はwrapperの層分類・対策方向packetの終端検証例に限定し、親Codexが一次証拠から原因層を分類する行動の証明ではない。",
   "scenarios": [
     {
       "id": "state-residual-after-removal",
@@ -2162,6 +2162,68 @@
         "opus",
         "haiku"
       ],
+      "expected_packet_status": "PASS",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "complete",
+      "must_not_pass": false
+    },
+    {
+      "id": "escaped-cause-layer-parent-orchestration-cause-returns-to-sol",
+      "behavior": "wrapper終端検証(親Codex行動証明ではない): escaped bug原因分析のscripted委譲で、workerが一次証拠に基づく親Codex orchestration失敗の層分類と対策方向をNEEDS_SOL_DECISIONへ返しwrapperをwaiting-decisionへ終端させてPASS完結を拒否する。親Codex自身の分類行動は未実行の親behavioral Eval対象",
+      "request": "外部reviewで直前taskの変更にescaped bugが見つかった。production code・prompt・PACKET契約・raw telemetry・Git履歴の一次証拠から原因層をglm-worker内部のworker/reviewer pipeline失敗か親Codex orchestration失敗かに分類し、対策方向を提案する。対策実装は行わない",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/AGENTS.md",
+        "codex/instructions/glm-execution.md",
+        "codex/instructions/escaped-cause-layer.md"
+      ],
+      "changed_paths": [],
+      "runner_steps": [
+        {"lines": ["STATUS: NEEDS_SOL_DECISION", "RISK: HIGH", "DECISION: 原因層を親Codex orchestration失敗と確定し対策方向を選択する", "EVIDENCE: raw telemetryとGit履歴でsemantic deltaのないreview phase遷移優先のreview invocationが親側で発生しており、worker/reviewer promptとscenario契約は一致している", "OPTIONS: 親側のreview invocation契約で対策 / worker/reviewer promptへ個別checklist追加 / 既存対策へ重複する新対策追加", "RECOMMENDATION: 親側contractで対策し、worker/reviewerチェック増殖と重複新対策は行わない", "TEST_OBLIGATIONS: 採用時は親側契約変更のrouting配線testと該当scenario期待結果の現物再照合を要件とする", "TARGETS: none", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus"],
+      "expected_packet_status": "NEEDS_SOL_DECISION",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-decision",
+      "must_not_pass": true
+    },
+    {
+      "id": "escaped-cause-layer-worker-pipeline-cause-fix-returns-to-sol-review",
+      "behavior": "wrapper終端検証(親Codex行動証明ではない): 原因層がglm-worker内部pipeline失敗に確定した後のscripted修正委譲で、workerが直接修正をIMPLEMENTED/HIGHへ申告しreviewerのNEEDS_SOL_REVIEW/HIGHがwrapperをwaiting-sol-reviewへ終端させる。層分類を親側contractの対策へ肩代きさせない正面制御",
+      "request": "外部reviewで見つかったescaped bugの原因層はglm-worker内部のworker/reviewer pipeline失敗に確定済み。production dispatch分岐とscenario契約の不一致を修正し、期待終端だけのscenarioへproduction因果testを追加する",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/AGENTS.md",
+        "codex/instructions/glm-execution.md",
+        "codex/instructions/escaped-cause-layer.md"
+      ],
+      "changed_paths": ["glm-worker/internal/workflow/workflow.go"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: HIGH", "SUMMARY: production dispatch分岐とscenario契約の不一致を修正し、production promptと期待判断の因果testを追加した", "REQUIREMENT_COVERAGE: covered", "TESTS: go test -count=1 ./...とscenario corpusが成功し、因果testが期待分岐を検証する", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: NEEDS_SOL_REVIEW", "RISK: HIGH", "SUMMARY: glm-worker内部pipeline失敗への直接修正pathとして妥当し、高リスク変更としてSol確認へ上げる", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: worker/reviewer promptへ個別checklist追加が無いことを確認", "TEST_EVIDENCE: 因果testとscenario corpusの全通過を確認", "ISSUES: none", "RESIDUAL_RISK: internal production変更に伴う通常の高リスク", "TARGETS: glm-worker/internal/workflow/workflow.go:dispatch分岐", "ARTIFACTS: none", "SOL_QUESTION: glm-worker内部pipeline失敗への直接修正として採否を判断する"]}
+      ],
+      "expected_models": ["opus", "sonnet"],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true
+    },
+    {
+      "id": "escaped-cause-layer-unrelated-normal-task-completes",
+      "behavior": "wrapper終端検証(親Codex行動証明ではない): escaped caseと無関係な通常taskが層分類なしでIMPLEMENTED/PASS/LOWへ完遂する条件の正面制御。通常task・全reviewへ常時要求しない親Codexの委譲内容の証明ではない",
+      "request": "通常の実装taskとして、READMEの目次更新とtypo修正だけを行う",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/AGENTS.md",
+        "codex/instructions/glm-execution.md",
+        "codex/instructions/escaped-cause-layer.md"
+      ],
+      "changed_paths": ["README.md"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: README目次の更新とtypo修正を行った", "REQUIREMENT_COVERAGE: covered", "TESTS: git diff --checkで空白誤りなしを確認", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: docs限定変更で条件外の要求がない", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: diffがdocs限定であることを確認", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus", "haiku"],
       "expected_packet_status": "PASS",
       "expected_packet_risk": "LOW",
       "expected_task_status": "complete",

@@ -119,7 +119,7 @@
     },
     {
       "path": "codex/AGENTS.md",
-      "sha256": "ac145383c36bd506f3fd2c87bd63a1327a71cafcd2138a73a769782eb1ed021c",
+      "sha256": "e630426526656cb4cd4292574689f5f1a90bbb8e9b0921076ba3549a5bcfcb74",
       "scenarios": [
         "feasibility-gate-production-beyond-unverified-viability-returns-to-sol",
         "feasibility-gate-premise-collapse-stops-further-implementation",
@@ -130,12 +130,15 @@
         "task-lifecycle-explicitly-limited-deliverable-completes",
         "failure-evidence-minimal-sanitized-evidence-packet-returns-to-sol",
         "failure-evidence-unobtainable-evidence-returns-undecidable-to-sol",
-        "failure-evidence-sufficient-classification-completes-without-artifact"
+        "failure-evidence-sufficient-classification-completes-without-artifact",
+        "escaped-cause-layer-parent-orchestration-cause-returns-to-sol",
+        "escaped-cause-layer-worker-pipeline-cause-fix-returns-to-sol-review",
+        "escaped-cause-layer-unrelated-normal-task-completes"
       ]
     },
     {
       "path": "codex/instructions/glm-execution.md",
-      "sha256": "4c8a914d16c74530d3797b257890b10cd5f051c2fd77e6b2d646366f3bd097d8",
+      "sha256": "c8155b0ae3a612695c1e2947550518a718517af746e8a3bdf3521769dcc23e07",
       "scenarios": [
         "feasibility-gate-production-beyond-unverified-viability-returns-to-sol",
         "feasibility-gate-premise-collapse-stops-further-implementation",
@@ -146,7 +149,10 @@
         "task-lifecycle-explicitly-limited-deliverable-completes",
         "failure-evidence-minimal-sanitized-evidence-packet-returns-to-sol",
         "failure-evidence-unobtainable-evidence-returns-undecidable-to-sol",
-        "failure-evidence-sufficient-classification-completes-without-artifact"
+        "failure-evidence-sufficient-classification-completes-without-artifact",
+        "escaped-cause-layer-parent-orchestration-cause-returns-to-sol",
+        "escaped-cause-layer-worker-pipeline-cause-fix-returns-to-sol-review",
+        "escaped-cause-layer-unrelated-normal-task-completes"
       ]
     },
     {
@@ -174,6 +180,15 @@
         "failure-evidence-minimal-sanitized-evidence-packet-returns-to-sol",
         "failure-evidence-unobtainable-evidence-returns-undecidable-to-sol",
         "failure-evidence-sufficient-classification-completes-without-artifact"
+      ]
+    },
+    {
+      "path": "codex/instructions/escaped-cause-layer.md",
+      "sha256": "ebd4abaa6c337ef6e8971d410181574c0e692d54156fb6a6c6fc4d67a3244c9a",
+      "scenarios": [
+        "escaped-cause-layer-parent-orchestration-cause-returns-to-sol",
+        "escaped-cause-layer-worker-pipeline-cause-fix-returns-to-sol-review",
+        "escaped-cause-layer-unrelated-normal-task-completes"
       ]
     }
   ]

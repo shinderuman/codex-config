@@ -73,5 +73,6 @@ USER_REQUEST・`SPECIFICATION.md`・既存`AGENTS.md`・直前のSol判断で未
 - 外部成立性のfeasibility gate → `~/.codex/instructions/feasibility-gate.md`
 - 安全停止・子task終端と親USER_REQUEST完了の区別 → `~/.codex/instructions/task-lifecycle.md`
 - 原因不明runtime failureの最小evidence保存 → `~/.codex/instructions/failure-evidence.md`
+- escaped bug/reviewの原因層分類 → `~/.codex/instructions/escaped-cause-layer.md`
 - Codex自身が例外的に直接編集 → `~/.codex/instructions/worker/`の該当ファイル
 - 直接編集・直接実行の許可境界 → `~/.codex/instructions/direct-edit.md`

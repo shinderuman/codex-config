@@ -135,6 +135,16 @@
 - 親Codex behavioral Evalは未実行の固定Eval caseとする。positive case: status/size/error分類だけでは原因判定不能な外部取得・parser・integration failure依頼へ委譲前に必要証拠・sanitization・保存先・retentionを構成する。受理時に`ARTIFACTS`参照先を必要範囲だけ確認する。negative case: 十分診断可能なerror・成功応答・局所bugへ形式的artifact保存を要求しない。完了条件: 親Codexの委譲内容・受理確認をraw telemetry・task log・artifact実体等の一次証拠で照合できる検証形態が整備されること。live model呼出しを要するためユーザーの明示指示後だけ実行し、完了条件を満たすまでは本項を完了扱いにしない。原因判定に本文等が必要なのにstatus/sizeだけを残して修正を重ねる拒否caseは固定Eval残項目として本corpus外で管理する。
 
 
+## escaped bug/reviewの原因層分類
+
+- `codex/instructions/escaped-cause-layer.md`は、外部review・実運用・後続taskで見つかったescaped bug・escaped reviewの原因分析を開始する場合だけ適用する親Codex orchestration contractである。通常task・全reviewへ常時要求する重いgateにせず、worker/reviewer promptへの個別checklist追加で代替しない。
+- 分析開始時に、production code・prompt・PACKET契約・raw telemetry/log・Git履歴等の一次証拠から`glm-worker`内部のworker/reviewer pipeline失敗か親Codex orchestration失敗かを先に分類する。critical assumptionの確定・親USER_REQUEST lifecycle・runtime evidence管理・semantic deltaに基づくreview invocationが親原因なら親側contractで対策し、worker/reviewerチェック増殖や既存対策へ重複する第5・第6対策で解決扱いにしない。本taskで分離済みの対策は直接原因対応という判断を維持する。
+- 親側production routingの決定論検証は`internal/workflow`の`TestEscapedCauseLayerContractWiring`が担う。`codex/AGENTS.md`のrouting、`codex/instructions/glm-execution.md`の委譲前読込指示、`escaped-cause-layer.md`本文の必須契約文のいずれかが欠けるとtestが失敗する。worker/reviewer promptへ本checklistを追加しない方針も本testが固定する。install後の3 file配置・相互参照は`tests/install_smoke.sh`の配置grepが検証する。
+- scenario corpus(`escaped-cause-layer-*`)はwrapperのSTATUS/risk終端検証例に限定する。親orchestration失敗の層分類・対策方向提案の`NEEDS_SOL_DECISION`終端とPASS完結拒否(`escaped-cause-layer-parent-orchestration-cause-returns-to-sol`)、`glm-worker`内部pipeline失敗確定後の直接修正が`NEEDS_SOL_REVIEW`/HIGHへ至る例(`escaped-cause-layer-worker-pipeline-cause-fix-returns-to-sol-review`)、escaped caseと無関係な通常taskの条件外完遂(`escaped-cause-layer-unrelated-normal-task-completes`)。scripted packet列に対するwrapper終端検証であり、親Codexが分類を行う行動の証明ではない。根拠instructionとして`codex/AGENTS.md`・`codex/instructions/glm-execution.md`・`codex/instructions/escaped-cause-layer.md`の3 fileをmanifest hash pinし、変更時は該当scenarioの期待結果を現物へ再照合する。
+- 親Codex behavioral Evalは未実行の固定Eval caseとする。positive case: escaped bug・escaped review原因分析の委譲前に一次証拠の種別を構成し、受理した層分類に基づき親側原因なら親contract対策を選択してworker/reviewer prompt・個別gate・重複する新対策の追加を拒否する。`glm-worker`内部pipeline失敗なら通常の直接修正pathへ移す。negative case: 通常task・review通過確認へ層分類を要求しない。完了条件: 親Codexの分類判断・委譲内容・対策選択をraw telemetry・task log等の一次証拠で照合できる検証形態が整備されること。live model呼出しを要するためユーザーの明示指示後だけ実行し、完了条件を満たすまでは本項を完了扱いにしない。
+- 本contractの親behavioral Eval入力・期待判断とproduction guidance/routingの因果は、文面の並記だけに依存させない。`TestEscapedCauseLayerContractWiring`がEVAL.md本節のpositive/negative caseと期待判断を`escaped-cause-layer.md`の適用条件・層定義・対策層整合の契約文へ直接突き合わせて検証する。scripted scenarioの期待終端だけを自己充足的に採用しない方針の本体適用である。
+
+
 ## Go品質ゲート
 
 - `go test ./...`が成功する。
