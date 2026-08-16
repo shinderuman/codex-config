@@ -28,7 +28,7 @@ type AppConfig struct {
 	ClaudeSettingsOverride string
 	// EnvAllowlistは親process環境からworkerへ追加で受け渡すenv key。
 	// OS必須・Z.ai必須keyは常に渡り、それ以外はここへ指定したkeyだけ追加される。
-	EnvAllowlist          []string
+	EnvAllowlist []string
 	// CodexConfigDirはCodex appのconfig dir(CODEX_CONFIG_DIR, 既定~/.codex)。
 	// install.shと同じ規則で、--verify-auto-resumeがautomation TOMLとSQLiteを参照する。
 	CodexConfigDir        string

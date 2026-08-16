@@ -22,6 +22,7 @@ const (
 	ModeResume
 	ModeStatus
 	ModeWatch
+	ModeTimeline
 	ModeStats
 	ModeReset
 	ModeVerifyAutoResume
@@ -42,7 +43,7 @@ type VerifyArgs struct {
 
 func ParseCommand(args []string) (Command, error) {
 	if len(args) == 0 {
-		return Command{}, fmt.Errorf("usage: glm-worker <instruction> | --decision <decision> | --fix <instruction> | --resume | --status | --watch | --stats | --reset | --eval-ab <run-dir>")
+		return Command{}, fmt.Errorf("usage: glm-worker <instruction> | --decision <decision> | --fix <instruction> | --resume | --status | --watch | --timeline [task-id] | --stats | --reset | --eval-ab <run-dir>")
 	}
 
 	switch args[0] {
@@ -65,6 +66,14 @@ func ParseCommand(args []string) (Command, error) {
 			return Command{}, fmt.Errorf("usage: glm-worker --watch")
 		}
 		return Command{Mode: ModeWatch}, nil
+	case "--timeline":
+		if len(args) > 2 {
+			return Command{}, fmt.Errorf("usage: glm-worker --timeline [task-id]")
+		}
+		if len(args) == 2 {
+			return Command{Mode: ModeTimeline, Payload: args[1]}, nil
+		}
+		return Command{Mode: ModeTimeline}, nil
 	case "--stats":
 		if len(args) != 1 {
 			return Command{}, fmt.Errorf("usage: glm-worker --stats")
@@ -140,11 +149,14 @@ func run(
 }
 
 // Executeはcmdをcfg配下で実行する。runner/workflowはrf経由で注入可能で、
-// --watchはstateへ書き込まないread-only参照、--status/--statsはロック取得前に、
+// --watchと--timelineはstateへ書き込まないread-only参照、--status/--statsはロック取得前に、
 // それ以外はプロセス間ロック後に処理する。
 func Execute(cmd Command, cfg config.AppConfig, rf RunnerFactory, stdout, stderr io.Writer) error {
 	if cmd.Mode == ModeWatch {
 		return printWatch(state.AttachStateStore(cfg), stdout, defaultWatchFollowInterval, nil)
+	}
+	if cmd.Mode == ModeTimeline {
+		return printTimeline(state.AttachStateStore(cfg), cmd.Payload, stdout)
 	}
 
 	st, err := state.NewStateStore(cfg)

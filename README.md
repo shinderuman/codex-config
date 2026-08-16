@@ -131,6 +131,7 @@ glm-worker --fix "<NEEDS_SOL_REVIEWへの修正指示>"
 glm-worker --resume
 glm-worker --status
 glm-worker --watch
+glm-worker --timeline "[task ID]"
 glm-worker --stats
 glm-worker --reset
 glm-worker --eval-ab "<A/B run dir>"
@@ -141,6 +142,7 @@ glm-worker --eval-ab "<A/B run dir>"
 - `--resume`はZ.ai 5時間上限またはprovider一時障害で停止した同一phase・session・checkpointを再開する。
 - `--status`と`--stats`は参照専用、`--reset`は現在の統計をarchiveして実行状態を消去する。
 - `--watch`は現在taskの受動event log(`events/<task ID>.jsonl`)を保存済み内容のread・tailだけで表示する参照専用command。provider/workerへの問い合わせ・AI呼出・repo lock・state書換を行わない。
+- `--timeline [task-id]`は保存済みevent logとtelemetryだけからtask/call単位のtimeline・tool種別別集計・相対graph・session agingを表示する参照専用command。AI呼出・repo lock・state書換を行わない。task ID省略時は現在task、明示指定時はretention内の旧taskも読める。
 - `--eval-ab`はCodex Direct対orchestratedのA/B比較run dir(spec.json・direct.json・orchestrated.json)を検証して比較結果を表示する参照専用commandで、AI呼出は行わない。orchestrated記録のGLM usageは当該taskのstats履歴から解決するため、orchestrated run側またはそのstate履歴を持つcheckoutで実行する。
 
 reviewer呼出しの前後でGit状態を3軸(HEAD・index・worktree/untracked)のdigestで固定・検証する。worker終了時とreviewer開始前、5h上限・provider障害からのresume前、そして各reviewer model callが正常終了した直後かつPASS/FIX_REQUIRED/NEEDS_SOL_REVIEW等を採用する前に、保存snapshotと現在状態を同じ3軸で比較する。reviewerがEdit/Write禁止でもBash・formatter・test・generator等でrepositoryを変更していた場合はreview結果を採用せず、rollbackも黙認もせず`NEEDS_SOL_REVIEW`/`HIGH`へfail closedする。追加のmodel呼出・reviewer層の変更は行わない。
@@ -276,11 +278,13 @@ glm-worker --resume
 ```sh
 glm-worker --status
 glm-worker --watch
+glm-worker --timeline "[task ID]"
 glm-worker --stats
 ```
 
 `--status`は現在のtask ID、task status、task別artifact保存先、session、判断待ち、rate limit状態、provider-unavailable状態(原因分類・試行数・経過・RESUME_AVAILABLE)に加え、対象repositoryのlock実保持(`REPOSITORY_LOCK: held/free/unknown`)と、`TASK_STATUS: active`時の`TASK_LIVENESS: running/stale/unknown`を表示する。lock保持判定はflock実取得の非破壊probeであり、lock file内のPIDは診断情報(`LOCK_PID`)としてのみ扱う。GLM workerの生存判定・重複起動待避は対象repoのlockだけを根拠にし、別repoのprocess一覧や`pgrep`は使わない。`active`+`REPOSITORY_LOCK: free`はstale候補としてrepo固有の復旧へ導く。
 `--watch`は現在taskのevent logを1行1eventのmetadata summary(時刻・phase・role・種別・tool名とbyte数・token・result観測値)で表示し、以降の追記をlocal tailする。thinking等の本文は表示せずbyte数だけを出す。中断はCtrl-Cでよい。
+`--timeline`は追加AI callなしでtask/call単位のtimelineを表示する。callごとにrole・phase・sessionとsession内call番号・resumed別・model alias(実model)・観測窓(最初と最終eventの時刻・span・event数)・result観測値(duration・API duration・turns・token・cost)・tool種別別の呼出数とID対応付けできた測定済みduration(合計・最大)を出す。対応付け不能なtool duration・result event未観測のcallは`unknown`/`unmeasured`/`none`として推測せず、tool名を持たないblockは`unknown` tool種別へ集計する。task単位ではtool種別別合計(`TOOL_TOTALS`)とcall観測窓の相対bar(`GRAPH`)、telemetry由来のsession aging(`SESSION_AGING`)を続けて表示する。event logの破損行は`SKIPPED_EVENTS`として報告し、event logがない現在taskはその旨を表示して正常終了する。event log・telemetry path構築へ使うtask ID(明示引数・現在task両方)はtask採番のUUID v4生成形式(長さ・hyphen位置・小写hex・version・variant)へ検証し、不正形式(相対path・絶対path・非v4等)はfilesystemへ触れずerrorを返す。明示指定task IDのlog不在・読込失敗もerrorを返す。
 `--stats`は通常のworker packetへ混ぜず、完了済みと現在のタスクを集計して次を表示する。
 
 - worker/reviewerとmodel alias別の呼び出し回数・実行時間・turn数
