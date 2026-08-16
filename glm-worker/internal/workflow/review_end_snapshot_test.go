@@ -48,6 +48,7 @@ type mutatingRunner struct {
 
 func (r *mutatingRunner) Run(
 	role state.SessionRole,
+	_ string,
 	model string,
 	readOnly bool,
 	effort string,

@@ -59,6 +59,10 @@ type RunResult struct {
 	SystemPrompt       string
 	SystemPromptBytes  int
 	SystemPromptSHA256 string
+	// PlainFailureはresult本文が得られない経路で、JSON eventとして解釈できない
+	// plain stdout行にだけ既存provider classifierを適用した結果。5h上限・transientの
+	// ときだけKindへ値が入り、raw本文とfatal既定値は保持しない。
+	PlainFailure ProviderFailureClass
 }
 
 type claudeJSONResult struct {
@@ -90,8 +94,17 @@ func NewClaudeRunner(cfg config.AppConfig, st *state.StateStore) *ClaudeRunner {
 // isolation.policyはtask共通なのでpolicy不一致時はworker/reviewer両roleのsessionを破棄する。
 // isolation.policyは成功markerではなくsession IDの起動policyを表すため、SessionID確定時点
 // (Claude実行前)に永続化し、5h上限中断後に同一sessionへresume可能な状態を保つ。
+// 出力はstream-jsonで受け、stdoutはevent ingesterだけが処理する。実行中に返る受動
+// eventはmetadataへ縮約してtask単位event logへbest-effort追記し、非result eventの
+// raw本文・thinking・tool入出力をdisk・task log・診断tail・telemetryへ保存しない。
+// 最終result eventだけをboundedに保持し、result eventは--output-format jsonの出力と
+// 同一schemaのためresult解析・PACKET/session/resume semanticsは変わらず、追加の
+// prompt/model callは発生しない。JSON eventとして解釈できないplain stdout行だけは
+// 旧raw fallbackの分類 semanticsを保つため既存classifierへ読ませ、5h上限・transient
+// の構造値だけをRunResult.PlainFailureへ渡す。event追記失敗はtask成否へ影響させない。
 func (r *ClaudeRunner) Run(
 	role state.SessionRole,
+	phase string,
 	model string,
 	readOnly bool,
 	effort string,
@@ -152,7 +165,8 @@ func (r *ClaudeRunner) Run(
 		"--model", model,
 		"--effort", effort,
 		"--autocompact", "500k",
-		"--output-format", "json",
+		"--output-format", "stream-json",
+		"--verbose",
 		"--dangerously-skip-permissions",
 		"--strict-mcp-config",
 		"--mcp-config", `{"mcpServers":{}}`,
@@ -166,29 +180,26 @@ func (r *ClaudeRunner) Run(
 
 	args = append(args, "--append-system-prompt-file", systemFile, prompt)
 
-	rawOutputPath := outputPath + ".json"
 	stderrPath := outputPath + ".stderr"
-	output, err := createPrivateFile(rawOutputPath)
-	if err != nil {
-		return result, err
-	}
 	stderr, err := createPrivateFile(stderrPath)
 	if err != nil {
-		output.Close()
 		return result, err
 	}
 	devNull, err := os.Open(os.DevNull)
 	if err != nil {
-		output.Close()
 		stderr.Close()
 		return result, fmt.Errorf("/dev/nullを開けません: %w", err)
 	}
 	defer devNull.Close()
 
+	ingester := r.newTaskEventIngester(taskID, role, phase, model, sessionID, ready)
+
 	command := exec.Command(r.config.ClaudeBin, args...)
 	command.Dir = r.config.RepoRoot
 	command.Stdin = devNull
-	command.Stdout = output
+	// stdoutはingesterだけが受け、非result eventのraw本文をdiskへ書かない。
+	// ingesterは行ごとにmetadataへ縮約し、最終result event行だけboundedに保持する。
+	command.Stdout = ingester
 	command.Stderr = stderr
 	command.Env = buildChildEnv(r.config.EnvAllowlist, settingEnv, map[string]string{
 		"CLAUDE_CONFIG_DIR":                r.config.ClaudeConfigDir,
@@ -197,17 +208,13 @@ func (r *ClaudeRunner) Run(
 	}, envDeletes)
 
 	runErr := command.Run()
-	outputCloseErr := output.Close()
+	ingester.flush()
 	stderrCloseErr := stderr.Close()
-	if runErr == nil {
-		if outputCloseErr != nil {
-			runErr = outputCloseErr
-		} else if stderrCloseErr != nil {
-			runErr = stderrCloseErr
-		}
+	if runErr == nil && stderrCloseErr != nil {
+		runErr = stderrCloseErr
 	}
 
-	parsed, parseErr := parseClaudeJSONResult(rawOutputPath)
+	parsed, parseErr := parseCapturedStreamResult(ingester.result())
 	if parseErr == nil {
 		result.Response = parsed.Result
 		result.TopLevelUsage = parsed.Usage
@@ -217,8 +224,13 @@ func (r *ClaudeRunner) Run(
 		result.TopLevelTurns = parsed.NumTurns
 		result.TotalCostUSD = parsed.TotalCostUSD
 	}
+	// 旧json出力はresult本文が空のときraw stdout fileを分類入力へコピーしていた。
+	// stream化後はplain stdoutをraw保存せず、既存classifierへの構造値だけを渡す。
+	if result.Response == "" {
+		result.PlainFailure = classifyPlainStdoutFailure(ingester.plainSignal())
+	}
 
-	if err := writeResultOutput(outputPath, result.Response, rawOutputPath, stderrPath); err != nil {
+	if err := writeResultOutput(outputPath, result.Response, streamResultSummary(parsed, parseErr), stderrPath); err != nil {
 		return result, err
 	}
 	if runErr != nil {
@@ -256,15 +268,78 @@ func parseClaudeJSONResult(path string) (claudeJSONResult, error) {
 	return result, nil
 }
 
-func writeResultOutput(outputPath string, response string, rawOutputPath string, stderrPath string) error {
+// parseCapturedStreamResultはingesterが保持した最終result event行を解析する。result eventは
+// --output-format jsonの出力objectと同一schemaのため、取り出した後の取り扱いはjson出力と
+// 同じ意味を保つ。result eventがない場合(起動失敗・途中kill等)はjson出力のtype不正と同じ
+// 失敗区分へ落とす。
+func parseCapturedStreamResult(line []byte, found bool) (claudeJSONResult, error) {
+	if !found {
+		return claudeJSONResult{}, fmt.Errorf("Claude CLIのJSON出力typeが不正です: result eventがありません")
+	}
+	var parsed claudeJSONResult
+	if err := json.Unmarshal(line, &parsed); err != nil {
+		return claudeJSONResult{}, fmt.Errorf("Claude CLIのJSON出力を解析できません: %w", err)
+	}
+	return parsed, nil
+}
+
+// newTaskEventIngesterはこのcall分の受動event記録を用意する。call ID生成に失敗した
+// 場合は以後何も記録しないingesterを返し、本体実行へ影響させない。
+func (r *ClaudeRunner) newTaskEventIngester(
+	taskID string,
+	role state.SessionRole,
+	phase string,
+	model string,
+	sessionID string,
+	resumed bool,
+) *streamEventIngester {
+	callID, err := state.NewUUID()
+	if err != nil {
+		state.WarnTaskEventSkip("call ID生成", err)
+		return &streamEventIngester{closed: true}
+	}
+	return newStreamEventIngester(r.state, taskID, callID, role, phase, model, sessionID, resumed)
+}
+
+// streamResultSummaryはresult本文が得られない経路へ出力する安全な構造summary。
+// assistant/tool本文・thinking等のcontentを含まず、失敗分類とtransient signal検出に
+// 必要な構造情報(解析error・subtype・is_error)だけを残す。event数等の任意数値は
+// 分類入力となるこの経路へ出さず、transient HTTP status signatureへの誤一致を防ぐ。
+func streamResultSummary(parsed claudeJSONResult, parseErr error) string {
+	if parseErr != nil {
+		return fmt.Sprintf("stream-json result unavailable: %v\n", parseErr)
+	}
+	if parsed.Result == "" {
+		return fmt.Sprintf("stream result event: subtype=%s is_error=%v\n", parsed.Subtype, parsed.IsError)
+	}
+	return ""
+}
+
+// classifyPlainStdoutFailureはplain stdoutのsignal本文を旧raw fallbackと同じclassifierへ
+// 通し、5h上限・transientの構造値だけを返す。明示fatal信号とその他の区別は既存
+// classifier上どちらもfatal既定のため、何も一致しないときは空を返して呼出元の
+// file由来分類へ委ねる。
+func classifyPlainStdoutFailure(plain string) ProviderFailureClass {
+	class := ClassifyProviderFailureText(plain)
+	if class.Kind == ProviderFailureZaiFiveHour || class.Kind == ProviderFailureTransient {
+		return class
+	}
+	return ProviderFailureClass{}
+}
+
+// writeResultOutputは最終outputPathへresponse(result本文)・構造summary・stderrだけを
+// 0600で書き出す。raw stream全体の転記は行わず、失敗時の診断tail・telemetryへ
+// 非result event本文が流れる経路を作らない。
+func writeResultOutput(outputPath string, response string, summary string, stderrPath string) error {
 	var data []byte
 	if response != "" {
 		data = []byte(response)
 		if data[len(data)-1] != '\n' {
 			data = append(data, '\n')
 		}
-	} else if raw, err := os.ReadFile(rawOutputPath); err == nil {
-		data = raw
+	}
+	if summary != "" {
+		data = append(data, summary...)
 	}
 	if stderr, err := os.ReadFile(stderrPath); err == nil && len(stderr) > 0 {
 		data = append(data, stderr...)

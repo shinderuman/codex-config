@@ -97,7 +97,7 @@ func (s *StateStore) RecordModelCallLog(value ModelCallLog) {
 		value.Version = modelCallLogVersion
 	}
 	if value.CallID == "" {
-		callID, err := newUUID()
+		callID, err := NewUUID()
 		if err != nil {
 			warnStatsFailure("telemetry call ID生成", err)
 		} else {

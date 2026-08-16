@@ -21,6 +21,7 @@ const (
 	ModeFix
 	ModeResume
 	ModeStatus
+	ModeWatch
 	ModeStats
 	ModeReset
 	ModeVerifyAutoResume
@@ -41,7 +42,7 @@ type VerifyArgs struct {
 
 func ParseCommand(args []string) (Command, error) {
 	if len(args) == 0 {
-		return Command{}, fmt.Errorf("usage: glm-worker <instruction> | --decision <decision> | --fix <instruction> | --resume | --status | --stats | --reset | --eval-ab <run-dir>")
+		return Command{}, fmt.Errorf("usage: glm-worker <instruction> | --decision <decision> | --fix <instruction> | --resume | --status | --watch | --stats | --reset | --eval-ab <run-dir>")
 	}
 
 	switch args[0] {
@@ -59,6 +60,11 @@ func ParseCommand(args []string) (Command, error) {
 			return Command{}, fmt.Errorf("usage: glm-worker --status")
 		}
 		return Command{Mode: ModeStatus}, nil
+	case "--watch":
+		if len(args) != 1 {
+			return Command{}, fmt.Errorf("usage: glm-worker --watch")
+		}
+		return Command{Mode: ModeWatch}, nil
 	case "--stats":
 		if len(args) != 1 {
 			return Command{}, fmt.Errorf("usage: glm-worker --stats")
@@ -134,8 +140,13 @@ func run(
 }
 
 // Executeはcmdをcfg配下で実行する。runner/workflowはrf経由で注入可能で、
-// --status/--statsはロック取得前に、それ以外はプロセス間ロック後に処理する。
+// --watchはstateへ書き込まないread-only参照、--status/--statsはロック取得前に、
+// それ以外はプロセス間ロック後に処理する。
 func Execute(cmd Command, cfg config.AppConfig, rf RunnerFactory, stdout, stderr io.Writer) error {
+	if cmd.Mode == ModeWatch {
+		return printWatch(state.AttachStateStore(cfg), stdout, defaultWatchFollowInterval, nil)
+	}
+
 	st, err := state.NewStateStore(cfg)
 	if err != nil {
 		return err

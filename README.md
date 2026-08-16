@@ -130,6 +130,7 @@ glm-worker --decision "<Sol判断>"
 glm-worker --fix "<NEEDS_SOL_REVIEWへの修正指示>"
 glm-worker --resume
 glm-worker --status
+glm-worker --watch
 glm-worker --stats
 glm-worker --reset
 glm-worker --eval-ab "<A/B run dir>"
@@ -139,6 +140,7 @@ glm-worker --eval-ab "<A/B run dir>"
 - `--fix`は`NEEDS_SOL_REVIEW`後だけ利用できる。
 - `--resume`はZ.ai 5時間上限またはprovider一時障害で停止した同一phase・session・checkpointを再開する。
 - `--status`と`--stats`は参照専用、`--reset`は現在の統計をarchiveして実行状態を消去する。
+- `--watch`は現在taskの受動event log(`events/<task ID>.jsonl`)を保存済み内容のread・tailだけで表示する参照専用command。provider/workerへの問い合わせ・AI呼出・repo lock・state書換を行わない。
 - `--eval-ab`はCodex Direct対orchestratedのA/B比較run dir(spec.json・direct.json・orchestrated.json)を検証して比較結果を表示する参照専用commandで、AI呼出は行わない。orchestrated記録のGLM usageは当該taskのstats履歴から解決するため、orchestrated run側またはそのstate履歴を持つcheckoutで実行する。
 
 reviewer呼出しの前後でGit状態を3軸(HEAD・index・worktree/untracked)のdigestで固定・検証する。worker終了時とreviewer開始前、5h上限・provider障害からのresume前、そして各reviewer model callが正常終了した直後かつPASS/FIX_REQUIRED/NEEDS_SOL_REVIEW等を採用する前に、保存snapshotと現在状態を同じ3軸で比較する。reviewerがEdit/Write禁止でもBash・formatter・test・generator等でrepositoryを変更していた場合はreview結果を採用せず、rollbackも黙認もせず`NEEDS_SOL_REVIEW`/`HIGH`へfail closedする。追加のmodel呼出・reviewer層の変更は行わない。
@@ -273,10 +275,12 @@ glm-worker --resume
 
 ```sh
 glm-worker --status
+glm-worker --watch
 glm-worker --stats
 ```
 
 `--status`は現在のtask ID、task status、task別artifact保存先、session、判断待ち、rate limit状態、provider-unavailable状態(原因分類・試行数・経過・RESUME_AVAILABLE)に加え、対象repositoryのlock実保持(`REPOSITORY_LOCK: held/free/unknown`)と、`TASK_STATUS: active`時の`TASK_LIVENESS: running/stale/unknown`を表示する。lock保持判定はflock実取得の非破壊probeであり、lock file内のPIDは診断情報(`LOCK_PID`)としてのみ扱う。GLM workerの生存判定・重複起動待避は対象repoのlockだけを根拠にし、別repoのprocess一覧や`pgrep`は使わない。`active`+`REPOSITORY_LOCK: free`はstale候補としてrepo固有の復旧へ導く。
+`--watch`は現在taskのevent logを1行1eventのmetadata summary(時刻・phase・role・種別・tool名とbyte数・token・result観測値)で表示し、以降の追記をlocal tailする。thinking等の本文は表示せずbyte数だけを出す。中断はCtrl-Cでよい。
 `--stats`は通常のworker packetへ混ぜず、完了済みと現在のタスクを集計して次を表示する。
 
 - worker/reviewerとmodel alias別の呼び出し回数・実行時間・turn数
@@ -294,6 +298,8 @@ glm-worker --stats
 Task Work Call(worker/reviewerの本task呼出。transient障害からの本task再開実行を含む)とProvider Probe Callは`call_type`(task/probe/event)で区別する。task call数・実行時間・token/cost集計へprobeを混ぜず、probeは呼出数を`probe_outcome`/`PROBE_CALLS`へ別計上する。probeもClaude CLIが返すinput/output/cache token・cost・resolved model・API/wall durationをJSONL telemetryへ記録し、取得不能値は未観測(零値)のまま推測しない。
 statsとtelemetryのschemaはversion 3で、top-level集計だったversion 1に加え、model_callsへprobeを混ぜていたversion 2 statsとcall_typeを持たないversion 2 telemetryも`--stats`とtelemetry読込から除外する。旧値の移行・書き換え・混在は行わない。versionは既存fieldの意味やJSON名を変更するときだけ上げ、上げ時は旧version recordをfail-closedで読み飛ばす。新fieldのomitempty追加は後方互換のためversionを維持し、旧recordでの新field欠落は「未観測/not captured」(0件・一致・LOW等の意味値とは区別)として扱う。telemetry各recordはworker/reviewer報告risk、実効risk、risk floor source/category、worker_end/review_start/review_endのGit snapshot digest(HEAD・index・worktree。生diffやfile内容は保存しない)、snapshot mismatch軸、packet reject理由、provider障害分類、probe/retry試行と経過時間、resume source(rate-limit/provider-unavailable)を同じ呼出へ紐付けて記録し、`--stats`はrisk floor・snapshot mismatch・packet reject・probe outcomeの少数集計を表示する。
 artifactはtask更新や`--reset`後もtelemetryと同様にtask ID別で保持する。不要になった成果物の削除は自動化しない。
+
+worker/reviewer呼出は`--output-format stream-json`で実行し、実行中に返る受動eventを追加のprompt/model callなしでtask単位event log(`events/<task ID>.jsonl`)へ`0600`で追記する。recordはversion 1で、task・call・session・role・phase・model alias・resume別・call内seq・時刻・種別(system/assistant/user/result)・tool名とblock byte数・message単位token・result観測値(duration・turns・cost)だけのmetadataであり、assistant/tool本文・prompt・response・thinking/reasoning本文・秘密情報は保存しない。child stdoutはこの縮約だけが受け、非result eventのraw本文はevent log・一時file・最終output・error診断・telemetryのいずれにも書き出さない。最終result event行だけboundedな内部表現へ保持して解析し、result eventがない・壊れている場合はstderrと構造summary(解析error・subtype・is_error)だけの診断へ落とす。summaryへevent数等の任意数値は含めず、transient HTTP status signature(`502|503|504|529`)への誤一致を防ぐ。JSON eventとして解釈できないplain stdout行だけを旧raw出力と同じprovider分類入力とし、5h上限・transientの分類構造値だけをworkflowへ渡してraw本文は保存しない。event logの追記・読込失敗はwarningだけでworkflowを止めず、部分破損行はその行だけskipして以後の追記・表示へ波及させない。最終result eventは`--output-format json`と同一schemaのためPACKET/session/resume/recovery semanticsは変わらない。event logもtelemetry・artifactと同じtask ID別の保存境界とし、新たな自動削除・保持期間は設けない。
 
 
 ## 開発時の検証

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 )
 
-// newUUIDはUUID version 4形式の文字列を生成する。
-func newUUID() (string, error) {
+// NewUUIDはUUID version 4形式の文字列を生成する。
+func NewUUID() (string, error) {
 	var value [16]byte
 	if _, err := rand.Read(value[:]); err != nil {
 		return "", fmt.Errorf("session UUIDを生成できません: %w", err)

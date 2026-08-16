@@ -81,7 +81,7 @@ func TestClaudeRunnerRunStartsThenResumesSession(t *testing.T) {
 	}, st)
 
 	firstOutput := filepath.Join(t.TempDir(), "first.log")
-	firstResult, err := r.Run(state.WorkerRole, "worker-model", false, "high", "first prompt", firstOutput)
+	firstResult, err := r.Run(state.WorkerRole, "worker-new", "worker-model", false, "high", "first prompt", firstOutput)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,8 +92,8 @@ func TestClaudeRunnerRunStartsThenResumesSession(t *testing.T) {
 	if !containsArgument(firstArguments, "worker-model") || !containsArgument(firstArguments, "first prompt") {
 		t.Fatalf("worker引数 = %#v", firstArguments)
 	}
-	if !containsArgument(firstArguments, "json") {
-		t.Fatalf("JSON出力指定がありません: %#v", firstArguments)
+	if !containsArgument(firstArguments, "stream-json") || !containsArgument(firstArguments, "--verbose") {
+		t.Fatalf("stream-json出力指定がありません: %#v", firstArguments)
 	}
 	settingsValue := argumentAfter(firstArguments, "--settings")
 	if settingsValue == "" {
@@ -146,7 +146,7 @@ func TestClaudeRunnerRunStartsThenResumesSession(t *testing.T) {
 	}
 
 	secondOutput := filepath.Join(t.TempDir(), "second.log")
-	secondResult, err := r.Run(state.WorkerRole, "override-model", true, "max", "second prompt", secondOutput)
+	secondResult, err := r.Run(state.WorkerRole, "worker-decision", "override-model", true, "max", "second prompt", secondOutput)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestClaudeRunnerRejectsMissingPrompt(t *testing.T) {
 		ClaudeBin: "unused",
 	}, st)
 
-	_, err := r.Run(state.WorkerRole, "worker-model", false, "high", "prompt", filepath.Join(t.TempDir(), "output"))
+	_, err := r.Run(state.WorkerRole, "worker-new", "worker-model", false, "high", "prompt", filepath.Join(t.TempDir(), "output"))
 	if err == nil || !strings.Contains(err.Error(), "required promptがありません") {
 		t.Fatalf("missing prompt error = %v", err)
 	}
@@ -187,7 +187,7 @@ func TestClaudeRunnerRejectsMissingTaskID(t *testing.T) {
 	st := newTestStateStore(t)
 	r := NewClaudeRunner(config.AppConfig{}, st)
 
-	_, err := r.Run(state.WorkerRole, "worker-model", false, "high", "prompt", filepath.Join(t.TempDir(), "output"))
+	_, err := r.Run(state.WorkerRole, "worker-new", "worker-model", false, "high", "prompt", filepath.Join(t.TempDir(), "output"))
 	if err == nil || !strings.Contains(err.Error(), "task.idがありません") {
 		t.Fatalf("missing task ID error = %v", err)
 	}
@@ -217,7 +217,7 @@ func TestClaudeRunnerPreservesErrorResultAndUsage(t *testing.T) {
 		ClaudeBin: commandPath,
 	}, st)
 	outputPath := filepath.Join(t.TempDir(), "error.log")
-	result, err := r.Run(state.WorkerRole, "opus", false, "high", "prompt", outputPath)
+	result, err := r.Run(state.WorkerRole, "worker-new", "opus", false, "high", "prompt", outputPath)
 	if err == nil {
 		t.Fatal("exit statusを返す必要があります")
 	}
@@ -255,8 +255,8 @@ func TestClaudeRunnerRejectsInvalidJSONWithoutMarkingSessionReady(t *testing.T) 
 		PromptDir: promptDir,
 		ClaudeBin: commandPath,
 	}, st)
-	_, err := r.Run(state.WorkerRole, "opus", false, "high", "prompt", filepath.Join(t.TempDir(), "output.log"))
-	if err == nil || !strings.Contains(err.Error(), "JSON出力を解析できません") {
+	_, err := r.Run(state.WorkerRole, "worker-new", "opus", false, "high", "prompt", filepath.Join(t.TempDir(), "output.log"))
+	if err == nil || !strings.Contains(err.Error(), "result eventがありません") {
 		t.Fatalf("invalid JSON error = %v", err)
 	}
 	if st.Exists("worker.ready") {
@@ -579,7 +579,7 @@ func TestClaudeRunnerReMintSessionOnStaleIsolationPolicy(t *testing.T) {
 		EnvAllowlist:    []string{"GLM_ARGS_FILE"},
 	}, st)
 
-	if _, err := r.Run(state.WorkerRole, "worker-model", false, "high", "prompt", filepath.Join(t.TempDir(), "out")); err != nil {
+	if _, err := r.Run(state.WorkerRole, "worker-new", "worker-model", false, "high", "prompt", filepath.Join(t.TempDir(), "out")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -665,11 +665,11 @@ func TestIsolationMigrationWorkerFirstClearsReviewerSession(t *testing.T) {
 	seedStaleReadyRole(t, f.state, state.WorkerRole, "stale-worker")
 	seedStaleReadyRole(t, f.state, state.ReviewerRole, "stale-reviewer")
 
-	if _, err := f.runner.Run(state.WorkerRole, "worker-model", false, "high", "worker prompt",
+	if _, err := f.runner.Run(state.WorkerRole, "worker-new", "worker-model", false, "high", "worker prompt",
 		filepath.Join(t.TempDir(), "worker.log")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.runner.Run(state.ReviewerRole, "reviewer-model", true, "high", "reviewer prompt",
+	if _, err := f.runner.Run(state.ReviewerRole, "reviewer-1", "reviewer-model", true, "high", "reviewer prompt",
 		filepath.Join(t.TempDir(), "reviewer.log")); err != nil {
 		t.Fatal(err)
 	}
@@ -698,11 +698,11 @@ func TestIsolationMigrationReviewerFirstClearsWorkerSession(t *testing.T) {
 	seedStaleReadyRole(t, f.state, state.WorkerRole, "stale-worker")
 	seedStaleReadyRole(t, f.state, state.ReviewerRole, "stale-reviewer")
 
-	if _, err := f.runner.Run(state.ReviewerRole, "reviewer-model", true, "high", "reviewer prompt",
+	if _, err := f.runner.Run(state.ReviewerRole, "reviewer-1", "reviewer-model", true, "high", "reviewer prompt",
 		filepath.Join(t.TempDir(), "reviewer.log")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.runner.Run(state.WorkerRole, "worker-model", false, "high", "worker prompt",
+	if _, err := f.runner.Run(state.WorkerRole, "worker-new", "worker-model", false, "high", "worker prompt",
 		filepath.Join(t.TempDir(), "worker.log")); err != nil {
 		t.Fatal(err)
 	}
@@ -732,7 +732,7 @@ func TestIsolationMigrationClearsNonCallingReadyRole(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := f.runner.Run(state.ReviewerRole, "reviewer-model", true, "high", "reviewer prompt",
+	if _, err := f.runner.Run(state.ReviewerRole, "reviewer-1", "reviewer-model", true, "high", "reviewer prompt",
 		filepath.Join(t.TempDir(), "reviewer.log")); err != nil {
 		t.Fatal(err)
 	}
@@ -740,7 +740,7 @@ func TestIsolationMigrationClearsNonCallingReadyRole(t *testing.T) {
 	if f.state.Exists("worker.ready") {
 		t.Fatal("呼出し対象でないworkerの旧readyが残っています")
 	}
-	if _, err := f.runner.Run(state.WorkerRole, "worker-model", false, "high", "worker prompt",
+	if _, err := f.runner.Run(state.WorkerRole, "worker-new", "worker-model", false, "high", "worker prompt",
 		filepath.Join(t.TempDir(), "worker.log")); err != nil {
 		t.Fatal(err)
 	}
@@ -790,7 +790,7 @@ func TestIsolationPolicyPersistedBeforeExecutionOnFailure(t *testing.T) {
 	}, st)
 	seedStaleReadyRole(t, st, state.WorkerRole, "stale-worker")
 
-	if _, err := r.Run(state.WorkerRole, "worker-model", false, "high", "first prompt",
+	if _, err := r.Run(state.WorkerRole, "worker-new", "worker-model", false, "high", "first prompt",
 		filepath.Join(t.TempDir(), "first.log")); err == nil {
 		t.Fatal("1回目は失敗する必要があります")
 	}
@@ -805,7 +805,7 @@ func TestIsolationPolicyPersistedBeforeExecutionOnFailure(t *testing.T) {
 		t.Fatalf("失敗時のsession idを読めません: %v", err)
 	}
 
-	if _, err := r.Run(state.WorkerRole, "worker-model", false, "high", "retry prompt",
+	if _, err := r.Run(state.WorkerRole, "worker-new", "worker-model", false, "high", "retry prompt",
 		filepath.Join(t.TempDir(), "retry.log")); err != nil {
 		t.Fatal(err)
 	}
@@ -874,7 +874,7 @@ func newFiveHourLimitResumeFixture(t *testing.T, role state.SessionRole) (*Claud
 func TestFirstWorkerRunFiveHourLimitResumesSameSession(t *testing.T) {
 	r, st, argsDir := newFiveHourLimitResumeFixture(t, state.WorkerRole)
 
-	if _, err := r.Run(state.WorkerRole, "worker-model", false, "high", "first prompt",
+	if _, err := r.Run(state.WorkerRole, "worker-new", "worker-model", false, "high", "first prompt",
 		filepath.Join(t.TempDir(), "first.log")); err == nil {
 		t.Fatal("5h上限はerrorを返す必要があります")
 	}
@@ -892,7 +892,7 @@ func TestFirstWorkerRunFiveHourLimitResumesSameSession(t *testing.T) {
 		t.Fatalf("初回は新session採番が必要: %#v", firstArgs)
 	}
 
-	if _, err := r.Run(state.WorkerRole, "worker-model", false, "high", "resume prompt",
+	if _, err := r.Run(state.WorkerRole, "worker-new", "worker-model", false, "high", "resume prompt",
 		filepath.Join(t.TempDir(), "resume.log")); err != nil {
 		t.Fatal(err)
 	}
@@ -909,7 +909,7 @@ func TestFirstWorkerRunFiveHourLimitResumesSameSession(t *testing.T) {
 func TestFirstReviewerRunFiveHourLimitResumesSameSession(t *testing.T) {
 	r, st, argsDir := newFiveHourLimitResumeFixture(t, state.ReviewerRole)
 
-	if _, err := r.Run(state.ReviewerRole, "reviewer-model", true, "high", "first review prompt",
+	if _, err := r.Run(state.ReviewerRole, "reviewer-1", "reviewer-model", true, "high", "first review prompt",
 		filepath.Join(t.TempDir(), "first.log")); err == nil {
 		t.Fatal("5h上限はerrorを返す必要があります")
 	}
@@ -926,7 +926,7 @@ func TestFirstReviewerRunFiveHourLimitResumesSameSession(t *testing.T) {
 		t.Fatalf("初回は新session採番が必要: %#v", firstArgs)
 	}
 
-	if _, err := r.Run(state.ReviewerRole, "reviewer-model", true, "high", "resume review prompt",
+	if _, err := r.Run(state.ReviewerRole, "reviewer-1", "reviewer-model", true, "high", "resume review prompt",
 		filepath.Join(t.TempDir(), "resume.log")); err != nil {
 		t.Fatal(err)
 	}
@@ -970,7 +970,7 @@ func TestIsolationPolicyWriteFailureAbortsBeforeClaude(t *testing.T) {
 		ClaudeConfigDir: filepath.Join(t.TempDir(), "claude-home"),
 	}, st)
 
-	_, err := r.Run(state.WorkerRole, "worker-model", false, "high", "prompt",
+	_, err := r.Run(state.WorkerRole, "worker-new", "worker-model", false, "high", "prompt",
 		filepath.Join(t.TempDir(), "out.log"))
 	if err == nil {
 		t.Fatal("policy永続化失敗時はerrorを返す必要があります")
@@ -1095,7 +1095,7 @@ func TestIsolationArgsIdenticalAcrossRoleAndResume(t *testing.T) {
 		{"reviewer-resume", state.ReviewerRole, "reviewer-model", true, true},
 	}
 	for _, step := range paths {
-		if _, err := r.Run(step.role, step.model, step.readOnly, "high", step.name+" prompt", filepath.Join(t.TempDir(), step.name+".log")); err != nil {
+		if _, err := r.Run(step.role, step.name, step.model, step.readOnly, "high", step.name+" prompt", filepath.Join(t.TempDir(), step.name+".log")); err != nil {
 			t.Fatalf("%s Run error: %v", step.name, err)
 		}
 	}

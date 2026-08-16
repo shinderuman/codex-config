@@ -32,6 +32,7 @@ type fakeRunner struct {
 
 func (r *fakeRunner) Run(
 	_ state.SessionRole,
+	_ string,
 	model string,
 	_ bool,
 	_ string,

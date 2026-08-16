@@ -45,6 +45,12 @@ func NewStateStore(config config.AppConfig) (*StateStore, error) {
 	return state, nil
 }
 
+// AttachStateStoreはstateディレクトリへ書き込まず既存stateを参照するだけのstoreを返す。
+// read-only表示(--watch)向けで、ディレクトリ不存在もここではエラーにしない。
+func AttachStateStore(config config.AppConfig) *StateStore {
+	return &StateStore{dir: filepath.Join(config.StateBase, config.RepoHash)}
+}
+
 func (s *StateStore) Path(name string) string {
 	return filepath.Join(s.dir, name)
 }
@@ -118,7 +124,7 @@ func (s *StateStore) StartNewTask() (string, error) {
 		return "", err
 	}
 
-	taskID, err := newUUID()
+	taskID, err := NewUUID()
 	if err != nil {
 		return "", err
 	}
@@ -192,7 +198,7 @@ func (s *StateStore) SessionID(role SessionRole) (string, bool, error) {
 		return id, s.Exists(string(role) + ".ready"), nil
 	}
 
-	id, err := newUUID()
+	id, err := NewUUID()
 	if err != nil {
 		return "", false, err
 	}

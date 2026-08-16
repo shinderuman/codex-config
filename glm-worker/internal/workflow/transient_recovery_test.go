@@ -125,6 +125,42 @@ func TestRecoveryProbeSuccessThenResumeCompletes(t *testing.T) {
 	}
 }
 
+// result本文が無い経路のplain stdout transient信号はrunnerの構造値だけから
+// 通常のprobe→resume回復へ入る。outputPath本文に信号が無くても分類semanticsが
+// 旧raw fallbackと同じことを固定する。
+func TestRecoveryFromPlainStdoutTransientSignal(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{
+		steps: []runnerStep{
+			{
+				runErr: errors.New("exit status 1"),
+				result: runner.RunResult{PlainFailure: runner.ProviderFailureClass{
+					Kind:   runner.ProviderFailureTransient,
+					Detail: "http-503",
+				}},
+			},
+			{output: implementedPacket("recovered")},
+		},
+		probeErrs: []error{errProbeTransient, nil},
+	}
+	w, _ := newRecoveryWorkflowT(t, st, r)
+	w.temp = t.TempDir()
+
+	result, err := w.runModel(workerCheckpoint())
+	if err != nil {
+		t.Fatalf("回復成功を期待: %v", err)
+	}
+	if result.Status() != "IMPLEMENTED" {
+		t.Fatalf("status = %q", result.Status())
+	}
+	if len(r.probes) != 2 || len(r.prompts) != 2 {
+		t.Fatalf("probes=%d prompts=%d", len(r.probes), len(r.prompts))
+	}
+	if st.TaskStatus() != state.TaskStatusActive {
+		t.Fatalf("status = %q", st.TaskStatus())
+	}
+}
+
 // probe成功後の本task再実行はrole別task callとして数え、probe呼出・tokenはtask集計へ混ざらない。
 // total AI call数はtask call + probe callで重複・欠落なく導出できる。
 func TestRecoveryAccountingSeparatesTaskAndProbeCalls(t *testing.T) {

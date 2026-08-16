@@ -36,6 +36,7 @@ type scriptedRunner struct {
 	onProbe func()
 	prompts []string
 	models  []string
+	phases  []string
 	probes  []string
 	// artifactFiles/taskArtifactDirはscenarioのartifact packet検証用。step出力の
 	// {{ARTIFACT_DIR}}予約tokenを現在taskのartifact dirへ置換し、宣言済みfileを保存する。
@@ -46,6 +47,7 @@ type scriptedRunner struct {
 
 func (r *scriptedRunner) Run(
 	_ state.SessionRole,
+	phase string,
 	model string,
 	_ bool,
 	_ string,
@@ -54,6 +56,7 @@ func (r *scriptedRunner) Run(
 ) (runner.RunResult, error) {
 	r.prompts = append(r.prompts, prompt)
 	r.models = append(r.models, model)
+	r.phases = append(r.phases, phase)
 	index := len(r.prompts) - 1
 	if r.onRun != nil {
 		r.onRun()
@@ -278,6 +281,9 @@ func TestRunModelRecordsPromptResponseAndUsage(t *testing.T) {
 	}
 	if !strings.Contains(r.prompts[0], artifactPromptMarker) {
 		t.Fatalf("artifact保存先がrunner promptにありません: %q", r.prompts[0])
+	}
+	if len(r.phases) != 1 || r.phases[0] != "worker-new" {
+		t.Fatalf("runnerへ渡したphase = %#v", r.phases)
 	}
 	if got.TopLevelUsage.CacheReadInputTokens != 2 || got.TreeUsage.CacheReadInputTokens != 37 || got.ResolvedModelUsage["glm-5.3"].OutputTokens != 40 {
 		t.Fatalf("telemetry usage = %#v", got)
@@ -894,6 +900,68 @@ func TestRunModelSurfacesZaiFiveHourLimit(t *testing.T) {
 	}
 	if len(logs) != 1 || logs[0].Outcome != "rate_limited" {
 		t.Fatalf("rate limit telemetry = %#v", logs)
+	}
+}
+
+// 旧raw fallback相当の分類入力として、result本文が無い経路のplain stdout 5h上限信号が
+// outputPath本文へ信号が無くてもrunnerの構造値からrate-limited状態へ到達すること。
+func TestRunModelSurfacesPlainStdoutFiveHourLimit(t *testing.T) {
+	st := newStateStoreT(t)
+	r := &scriptedRunner{steps: []runnerStep{{
+		runErr: errors.New("exit status 1"),
+		result: runner.RunResult{PlainFailure: runner.ProviderFailureClass{
+			Kind:          runner.ProviderFailureZaiFiveHour,
+			FiveHourLimit: runner.ZaiFiveHourLimit{ResetAtRFC3339: "2026-07-22T14:06:34+08:00"},
+		}},
+	}}}
+	w := newWorkflowT(t, st, r)
+	w.config.RepoRoot = "/repo"
+	w.config.RepoShort = "testrepo1234"
+	w.temp = t.TempDir()
+
+	_, err := w.runModel(state.ResumeCheckpoint{
+		Stage:   state.ResumeStageWorker,
+		Phase:   "worker-new",
+		Role:    state.WorkerRole,
+		Model:   "opus",
+		Effort:  "high",
+		Prompt:  "p",
+		Request: "req",
+	})
+	if err == nil || !strings.Contains(err.Error(), "STATUS: RATE_LIMITED") {
+		t.Fatalf("rate limit errorを期待: %v", err)
+	}
+	if st.TaskStatus() != state.TaskStatusRateLimited {
+		t.Fatalf("status = %q", st.TaskStatus())
+	}
+}
+
+// mergePlainFailureClassは旧classifierの全体一致順序(5h→transient)をfile由来と
+// plain由来の統合でも保つ。fatal既定はどちらの上書きもしない。
+func TestMergePlainFailureClassPriority(t *testing.T) {
+	fiveHour := runner.ProviderFailureClass{Kind: runner.ProviderFailureZaiFiveHour}
+	transientFile := runner.ProviderFailureClass{Kind: runner.ProviderFailureTransient, Detail: "network:dial tcp"}
+	transientPlain := runner.ProviderFailureClass{Kind: runner.ProviderFailureTransient, Detail: "http-503"}
+	fatal := runner.ProviderFailureClass{Kind: runner.ProviderFailureFatal}
+	empty := runner.ProviderFailureClass{}
+
+	cases := []struct {
+		name  string
+		base  runner.ProviderFailureClass
+		plain runner.ProviderFailureClass
+		want  runner.ProviderFailureClass
+	}{
+		{"plain 5h over file transient", transientFile, fiveHour, fiveHour},
+		{"file 5h over plain transient", fiveHour, transientPlain, fiveHour},
+		{"file transient keeps detail", transientFile, transientPlain, transientFile},
+		{"plain transient over fatal", fatal, transientPlain, transientPlain},
+		{"plain empty keeps file class", transientFile, empty, transientFile},
+		{"both empty stays fatal default", fatal, empty, fatal},
+	}
+	for _, c := range cases {
+		if got := mergePlainFailureClass(c.base, c.plain); got != c.want {
+			t.Fatalf("%s: merge = %#v, want %#v", c.name, got, c.want)
+		}
 	}
 }
 

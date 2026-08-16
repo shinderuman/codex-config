@@ -20,8 +20,9 @@ import (
 )
 
 // interfaceは実装側ではなく利用側に置き、テストでは偽装実装へ差し替える。
+// phaseは受動event logへ記録するcall識別metadataで、実行内容へは影響しない。
 type ModelRunner interface {
-	Run(role state.SessionRole, model string, readOnly bool, effort string, prompt string, outputPath string) (runner.RunResult, error)
+	Run(role state.SessionRole, phase string, model string, readOnly bool, effort string, prompt string, outputPath string) (runner.RunResult, error)
 	Probe(model string) (runner.ProbeResult, error)
 }
 
@@ -733,6 +734,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	startedAt := w.now().UTC()
 	runResult, runErr := w.runner.Run(
 		checkpoint.Role,
+		checkpoint.Phase,
 		checkpoint.Model,
 		checkpoint.ReadOnly,
 		checkpoint.Effort,
@@ -743,7 +745,10 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	w.state.RecordModelDuration(checkpoint.Model, completedAt.Sub(startedAt))
 	failureClass := runner.ProviderFailureClass{}
 	if runErr != nil {
-		failureClass = runner.ClassifyProviderFailureText(runner.ReadTransientSignal(outputPath))
+		failureClass = mergePlainFailureClass(
+			runner.ClassifyProviderFailureText(runner.ReadTransientSignal(outputPath)),
+			runResult.PlainFailure,
+		)
 		if failureClass.Kind == runner.ProviderFailureZaiFiveHour {
 			return packet.Packet{}, w.saveRateLimitedState(checkpoint, failureClass.FiveHourLimit, runResult, startedAt, completedAt, runErr, outputPath)
 		}
@@ -910,10 +915,10 @@ func (w *Workflow) saveProbeRateLimited(checkpoint state.ResumeCheckpoint, limit
 	}
 	_ = w.state.SecureArtifactDir()
 	return runner.ZaiRateLimitError{
-		Phase:    checkpoint.Phase,
-		Limit:    limit,
-		TaskID:   taskID,
-		RepoRoot: w.config.RepoRoot,
+		Phase:     checkpoint.Phase,
+		Limit:     limit,
+		TaskID:    taskID,
+		RepoRoot:  w.config.RepoRoot,
 		RepoShort: w.config.RepoShort,
 	}
 }
@@ -953,6 +958,7 @@ func (w *Workflow) runResumedTask(checkpoint state.ResumeCheckpoint, outputPath 
 	w.state.RecordModelCall(checkpoint.Role, checkpoint.Model)
 	result, runErr := w.runner.Run(
 		checkpoint.Role,
+		checkpoint.Phase,
 		checkpoint.Model,
 		checkpoint.ReadOnly,
 		checkpoint.Effort,
@@ -964,7 +970,10 @@ func (w *Workflow) runResumedTask(checkpoint state.ResumeCheckpoint, outputPath 
 	if runErr == nil {
 		return true, result, startedAt, completedAt, nil
 	}
-	class := runner.ClassifyProviderFailureText(runner.ReadTransientSignal(outputPath))
+	class := mergePlainFailureClass(
+		runner.ClassifyProviderFailureText(runner.ReadTransientSignal(outputPath)),
+		result.PlainFailure,
+	)
 	if class.Kind == runner.ProviderFailureZaiFiveHour {
 		err := w.saveRateLimitedState(checkpoint, class.FiveHourLimit, result, startedAt, completedAt, runErr, outputPath)
 		return false, result, startedAt, completedAt, err
@@ -978,6 +987,25 @@ func (w *Workflow) runResumedTask(checkpoint state.ResumeCheckpoint, outputPath 
 	}
 	w.recordModelCall(checkpoint, result, startedAt, completedAt, "transient_error", "", runErr, outputPath, callDiagnostics{providerClassification: class.Detail})
 	return false, runner.RunResult{}, startedAt, completedAt, nil
+}
+
+// mergePlainFailureClassはoutputPath本文の分類に、result本文が無い経路だけrunnerが
+// plain stdoutから検出した5h上限・transient分類を統合する。旧raw fallbackは全本文を
+// 連結して5h→transientの順で一致させていたため、どちらかの5hを最優先にし、
+// file由来とplain由来が同種のときはfile由来のdetailを保つ。
+func mergePlainFailureClass(base runner.ProviderFailureClass, plain runner.ProviderFailureClass) runner.ProviderFailureClass {
+	switch {
+	case plain.Kind == runner.ProviderFailureZaiFiveHour:
+		return plain
+	case base.Kind == runner.ProviderFailureZaiFiveHour:
+		return base
+	case base.Kind == runner.ProviderFailureTransient:
+		return base
+	case plain.Kind == runner.ProviderFailureTransient:
+		return plain
+	default:
+		return base
+	}
 }
 
 // recoveryLoopは上限付きbackoffでprobeを繰り返し、transientだけ再試行する。
