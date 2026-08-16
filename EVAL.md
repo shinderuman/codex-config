@@ -125,6 +125,16 @@
 - 親Codex behavioral Evalは未実行の固定Eval caseとする。positive case: monitorのscheduler停止・queue保全・alarm報告完了後も元依頼の診断・修正・再開確認へ同一Codex taskで継続する。個別commit/install完了後も明示継続planの次項へ継続する。negative case: 依頼が単一局所成果物へ明示限定される場合へ長期roadmapや依頼外診断を拡張しない。完了条件: 親Codexの継続・停止判断をraw telemetry・task log等の一次証拠で照合できる検証形態が整備されること。live model呼出しを要するためユーザーの明示指示後だけ実行し、完了条件を満たすまでは本項を完了扱いにしない。安全停止・状態保全だけで未解決の親USER_REQUESTを完了扱いする拒否caseは固定Eval残項目として本corpus外で管理する。
 
 
+## 原因不明runtime failureの最小evidence管理
+
+- `codex/instructions/failure-evidence.md`は、外部取得・parser・integration failureでstatus/size/error分類だけでは根本原因や再現条件を判定できない場合だけ、response本文・header・payload断片・parser入力等から再現に必要な最小evidenceをtask artifactへ保存させる親Codex orchestration contractである。Kindle escaped caseの原因をworker/reviewer pipelineの個別checklist不足ではなく親Codexのruntime evidence管理不足と分類しており、worker/reviewer promptへの一般checklist追加で解決しない。
+- 保存前のcredential・token・cookie・session ID・個人情報等の除去・置換、再現に必要な最小範囲への切り出し、容量上限・retention/削除時期・access範囲の対象リスク応じた明示を委譲時に構成する。全response・全成功応答の無条件保存、巨大payload、秘密情報の生保存、telemetryへの本文混入、診断に不要な長期保存は禁止する。保存先は既存`REPORT_ARTIFACT_DIR`/`ARTIFACTS`だけとし、新しいstorage・telemetry schemaを作らない。
+- artifact保存失敗はbest-effort warningとして残し、それだけでは本taskを失敗させない。原因判定に証拠が必須なのに取得不能なら「判定不能」としてSol/ユーザーへ戻し、推測修正を続けない。通常の十分診断可能なerror、成功応答、局所bugへ形式的なartifact保存を要求しない。
+- 親側production routingの決定論検証は`internal/workflow`の`TestFailureEvidenceContractWiring`が担う。`codex/AGENTS.md`のrouting、`codex/instructions/glm-execution.md`の委譲前読込指示、`codex/instructions/glm-packets.md`の受理時指示、`failure-evidence.md`本文の必須契約文のいずれかが欠けるとtestが失敗する。worker/reviewer promptへ一般checklistを追加しない方針も本testが固定する。install後の4 file配置・相互参照は`tests/install_smoke.sh`の配置grepが検証する。
+- scenario corpus(`failure-evidence-*`)はwrapperのartifact packet/終端例への検証に限定する。sanitize済み最小evidenceの`ARTIFACTS`参照packetがartifact dir配下実在file検証を通じ`NEEDS_SOL_REVIEW`終端へ至る例(`failure-evidence-minimal-sanitized-evidence-packet-returns-to-sol`)、証拠取得不能の「判定不能」`NEEDS_SOL_DECISION`終端(`failure-evidence-unobtainable-evidence-returns-undecidable-to-sol`)、十分診断可能な分類だけの通常完遂(`failure-evidence-sufficient-classification-completes-without-artifact`)。scripted packet列に対するwrapper終端検証であり、親Codexが委譲前にevidence条件を構成し受理時に必要範囲だけ確認する行動の証明ではない。根拠instructionとして`codex/AGENTS.md`・`codex/instructions/glm-execution.md`・`codex/instructions/glm-packets.md`・`codex/instructions/failure-evidence.md`の4 fileをmanifest hash pinし、変更時は該当scenarioの期待結果を現物へ再照合する。scenario harnessの`artifact_files`・`{{ARTIFACT_DIR}}`予約tokenはtask artifact dir配下の実在file検証を通るpacket例の作成だけへ使う。
+- 親Codex behavioral Evalは未実行の固定Eval caseとする。positive case: status/size/error分類だけでは原因判定不能な外部取得・parser・integration failure依頼へ委譲前に必要証拠・sanitization・保存先・retentionを構成する。受理時に`ARTIFACTS`参照先を必要範囲だけ確認する。negative case: 十分診断可能なerror・成功応答・局所bugへ形式的artifact保存を要求しない。完了条件: 親Codexの委譲内容・受理確認をraw telemetry・task log・artifact実体等の一次証拠で照合できる検証形態が整備されること。live model呼出しを要するためユーザーの明示指示後だけ実行し、完了条件を満たすまでは本項を完了扱いにしない。原因判定に本文等が必要なのにstatus/sizeだけを残して修正を重ねる拒否caseは固定Eval残項目として本corpus外で管理する。
+
+
 ## Go品質ゲート
 
 - `go test ./...`が成功する。

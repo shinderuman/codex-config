@@ -119,7 +119,7 @@
     },
     {
       "path": "codex/AGENTS.md",
-      "sha256": "cfc5dbe0bc79ca004a3fb5a74a0969f12c83fb10618adb3dd39f919564dc8de4",
+      "sha256": "ac145383c36bd506f3fd2c87bd63a1327a71cafcd2138a73a769782eb1ed021c",
       "scenarios": [
         "feasibility-gate-production-beyond-unverified-viability-returns-to-sol",
         "feasibility-gate-premise-collapse-stops-further-implementation",
@@ -127,12 +127,15 @@
         "feasibility-gate-established-premise-change-completes",
         "task-lifecycle-monitor-safe-stop-local-terminal-returns-to-sol",
         "task-lifecycle-external-judgment-blocker-stops-with-state",
-        "task-lifecycle-explicitly-limited-deliverable-completes"
+        "task-lifecycle-explicitly-limited-deliverable-completes",
+        "failure-evidence-minimal-sanitized-evidence-packet-returns-to-sol",
+        "failure-evidence-unobtainable-evidence-returns-undecidable-to-sol",
+        "failure-evidence-sufficient-classification-completes-without-artifact"
       ]
     },
     {
       "path": "codex/instructions/glm-execution.md",
-      "sha256": "d666c3cdae74df965a2d97c5ec05d8c145f29f16726b5ada4577e3094743cc47",
+      "sha256": "4c8a914d16c74530d3797b257890b10cd5f051c2fd77e6b2d646366f3bd097d8",
       "scenarios": [
         "feasibility-gate-production-beyond-unverified-viability-returns-to-sol",
         "feasibility-gate-premise-collapse-stops-further-implementation",
@@ -140,7 +143,10 @@
         "feasibility-gate-established-premise-change-completes",
         "task-lifecycle-monitor-safe-stop-local-terminal-returns-to-sol",
         "task-lifecycle-external-judgment-blocker-stops-with-state",
-        "task-lifecycle-explicitly-limited-deliverable-completes"
+        "task-lifecycle-explicitly-limited-deliverable-completes",
+        "failure-evidence-minimal-sanitized-evidence-packet-returns-to-sol",
+        "failure-evidence-unobtainable-evidence-returns-undecidable-to-sol",
+        "failure-evidence-sufficient-classification-completes-without-artifact"
       ]
     },
     {
@@ -150,6 +156,24 @@
         "task-lifecycle-monitor-safe-stop-local-terminal-returns-to-sol",
         "task-lifecycle-external-judgment-blocker-stops-with-state",
         "task-lifecycle-explicitly-limited-deliverable-completes"
+      ]
+    },
+    {
+      "path": "codex/instructions/glm-packets.md",
+      "sha256": "7e1d71c9e1e91da9076987a82193af6835a8cde728565a34d52f589a9d7f9814",
+      "scenarios": [
+        "failure-evidence-minimal-sanitized-evidence-packet-returns-to-sol",
+        "failure-evidence-unobtainable-evidence-returns-undecidable-to-sol",
+        "failure-evidence-sufficient-classification-completes-without-artifact"
+      ]
+    },
+    {
+      "path": "codex/instructions/failure-evidence.md",
+      "sha256": "0d633a3b9492896dbbdf97d18d3f22755a3a594d236e0efdc287390489238d18",
+      "scenarios": [
+        "failure-evidence-minimal-sanitized-evidence-packet-returns-to-sol",
+        "failure-evidence-unobtainable-evidence-returns-undecidable-to-sol",
+        "failure-evidence-sufficient-classification-completes-without-artifact"
       ]
     }
   ]

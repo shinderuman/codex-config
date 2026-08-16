@@ -5,6 +5,7 @@
 ## 共通
 
 - `ARTIFACTS`が`none`以外なら、要求・判断・報告に必要な成果物だけを記載パスから確認し、packetへ全内容を転載しない。
+- 原因不明runtime failureの診断に必要なevidenceを求めた依頼では、`ARTIFACTS`参照先を`~/.codex/instructions/failure-evidence.md`の受理条件で必要範囲だけ確認する。
 
 ## `STATUS: NEEDS_SOL_DECISION`
 

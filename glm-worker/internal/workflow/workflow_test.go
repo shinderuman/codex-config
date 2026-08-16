@@ -34,6 +34,11 @@ type scriptedRunner struct {
 	prompts      []string
 	models       []string
 	probes       []string
+	// artifactFiles/taskArtifactDirはscenarioのartifact packet検証用。step出力の
+	// {{ARTIFACT_DIR}}予約tokenを現在taskのartifact dirへ置換し、宣言済みfileを保存する。
+	// productionのmodelが委譲時に示されたREPORT_ARTIFACT_DIR配下へ保存する動作の再現。
+	artifactFiles   []scenarioArtifact
+	taskArtifactDir func() (string, error)
 }
 
 func (r *scriptedRunner) Run(
@@ -48,6 +53,18 @@ func (r *scriptedRunner) Run(
 	r.models = append(r.models, model)
 	index := len(r.prompts) - 1
 	step := r.steps[index]
+	if r.taskArtifactDir != nil && strings.Contains(step.output, scenarioArtifactDirToken) {
+		dir, err := r.taskArtifactDir()
+		if err != nil {
+			return runner.RunResult{}, err
+		}
+		for _, af := range r.artifactFiles {
+			if err := os.WriteFile(filepath.Join(dir, af.Name), []byte(af.Content), 0o600); err != nil {
+				return runner.RunResult{}, err
+			}
+		}
+		step.output = strings.ReplaceAll(step.output, scenarioArtifactDirToken, dir)
+	}
 	if step.output != "" {
 		if err := os.WriteFile(outputPath, []byte(step.output), 0o600); err != nil {
 			return runner.RunResult{}, err

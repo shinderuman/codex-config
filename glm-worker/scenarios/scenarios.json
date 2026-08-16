@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "prompt/instruction変更の品質gateとして、fake runnerが返すpacket列に対するproduction workflow/prompt/gateの終端検証を行うscenario corpus。各scenarioはUSER_REQUEST・scripted packet列・期待model/routing/terminalを持ちproduction経路へ入力し、request/MODE伝達・risk/model routing・FIX_REQUIRED/NEEDS_SOL_REVIEW/NEEDS_SOL_DECISION終端・risk floor/self-protectionによるPASS拒否・NEEDS_SOL_REVIEWのTARGETS契約・FIX_REQUIREDのTARGETS: PACKET報告再出力分岐を決定論検証する。manifest.jsonは根拠instruction fileのSHA-256を固定し内容変更でhash mismatchによりtestを失敗させ影響scenarioの再確認を強制する。永続状態バグそのものの自動検出・modelの規則遵守の検証は行わず後続固定Evalの対象。install_smoke.shの配置grepとは役割を分ける。live model・networkは呼ばない。feasibility-gate-*はwrapperのSTATUS/risk終端検証例に限定し、親Codexがfeasibility-gate.mdを読み委譲・受領を制御する行動の証明ではない。親orchestration行動の固定Evalは未実行で、EVAL.mdの完了条件を満たすまで完了扱いにしない。task-lifecycle-*はwrapperの局所終端例への終端検証に限定し、親Codexが局所終端後に親依頼の未解決作業を再評価し同一taskで継続する行動の証明ではない。",
+  "description": "prompt/instruction変更の品質gateとして、fake runnerが返すpacket列に対するproduction workflow/prompt/gateの終端検証を行うscenario corpus。各scenarioはUSER_REQUEST・scripted packet列・期待model/routing/terminalを持ちproduction経路へ入力し、request/MODE伝達・risk/model routing・FIX_REQUIRED/NEEDS_SOL_REVIEW/NEEDS_SOL_DECISION終端・risk floor/self-protectionによるPASS拒否・NEEDS_SOL_REVIEWのTARGETS契約・FIX_REQUIREDのTARGETS: PACKET報告再出力分岐を決定論検証する。manifest.jsonは根拠instruction fileのSHA-256を固定し内容変更でhash mismatchによりtestを失敗させ影響scenarioの再確認を強制する。永続状態バグそのものの自動検出・modelの規則遵守の検証は行わず後続固定Evalの対象。install_smoke.shの配置grepとは役割を分ける。live model・networkは呼ばない。feasibility-gate-*はwrapperのSTATUS/risk終端検証例に限定し、親Codexがfeasibility-gate.mdを読み委譲・受領を制御する行動の証明ではない。親orchestration行動の固定Evalは未実行で、EVAL.mdの完了条件を満たすまで完了扱いにしない。task-lifecycle-*はwrapperの局所終端例への終端検証に限定し、親Codexが局所終端後に親依頼の未解決作業を再評価し同一taskで継続する行動の証明ではない。failure-evidence-*はwrapperのartifact packet/終端例への検証に限定し、親Codexが委譲前にevidence・sanitization・retention条件を構成し受理時に必要範囲だけ確認する行動の証明ではない。",
   "scenarios": [
     {
       "id": "state-residual-after-removal",
@@ -2009,6 +2009,148 @@
             "REQUIREMENT_COVERAGE: covered",
             "INVARIANTS: preserved",
             "TEST_EVIDENCE: 停止後queue残存・checkpoint保全のtestを確認",
+            "ISSUES: none",
+            "RESIDUAL_RISK: none",
+            "TARGETS: none",
+            "ARTIFACTS: none"
+          ]
+        }
+      ],
+      "expected_models": [
+        "opus",
+        "haiku"
+      ],
+      "expected_packet_status": "PASS",
+      "expected_packet_risk": "LOW",
+      "expected_task_status": "complete",
+      "must_not_pass": false
+    },
+    {
+      "id": "failure-evidence-minimal-sanitized-evidence-packet-returns-to-sol",
+      "behavior": "wrapper終端検証(親Codex行動証明ではない): 外部取得failureでstatus/size分類だけでは原因判定不能なscripted caseで、sanitize済み最小evidenceをtask artifactへ保存しARTIFACTSで参照するworker/reviewer packet列が、wrapperのartifact dir配下実在file検証を通じNEEDS_SOL_REVIEW/HIGHへ終端する。親Codexが委譲前にevidence条件を構成し受理時に関係範囲だけ確認する行動は未実行の親behavioral Eval対象",
+      "request": "外部書籍API取得でHTTP 200なのに期待schemaと違う応答が返る原因不明failureを、response本文断片等の再現に必要な最小evidenceをcredential/token/cookie/session ID等を除去したうえでtask artifactへ保存し、原因を判定して修正する。evidenceは診断に必要な範囲だけとし容量は本文断片512 bytesまで、task完了後の次task開始までをretentionとする",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/AGENTS.md",
+        "codex/instructions/glm-execution.md",
+        "codex/instructions/glm-packets.md",
+        "codex/instructions/failure-evidence.md"
+      ],
+      "changed_paths": [
+        "src/fetch/library_client.go"
+      ],
+      "artifact_files": [
+        {
+          "name": "fetch-failure-evidence.md",
+          "content": "fetch failure evidence (sanitized minimal fragment)\nclassification: HTTP 200, size 1412 bytes, parser rejected body: expected application/json\nresponse headers (relevant only): content-type: text/html; charset=utf-8; set-cookie: [REDACTED]\nresponse body first 256 bytes: <html><head><title>Sign in</title></head><body>Please log in to continue</body>\ncredential/token/cookie/session ID/personal data removed or replaced with [REDACTED]\n"
+        }
+      ],
+      "runner_steps": [
+        {
+          "lines": [
+            "STATUS: IMPLEMENTED",
+            "RISK: HIGH",
+            "SUMMARY: 原因不明のschema不一致取得failureを、保存evidenceのlogin誘導本文からservice側認証要求と判定し修正した",
+            "REQUIREMENT_COVERAGE: covered。evidenceはsanitize済み最小断片をtask artifactへ保存しARTIFACTSで参照する",
+            "TESTS: schema検証testで期待JSONへ復帰し、evidenceのtoken/cookie除去を確認した",
+            "UNVERIFIED: 外部service側の案内変更が継続するかは観測範囲外",
+            "ARTIFACTS: {{ARTIFACT_DIR}}/fetch-failure-evidence.md"
+          ]
+        },
+        {
+          "lines": [
+            "STATUS: NEEDS_SOL_REVIEW",
+            "RISK: HIGH",
+            "SUMMARY: 原因不明外部failureの根本原因確定と修正方針をSol確認へ昇格する",
+            "REQUIREMENT_COVERAGE: covered",
+            "INVARIANTS: artifactはsanitize済み最小断片で秘密情報を含まない",
+            "TEST_EVIDENCE: schema検証testとevidence sanitize確認を確認した",
+            "ISSUES: none",
+            "RESIDUAL_RISK: 外部service応答の変動で原因判定が変わる可能性",
+            "TARGETS: src/fetch/library_client.goのschema検証と保存evidenceのsanitize範囲",
+            "ARTIFACTS: {{ARTIFACT_DIR}}/fetch-failure-evidence.md",
+            "SOL_QUESTION: 判定した根本原因とsanitize済みevidenceに基づく修正の採否"
+          ]
+        }
+      ],
+      "expected_models": [
+        "opus",
+        "sonnet"
+      ],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true
+    },
+    {
+      "id": "failure-evidence-unobtainable-evidence-returns-undecidable-to-sol",
+      "behavior": "wrapper終端検証(親Codex行動証明ではない): 原因判定に証拠が必須なのにresponse本文等を取得不能なscripted caseで、workerが「判定不能」をNEEDS_SOL_DECISIONで戻しwrapperがwaiting-decisionへ終端する。親Codexが推測修正の継続をさせずSol/ユーザー判断へ戻す行動は未実行の親behavioral Eval対象",
+      "request": "外部APIが返す原因不明errorの原因判定。status/size/error分類だけでは原因も再現条件も判定できず、応答本文断片の保存を試みても対象が本文を返さないため証拠取得不能な場合は、推測で修正を重ねず「判定不能」として戻す",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/AGENTS.md",
+        "codex/instructions/glm-execution.md",
+        "codex/instructions/glm-packets.md",
+        "codex/instructions/failure-evidence.md"
+      ],
+      "changed_paths": [],
+      "runner_steps": [
+        {
+          "lines": [
+            "STATUS: NEEDS_SOL_DECISION",
+            "RISK: HIGH",
+            "DECISION: 証拠取得不能なまま推測修正を続けるか、証拠取得条件を変えるか",
+            "EVIDENCE: status/size/error分類だけでは原因も再現条件も判定できない。応答本文断片の保存を試みたが対象が本文を返さず証拠取得不能。保存試行の失敗はbest-effort warningとして記録済み",
+            "OPTIONS: 利用者経由で応答本文等の証拠を取得して再委譲 / 対象機能の一時停止 / 推測に基づくworkaround実装",
+            "RECOMMENDATION: 「判定不能」として扱い、証拠取得条件を整えてから再開する。推測修正は行わない",
+            "TEST_OBLIGATIONS: 再開後に取得証拠へ基づく原因判定と回帰testを確認する",
+            "TARGETS: none",
+            "ARTIFACTS: none"
+          ]
+        }
+      ],
+      "expected_models": [
+        "opus"
+      ],
+      "expected_packet_status": "NEEDS_SOL_DECISION",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-decision",
+      "must_not_pass": true
+    },
+    {
+      "id": "failure-evidence-sufficient-classification-completes-without-artifact",
+      "behavior": "wrapper終端検証(親Codex行動証明ではない): status/error分類だけで十分診断可能な通常failure修正のscripted正面制御。形式的artifact保存なしでARTIFACTS: noneのまま通常完遂する。親Codexが全応答保存や形式的artifact保存を要求しない行動は未実行の親behavioral Eval対象",
+      "request": "外部APIが429 error文と共に明示的に返すrate limit通知の取り扱い修正。error分類と本体実装だけで原因が確定しており、応答本文等の追加evidence保存は不要",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/AGENTS.md",
+        "codex/instructions/glm-execution.md",
+        "codex/instructions/glm-packets.md",
+        "codex/instructions/failure-evidence.md"
+      ],
+      "changed_paths": [
+        "src/fetch/backoff.go"
+      ],
+      "runner_steps": [
+        {
+          "lines": [
+            "STATUS: IMPLEMENTED",
+            "RISK: LOW",
+            "SUMMARY: 明示429文を持つrate limit通知を既存backoff経路へ接続した。error分類だけで診断可能なため追加evidence保存は行っていない",
+            "REQUIREMENT_COVERAGE: covered",
+            "TESTS: 429受領時のbackoff開始と復帰をunit testで確認",
+            "UNVERIFIED: none",
+            "ARTIFACTS: none"
+          ]
+        },
+        {
+          "lines": [
+            "STATUS: PASS",
+            "RISK: LOW",
+            "SUMMARY: 十分診断可能なerror分類のみで完了する通常修正である",
+            "REQUIREMENT_COVERAGE: covered",
+            "INVARIANTS: preserved",
+            "TEST_EVIDENCE: 429 backoffのtestを確認",
             "ISSUES: none",
             "RESIDUAL_RISK: none",
             "TARGETS: none",

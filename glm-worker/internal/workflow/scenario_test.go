@@ -32,6 +32,16 @@ type scenarioStep struct {
 	CostUSD float64       `json:"cost_usd,omitempty"`
 }
 
+// scenarioArtifactはwrapperのartifact packet検証へ使うtask artifact保存file。
+// scriptedRunnerがstep消費時にpacket行の{{ARTIFACT_DIR}}予約tokenを実artifact dirへ
+// 置換し、宣言済みfileだけを保存・参照させる。
+type scenarioArtifact struct {
+	Name    string `json:"name"`
+	Content string `json:"content"`
+}
+
+const scenarioArtifactDirToken = "{{ARTIFACT_DIR}}"
+
 type scenarioUsage struct {
 	InputTokens  int64 `json:"input_tokens,omitempty"`
 	OutputTokens int64 `json:"output_tokens,omitempty"`
@@ -118,6 +128,9 @@ type scenarioDoc struct {
 	ExpectedCheckpoint string `json:"expected_checkpoint,omitempty"`
 	// ExpectedProviderClassificationはprovider-unavailable停止時のcheckpoint分類期待値。
 	ExpectedProviderClassification string `json:"expected_provider_classification,omitempty"`
+	// ArtifactFilesはscriptedRunnerがstep消費時に現在taskのartifact dirへ保存するfile。
+	// packet行の{{ARTIFACT_DIR}}tokenと組み合わせ、ARTIFACTS参照の実在file検証を通る例を作る。
+	ArtifactFiles []scenarioArtifact `json:"artifact_files,omitempty"`
 }
 
 type scenarioFile struct {
@@ -279,6 +292,17 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 		if len(s.RunnerSteps) != len(s.ExpectedModels) {
 			return fmt.Errorf("scenario %s runner_steps/expected_models count mismatch: %d vs %d", s.ID, len(s.RunnerSteps), len(s.ExpectedModels))
 		}
+		artifactNames := make(map[string]bool, len(s.ArtifactFiles))
+		for _, af := range s.ArtifactFiles {
+			if af.Name == "" || af.Name == "." || af.Name == ".." || filepath.IsAbs(af.Name) || strings.ContainsAny(af.Name, `/\`) {
+				return fmt.Errorf("scenario %s invalid artifact file name %q", s.ID, af.Name)
+			}
+			if af.Content == "" {
+				return fmt.Errorf("scenario %s artifact %s content empty", s.ID, af.Name)
+			}
+			artifactNames[af.Name] = true
+		}
+		artifactTokenUsed := false
 		for i, step := range s.RunnerSteps {
 			hasLines := len(step.Lines) > 0
 			hasErr := step.Error != ""
@@ -300,7 +324,18 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 				if err := packet.Validate(packet.FromLines(step.Lines)); err != nil {
 					return fmt.Errorf("scenario %s step %d invalid packet: %w", s.ID, i, err)
 				}
+				for _, ln := range step.Lines {
+					if err := validateScenarioArtifactToken(s.ID, ln, artifactNames); err != nil {
+						return err
+					}
+					if strings.Contains(ln, scenarioArtifactDirToken) {
+						artifactTokenUsed = true
+					}
+				}
 			}
+		}
+		if len(s.ArtifactFiles) > 0 && !artifactTokenUsed {
+			return fmt.Errorf("scenario %s declares artifact_files but no runner step line references %s", s.ID, scenarioArtifactDirToken)
 		}
 		for i, exp := range s.ExpectedPrompts {
 			if exp.Index < 0 {
@@ -392,6 +427,31 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 		}
 	}
 	return nil
+}
+
+// validateScenarioArtifactTokenはpacket行内の{{ARTIFACT_DIR}}予約tokenが宣言済み
+// artifact file名だけを参照していることを検証する。未宣言fileや素のdir参照は
+// scriptedRunnerでの置換後に実在file検証へ失敗するため、corpus段階で拒否する。
+func validateScenarioArtifactToken(id string, line string, artifactNames map[string]bool) error {
+	rest := line
+	for {
+		i := strings.Index(rest, scenarioArtifactDirToken)
+		if i < 0 {
+			return nil
+		}
+		after := rest[i+len(scenarioArtifactDirToken):]
+		matched := false
+		for name := range artifactNames {
+			if strings.HasPrefix(after, "/"+name) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return fmt.Errorf("scenario %s line references %s without matching artifact_files entry: %q", id, scenarioArtifactDirToken, line)
+		}
+		rest = after
+	}
 }
 
 func TestScenarioCorpusContract(t *testing.T) {
@@ -530,6 +590,19 @@ func TestScenarioCorpusContractRejectsInvalid(t *testing.T) {
 		{"expected prompts empty contains", func(sc *scenarioFile, _ *manifestFile) {
 			sc.Scenarios[0].ExpectedPrompts = []promptExpectation{{Index: 0}}
 		}, "contains empty"},
+		{"artifact file name with separator", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].ArtifactFiles = []scenarioArtifact{{Name: "nested/evidence.md", Content: "x"}}
+		}, "invalid artifact file name"},
+		{"artifact content empty", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].ArtifactFiles = []scenarioArtifact{{Name: "evidence.md"}}
+		}, "content empty"},
+		{"artifact files unused", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].ArtifactFiles = []scenarioArtifact{{Name: "evidence.md", Content: "x"}}
+		}, "no runner step line references"},
+		{"artifact token without declared file", func(sc *scenarioFile, _ *manifestFile) {
+			lines := sc.Scenarios[0].RunnerSteps[0].Lines
+			lines[len(lines)-1] = strings.Replace(lines[len(lines)-1], "ARTIFACTS: none", "ARTIFACTS: "+scenarioArtifactDirToken+"/evidence.md", 1)
+		}, "without matching artifact_files entry"},
 	}
 	for _, c := range cases {
 		c := c
@@ -593,6 +666,12 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 	t.Helper()
 	st := newStateStoreT(t)
 	r := &scriptedRunner{steps: stepsFromScenario(doc)}
+	if len(doc.ArtifactFiles) > 0 {
+		// ExecuteNewTaskは新規task IDへ切り替わるため、artifact fileと{{ARTIFACT_DIR}}の
+		// 置換はstep消費時の現在taskへ行う。事前配置では旧task配下になり検証が通らない。
+		r.artifactFiles = doc.ArtifactFiles
+		r.taskArtifactDir = st.PrepareArtifactDir
+	}
 	if doc.ProbeErrors != nil {
 		r.probeErrs = make([]error, len(doc.ProbeErrors))
 		for i, text := range doc.ProbeErrors {
