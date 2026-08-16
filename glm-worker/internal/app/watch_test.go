@@ -44,8 +44,9 @@ func TestWatchRendersSavedEventsWithoutSideEffects(t *testing.T) {
 	taskID := "12345678-aaaa-bbbb-cccc-dddddddddddd"
 	writeTaskEventLines(t, st, taskID,
 		state.TaskEventRecord{TaskID: taskID, CallID: "call-1", Role: "worker", Phase: "worker-new", Kind: "system", Subtype: "init", MessageModel: "glm-5.3"},
-		state.TaskEventRecord{TaskID: taskID, CallID: "call-1", Role: "worker", Phase: "worker-new", Kind: "assistant", MessageModel: "glm-5.3", Blocks: []state.TaskBlockSummary{{Type: "thinking", Bytes: 456}, {Type: "tool_use", Name: "Bash", Bytes: 88}}, Usage: &state.TaskEventUsage{InputTokens: 100, OutputTokens: 7}},
+		state.TaskEventRecord{TaskID: taskID, CallID: "call-1", Role: "worker", Phase: "worker-new", Kind: "assistant", MessageModel: "glm-5.3", Blocks: []state.TaskBlockSummary{{Type: "thinking", Bytes: 456}, {Type: "tool_use", Name: "Bash", ToolID: "toolu_1", Bytes: 88}}, Usage: &state.TaskEventUsage{InputTokens: 100, OutputTokens: 7}},
 		state.TaskEventRecord{TaskID: taskID, CallID: "call-2", Role: "reviewer", Phase: "reviewer-1", Resumed: true, Kind: "result", Subtype: "success", NumTurns: 3, TotalCostUSD: 0.25, DurationMS: 1500, Usage: &state.TaskEventUsage{OutputTokens: 20}},
+		state.TaskEventRecord{TaskID: taskID, CallID: "call-2", Role: "reviewer", Phase: "reviewer-1", Kind: "user", Blocks: []state.TaskBlockSummary{{Type: "tool_result", Name: "Read", ToolID: "toolu_1", Bytes: 814, DurationMS: 456}}},
 	)
 
 	entriesBefore, err := os.ReadDir(st.Path("."))
@@ -71,12 +72,13 @@ func TestWatchRendersSavedEventsWithoutSideEffects(t *testing.T) {
 		"turns=3",
 		"cost=0.2500",
 		"dur=1500ms",
+		"tool_result(Read):814b/456ms",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("watch表示に%qがありません: %s", want, rendered)
 		}
 	}
-	if strings.Contains(rendered, "GLM_WORKER_PROBE_OK") || strings.Count(rendered, "\n") != 6 {
+	if strings.Contains(rendered, "GLM_WORKER_PROBE_OK") || strings.Count(rendered, "\n") != 7 {
 		t.Fatalf("watch表示 = %q", rendered)
 	}
 

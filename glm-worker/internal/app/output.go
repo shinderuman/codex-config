@@ -1,8 +1,11 @@
 package app
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -38,6 +41,9 @@ func printStatus(st *state.StateStore, stdout io.Writer) error {
 		fmt.Fprintln(stdout, "PENDING_DECISION: no")
 	}
 
+	logs, logErr := readStatusTelemetry(st, taskID)
+	printTaskDetail(st, taskID, stdout)
+
 	checkpoint, err := st.LoadResumeCheckpoint()
 	rateLimited := err == nil && checkpoint.RateLimited
 	providerUnavailable := err == nil && checkpoint.ProviderUnavailable
@@ -46,6 +52,9 @@ func printStatus(st *state.StateStore, stdout io.Writer) error {
 		fmt.Fprintln(stdout, "RATE_LIMITED: yes")
 		fmt.Fprintf(stdout, "RATE_LIMIT_PHASE: %s\n", checkpoint.Phase)
 		fmt.Fprintf(stdout, "RESET_AT_CST: %s\n", checkpoint.ResetAtCST)
+		if checkpoint.ResetAtRFC3339 != "" {
+			fmt.Fprintf(stdout, "RESET_AT_RFC3339: %s\n", checkpoint.ResetAtRFC3339)
+		}
 		fmt.Fprintln(stdout, "RESET_TIMEZONE: CST (China Standard Time, UTC+8)")
 	} else {
 		fmt.Fprintln(stdout, "RATE_LIMITED: no")
@@ -65,16 +74,171 @@ func printStatus(st *state.StateStore, stdout io.Writer) error {
 		} else {
 			fmt.Fprintln(stdout, "PROVIDER_ELAPSED: unknown")
 		}
+		fmt.Fprintln(stdout, "PROVIDER_RESUME_PLAN: --resume re-probes the provider before continuing this phase")
 	} else {
 		fmt.Fprintln(stdout, "PROVIDER_UNAVAILABLE: no")
 	}
+
+	printProbeDetail(logs, stdout)
 
 	if rateLimited || providerUnavailable {
 		fmt.Fprintln(stdout, "RESUME_AVAILABLE: yes")
 	} else {
 		fmt.Fprintln(stdout, "RESUME_AVAILABLE: no")
 	}
+
+	printSessionAging(taskID, logErr, logs, stdout)
 	return nil
+}
+
+// readStatusTelemetryは現在taskのtelemetry呼出記録を読む。file不在は空扱いとし、
+// corruption等の読み取り失敗は表示側でunreadable表示へ使う(status自体は失敗させない)。
+func readStatusTelemetry(st *state.StateStore, taskID string) ([]state.ModelCallLog, error) {
+	if taskID == "none" {
+		return nil, nil
+	}
+	logs, err := st.ReadModelCallLogs(taskID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return logs, nil
+}
+
+// printTaskDetailは既存stateだけから現在taskの実行観測(current phase/role/model・開始
+// 経過時間・最終event)を表示する。AI call・provider requestは行わず、読み取れた値だけを
+// 出し、取得できない項目はunknown/noneとする(推測補完はしない)。
+func printTaskDetail(st *state.StateStore, taskID string, stdout io.Writer) {
+	if stats, err := st.CurrentTaskStats(); err != nil || stats.StartedAt.IsZero() {
+		fmt.Fprintln(stdout, "TASK_STARTED_AT: unknown")
+		fmt.Fprintln(stdout, "TASK_ELAPSED: unknown")
+	} else {
+		fmt.Fprintf(stdout, "TASK_STARTED_AT: %s\n", stats.StartedAt.Format(time.RFC3339))
+		fmt.Fprintf(stdout, "TASK_ELAPSED: %s\n", time.Since(stats.StartedAt).Truncate(time.Second))
+	}
+
+	current := currentCallView{}
+	if last, ok := lastTaskEvent(st, taskID); ok {
+		current = currentCallView{phase: last.Phase, role: last.Role, model: last.ModelAlias}
+		if current.model == "" {
+			current.model = last.MessageModel
+		}
+		fmt.Fprintln(stdout, "LAST_EVENT: "+formatTaskEvent(last))
+		if last.Timestamp.IsZero() {
+			fmt.Fprintln(stdout, "LAST_EVENT_AGE: unknown")
+		} else {
+			fmt.Fprintf(stdout, "LAST_EVENT_AGE: %s\n", time.Since(last.Timestamp).Truncate(time.Second))
+		}
+	} else {
+		fmt.Fprintln(stdout, "LAST_EVENT: none")
+		fmt.Fprintln(stdout, "LAST_EVENT_AGE: unknown")
+		if checkpoint, err := st.LoadResumeCheckpoint(); err == nil {
+			current = currentCallView{phase: checkpoint.Phase, role: string(checkpoint.Role), model: checkpoint.Model}
+		}
+	}
+	fmt.Fprintf(stdout, "CURRENT_PHASE: %s\n", orUnknown(current.phase))
+	fmt.Fprintf(stdout, "CURRENT_ROLE: %s\n", orUnknown(current.role))
+	fmt.Fprintf(stdout, "CURRENT_MODEL: %s\n", orUnknown(current.model))
+}
+
+// printProbeDetailはprovider probe呼出の観測(実行回数と最終probe)をtelemetryだけから
+// 表示する。in-process backoff中の状況観測に使い、probe記録がないときは何も出さない。
+func printProbeDetail(logs []state.ModelCallLog, stdout io.Writer) {
+	probes := make([]state.ModelCallLog, 0)
+	for _, log := range logs {
+		if log.CallType == state.CallTypeProbe {
+			probes = append(probes, log)
+		}
+	}
+	if len(probes) == 0 {
+		return
+	}
+	last := probes[len(probes)-1]
+	fmt.Fprintf(stdout, "PROBES: %d\n", len(probes))
+	fmt.Fprintf(stdout, "PROBE_LAST_AT: %s\n", last.CompletedAt.Format(time.RFC3339))
+	fmt.Fprintf(stdout, "PROBE_LAST_AGE: %s\n", time.Since(last.CompletedAt).Truncate(time.Second))
+	fmt.Fprintf(stdout, "PROBE_LAST_OUTCOME: %s\n", orUnknown(last.Outcome))
+	fmt.Fprintf(stdout, "PROBE_LAST_ATTEMPT: %d\n", last.ProbeAttempt)
+}
+
+// printSessionAgingは現在taskのsession別aging要約(role/model・session内call index相当の
+// latency列・累積turn/token)を既存telemetryだけから表示する。
+func printSessionAging(taskID string, logErr error, logs []state.ModelCallLog, stdout io.Writer) {
+	if taskID == "none" {
+		fmt.Fprintln(stdout, "SESSION_AGING: none")
+		return
+	}
+	if logErr != nil {
+		fmt.Fprintln(stdout, "SESSION_AGING: unreadable")
+		return
+	}
+	sessions := state.AgingFromModelCallLogs(logs)
+	if len(sessions) == 0 {
+		fmt.Fprintln(stdout, "SESSION_AGING: none")
+		return
+	}
+	for _, session := range sessions {
+		latencies := make([]string, 0, len(session.CallLatencyMS))
+		for _, latency := range session.CallLatencyMS {
+			latencies = append(latencies, fmt.Sprintf("%d", latency))
+		}
+		fmt.Fprintf(
+			stdout,
+			"SESSION_AGING: role=%s model=%s id=%s calls=%d resumed=%d turns=%d in=%d out=%d lat_ms=%s\n",
+			session.Role,
+			strings.Join(session.Models, "+"),
+			session.SessionID,
+			session.Calls,
+			session.ResumedCalls,
+			session.CumulativeTurns,
+			session.CumulativeInputTokens,
+			session.CumulativeOutputTokens,
+			strings.Join(latencies, ","),
+		)
+	}
+}
+
+// currentCallViewは--status表示用の現在呼出識別。event log最終recordを優先し、
+// eventがないときはresume checkpointから補う。
+type currentCallView struct {
+	phase string
+	role  string
+	model string
+}
+
+// lastTaskEventはtask event logの最終parse可能recordを返す。書き込み途中の末尾部分行は
+// parse失敗として無視される。
+func lastTaskEvent(st *state.StateStore, taskID string) (state.TaskEventRecord, bool) {
+	if taskID == "none" {
+		return state.TaskEventRecord{}, false
+	}
+	file, err := os.Open(st.TaskEventLogPath(taskID))
+	if err != nil {
+		return state.TaskEventRecord{}, false
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	var last state.TaskEventRecord
+	found := false
+	for scanner.Scan() {
+		record, err := state.ParseTaskEventLine(scanner.Bytes())
+		if err != nil {
+			continue
+		}
+		last = record
+		found = true
+	}
+	return last, found
+}
+
+func orUnknown(value string) string {
+	if value == "" {
+		return "unknown"
+	}
+	return value
 }
 
 // taskLivenessはTASK_STATUS=active時のrepo lock実保持による生存表示。

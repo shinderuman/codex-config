@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -15,11 +16,16 @@ const taskEventLogVersion = 1
 
 // TaskBlockSummaryはstream event 1 content blockの非content観測値。
 // text/thinking本文・tool入出力などの中身は保存せず、種別・tool名・byte数だけを残す。
+// ToolIDはtool_useのid / tool_resultのtool_use_id。DurationMSは同一call内で
+// tool_use→tool_resultをIDで対応付けられたときだけ入る観測時間で、対応付けられない
+// 場合は0のまま(未測定を推測で埋めない)。
 type TaskBlockSummary struct {
-	Type    string `json:"type"`
-	Name    string `json:"name,omitempty"`
-	Bytes   int    `json:"bytes"`
-	IsError bool   `json:"is_error,omitempty"`
+	Type       string `json:"type"`
+	Name       string `json:"name,omitempty"`
+	ToolID     string `json:"tool_id,omitempty"`
+	Bytes      int    `json:"bytes"`
+	IsError    bool   `json:"is_error,omitempty"`
+	DurationMS int64  `json:"duration_ms,omitempty"`
 }
 
 // TaskEventUsageはassistant message / result eventに付与されるtoken観測値。
@@ -108,6 +114,59 @@ func WarnTaskEventSkip(operation string, err error) {
 	fmt.Fprintf(statsWarnOut, "WARNING: passive event logの%sに失敗したためevent記録をskipします（task本体へ影響しません）: %v\n", operation, err)
 }
 
+// WarnTaskEventCapは1 callのevent記録が上限に到達し以後の追記をskipした旨を出す。
+// result event捕捉・task本体へは影響しない。
+func WarnTaskEventCap(limit int) {
+	fmt.Fprintf(statsWarnOut, "WARNING: passive event logの追記がcall当たり上限%d件に到達したため以後のevent記録をskipします（task本体へ影響しません）\n", limit)
+}
+
 func (s *StateStore) TaskEventLogPath(taskID string) string {
 	return s.Path(filepath.Join("events", taskID+".jsonl"))
+}
+
+// retainedTaskEventLogsは新規task開始時に残す旧taskのevent log件数。実測(1 task約
+// 数千行)に対し十分な観測履歴を残しつつ、task数に比例した無制限増加を防ぐ最小上限。
+const retainedTaskEventLogs = 10
+
+// PruneTaskEventLogsは旧taskのevent logを新しい順にkeep件だけ残して削除する。
+// 現taskのlogはmtimeに関係なく削除しない。telemetry・stats履歴・checkpoint・sessionは
+// 対象外で、失敗はwarningだけ出し呼出元のtask成否へ影響させない。
+func (s *StateStore) PruneTaskEventLogs(keep int, currentTaskID string) {
+	paths, err := filepath.Glob(s.Path(filepath.Join("events", "*.jsonl")))
+	if err != nil {
+		WarnTaskEventPrune(err)
+		return
+	}
+	currentLog := s.TaskEventLogPath(currentTaskID)
+	type entry struct {
+		path  string
+		mtime time.Time
+	}
+	entries := make([]entry, 0, len(paths))
+	for _, path := range paths {
+		if path == currentLog {
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			WarnTaskEventPrune(err)
+			continue
+		}
+		entries = append(entries, entry{path: path, mtime: info.ModTime()})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].mtime.After(entries[j].mtime) })
+	for index, item := range entries {
+		if index < keep {
+			continue
+		}
+		if err := os.Remove(item.path); err != nil {
+			WarnTaskEventPrune(err)
+		}
+	}
+}
+
+// WarnTaskEventPruneは旧event logのretention整理失敗を観測用warningとして出す。
+// event logは観測資料のため、整理失敗でtask本体を失敗させない。
+func WarnTaskEventPrune(err error) {
+	fmt.Fprintf(statsWarnOut, "WARNING: 旧task event logのretention整理に失敗しました（task本体へ影響しません）: %v\n", err)
 }

@@ -131,6 +131,7 @@ func (s *StateStore) StartNewTask() (string, error) {
 	if err := s.Write("task.id", taskID); err != nil {
 		return "", err
 	}
+	s.PruneTaskEventLogs(retainedTaskEventLogs, taskID)
 	s.InitializeTaskStats(taskID)
 	if err := s.SetTaskStatus(TaskStatusActive); err != nil {
 		return "", err

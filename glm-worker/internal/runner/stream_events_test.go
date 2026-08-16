@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/config"
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
@@ -18,6 +19,8 @@ import (
 const streamFixtureSecret = "sk-ant-secret-TOKEN123"
 
 const streamFixtureLines = `{"type":"system","subtype":"init","session_id":"sess-1","model":"glm-5.3"}
+{"type":"system","subtype":"thinking_tokens"}
+{"type":"system","subtype":"thinking_tokens"}
 {"type":"assistant","message":{"id":"msg_1","model":"glm-5.3","content":[{"type":"thinking","thinking":"secret plan ` + streamFixtureSecret + `"},{"type":"text","text":"visible text"},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"echo ` + streamFixtureSecret + `"}}],"usage":{"input_tokens":100,"cache_read_input_tokens":200,"output_tokens":7}}}
 {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"` + streamFixtureSecret + ` output","is_error":false}]}}
 {"type":"result","subtype":"success","is_error":false,"result":"runner output\n","duration_ms":1200,"duration_api_ms":900,"num_turns":2,"total_cost_usd":0.5,"usage":{"input_tokens":11,"cache_creation_input_tokens":12,"cache_read_input_tokens":13,"output_tokens":14},"modelUsage":{"glm-5.3":{"inputTokens":11,"cacheCreationInputTokens":12,"cacheReadInputTokens":13,"outputTokens":14}}}
@@ -153,6 +156,16 @@ func TestClaudeRunnerStreamEventsAppendSanitizedMetadata(t *testing.T) {
 		if block.Bytes <= 0 {
 			t.Fatalf("block bytes = %#v", assistant.Blocks)
 		}
+	}
+	if assistant.Blocks[2].ToolID != "toolu_1" {
+		t.Fatalf("tool_use id = %#v", assistant.Blocks[2])
+	}
+	user := records[2]
+	if user.Kind != "user" || len(user.Blocks) != 1 {
+		t.Fatalf("user event = %#v", user)
+	}
+	if user.Blocks[0].ToolID != "toolu_1" || user.Blocks[0].Name != "Bash" {
+		t.Fatalf("tool_result block = %#v", user.Blocks[0])
 	}
 
 	result := records[3]
@@ -511,14 +524,131 @@ func TestClaudeRunnerStreamEventsBestEffortOnUnwritableLog(t *testing.T) {
 // TestReduceStreamEventUnknownLineは未知種別・不正JSON行をcontent無しで観測記録する。
 func TestReduceStreamEventUnknownLine(t *testing.T) {
 	base := state.TaskEventRecord{TaskID: "t", CallID: "c", Role: "worker", Phase: "worker-new"}
+	observedAt := time.Date(2026, 8, 16, 10, 0, 0, 0, time.UTC)
 
-	unknown := reduceStreamEvent([]byte(`{"type":"stream_event","payload":{"secret":"`+streamFixtureSecret+`"}}`), base, 3)
+	unknown := reduceStreamEvent([]byte(`{"type":"stream_event","payload":{"secret":"`+streamFixtureSecret+`"}}`), base, 3, observedAt)
 	if unknown.Kind != "stream_event" || unknown.Seq != 3 {
 		t.Fatalf("unknown event = %#v", unknown)
 	}
 
-	invalid := reduceStreamEvent([]byte("not json"), base, 4)
+	invalid := reduceStreamEvent([]byte("not json"), base, 4, observedAt)
 	if invalid.Kind != "unknown" || invalid.Seq != 4 {
 		t.Fatalf("invalid event = %#v", invalid)
+	}
+}
+
+// newFakeClockIngesterはevent観測時刻を制御できるingesterを返す。event 1件の記録ごとに
+// clockを進め、tool timing対応付けのduration検証を決定的にする。
+func newFakeClockIngester(t *testing.T, st *state.StateStore, advance time.Duration) *streamEventIngester {
+	t.Helper()
+	current := time.Date(2026, 8, 16, 10, 0, 0, 0, time.UTC)
+	ingester := newStreamEventIngester(st, "t", "c", state.WorkerRole, "worker-new", "opus", "sess", false)
+	ingester.now = func() time.Time {
+		current = current.Add(advance)
+		return current
+	}
+	return ingester
+}
+
+// TestStreamEventIngesterSuppressesProgressEventsは実運用で大量観測された
+// system/thinking_tokens進捗eventを記録せず、他のsystem subtypeは記録し続けることを
+// 検証する。seqは抑止分を消費せず連続する。
+func TestStreamEventIngesterSuppressesProgressEvents(t *testing.T) {
+	st := newTestStateStore(t)
+	ingester := newFakeClockIngester(t, st, time.Second)
+
+	for i := 0; i < 500; i++ {
+		if _, err := ingester.Write([]byte("{\"type\":\"system\",\"subtype\":\"thinking_tokens\"}\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ingester.Write([]byte("{\"type\":\"system\",\"subtype\":\"init\",\"model\":\"glm-5.3\"}\n")); err != nil {
+		t.Fatal(err)
+	}
+	ingester.flush()
+
+	records := readTaskEventLines(t, st, "t")
+	if len(records) != 1 {
+		t.Fatalf("記録件数 = %d: %#v", len(records), records)
+	}
+	if records[0].Kind != "system" || records[0].Subtype != "init" || records[0].Seq != 1 {
+		t.Fatalf("init record = %#v", records[0])
+	}
+}
+
+// TestStreamEventIngesterPairsToolTimingByIDはtool_use idとtool_resultのtool_use_idの
+// 正確な対応付けだけを記録し、片側しか観測できない組へdurationを書かないことを検証する。
+func TestStreamEventIngesterPairsToolTimingByID(t *testing.T) {
+	st := newTestStateStore(t)
+	ingester := newFakeClockIngester(t, st, 2*time.Second)
+
+	lines := []string{
+		`{"type":"assistant","message":{"model":"glm-5.3","content":[{"type":"tool_use","id":"toolu_ok","name":"Bash","input":{}},{"type":"tool_use","id":"toolu_open","name":"Read","input":{}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_unknown","content":"x"}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_ok","content":"y"}]}}`,
+		`{"type":"assistant","message":{"model":"glm-5.3","content":[{"type":"tool_use","id":"toolu_open","name":"Read","input":{}}]}}`,
+	}
+	for _, line := range lines {
+		if _, err := ingester.Write([]byte(line + "\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ingester.flush()
+
+	records := readTaskEventLines(t, st, "t")
+	if len(records) != 4 {
+		t.Fatalf("記録件数 = %d", len(records))
+	}
+
+	firstUse := records[0].Blocks
+	if firstUse[0].ToolID != "toolu_ok" || firstUse[0].DurationMS != 0 || firstUse[1].ToolID != "toolu_open" {
+		t.Fatalf("tool_use blocks = %#v", firstUse)
+	}
+
+	unmatched := records[1].Blocks[0]
+	if unmatched.ToolID != "toolu_unknown" || unmatched.DurationMS != 0 || unmatched.Name != "" {
+		t.Fatalf("未対応tool_result = %#v", unmatched)
+	}
+
+	paired := records[2].Blocks[0]
+	if paired.ToolID != "toolu_ok" || paired.Name != "Bash" {
+		t.Fatalf("対応済tool_result = %#v", paired)
+	}
+	// tool_use観測は1番目のclock呼出(+2s)、tool_result観測は3番目(+6s)で差は2event分=4s。
+	if paired.DurationMS != 4000 {
+		t.Fatalf("対応済duration = %d", paired.DurationMS)
+	}
+
+	reuse := records[3].Blocks[0]
+	if reuse.ToolID != "toolu_open" || reuse.DurationMS != 0 {
+		t.Fatalf("再登場tool_use = %#v", reuse)
+	}
+}
+
+// TestStreamEventIngesterCapKeepsResultCaptureは記録上限到達後の追記停止と、
+// result event行捕捉の維持を検証する。
+func TestStreamEventIngesterCapKeepsResultCapture(t *testing.T) {
+	st := newTestStateStore(t)
+	ingester := newFakeClockIngester(t, st, 0)
+	ingester.seq = maxStreamEventRecordsPerCall - 1
+
+	if _, err := ingester.Write([]byte("{\"type\":\"system\",\"subtype\":\"init\"}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ingester.Write([]byte(lineOfKind(streamFixtureLines, "system") + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	resultLine := lineOfKind(streamFixtureLines, "result")
+	if _, err := ingester.Write([]byte(resultLine + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	ingester.flush()
+
+	records := readTaskEventLines(t, st, "t")
+	if len(records) != 1 || records[0].Subtype != "init" {
+		t.Fatalf("上限後の記録件数 = %d: %#v", len(records), records)
+	}
+	if captured, ok := ingester.result(); !ok || !strings.Contains(string(captured), `"type":"result"`) {
+		t.Fatalf("上限後のresult捕捉 = %q / %v", string(captured), ok)
 	}
 }

@@ -178,6 +178,12 @@ func (s *StateStore) loadTaskStats() (TaskStats, error) {
 	return decodeTaskStats(data)
 }
 
+// CurrentTaskStatsは現在taskの観測用mirrorを読み込む。表示専用参照向けで、
+// file不在・corruptionはerrorとして呼出元へ返す。
+func (s *StateStore) CurrentTaskStats() (TaskStats, error) {
+	return s.loadTaskStats()
+}
+
 func decodeTaskStats(data []byte) (TaskStats, error) {
 	var stats TaskStats
 	if err := json.Unmarshal(data, &stats); err != nil {

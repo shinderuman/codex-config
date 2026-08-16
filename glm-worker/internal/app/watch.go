@@ -125,6 +125,10 @@ func formatTaskEvent(record state.TaskEventRecord) string {
 		if block.IsError {
 			label += "!"
 		}
+		if block.DurationMS != 0 {
+			parts = append(parts, fmt.Sprintf("%s:%db/%dms", label, block.Bytes, block.DurationMS))
+			continue
+		}
 		parts = append(parts, fmt.Sprintf("%s:%db", label, block.Bytes))
 	}
 	if record.Usage != nil {
