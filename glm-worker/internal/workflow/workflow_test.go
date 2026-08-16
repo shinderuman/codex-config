@@ -31,9 +31,12 @@ type scriptedRunner struct {
 	probeBlankResponse bool
 	// probeIsErrorはexit 0でis_error=trueの偽陽性probeを再現する。
 	probeIsError bool
-	prompts      []string
-	models       []string
-	probes       []string
+	// onRun/onProbeは各呼出の実行中にclockを進める試験用hook。
+	onRun   func()
+	onProbe func()
+	prompts []string
+	models  []string
+	probes  []string
 	// artifactFiles/taskArtifactDirはscenarioのartifact packet検証用。step出力の
 	// {{ARTIFACT_DIR}}予約tokenを現在taskのartifact dirへ置換し、宣言済みfileを保存する。
 	// productionのmodelが委譲時に示されたREPORT_ARTIFACT_DIR配下へ保存する動作の再現。
@@ -52,6 +55,9 @@ func (r *scriptedRunner) Run(
 	r.prompts = append(r.prompts, prompt)
 	r.models = append(r.models, model)
 	index := len(r.prompts) - 1
+	if r.onRun != nil {
+		r.onRun()
+	}
 	step := r.steps[index]
 	if r.taskArtifactDir != nil && strings.Contains(step.output, scenarioArtifactDirToken) {
 		dir, err := r.taskArtifactDir()
@@ -83,6 +89,9 @@ func (r *scriptedRunner) Run(
 func (r *scriptedRunner) Probe(model string) (runner.ProbeResult, error) {
 	r.probes = append(r.probes, model)
 	index := len(r.probes) - 1
+	if r.onProbe != nil {
+		r.onProbe()
+	}
 	var err error
 	if index < len(r.probeErrs) {
 		err = r.probeErrs[index]

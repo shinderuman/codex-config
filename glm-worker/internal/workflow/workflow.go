@@ -730,7 +730,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	}
 	w.state.RecordModelCall(checkpoint.Role, checkpoint.Model)
 
-	startedAt := time.Now().UTC()
+	startedAt := w.now().UTC()
 	runResult, runErr := w.runner.Run(
 		checkpoint.Role,
 		checkpoint.Model,
@@ -739,7 +739,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 		checkpoint.Prompt,
 		outputPath,
 	)
-	completedAt := time.Now().UTC()
+	completedAt := w.now().UTC()
 	w.state.RecordModelDuration(checkpoint.Model, completedAt.Sub(startedAt))
 	failureClass := runner.ProviderFailureClass{}
 	if runErr != nil {
