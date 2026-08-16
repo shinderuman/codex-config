@@ -24,6 +24,7 @@ const (
 	ModeStats
 	ModeReset
 	ModeVerifyAutoResume
+	ModeEvalAB
 )
 
 type Command struct {
@@ -40,7 +41,7 @@ type VerifyArgs struct {
 
 func ParseCommand(args []string) (Command, error) {
 	if len(args) == 0 {
-		return Command{}, fmt.Errorf("usage: glm-worker <instruction> | --decision <decision> | --fix <instruction> | --resume | --status | --stats | --reset")
+		return Command{}, fmt.Errorf("usage: glm-worker <instruction> | --decision <decision> | --fix <instruction> | --resume | --status | --stats | --reset | --eval-ab <run-dir>")
 	}
 
 	switch args[0] {
@@ -80,6 +81,11 @@ func ParseCommand(args []string) (Command, error) {
 				ThreadID: args[3],
 			},
 		}, nil
+	case "--eval-ab":
+		if len(args) != 2 {
+			return Command{}, fmt.Errorf("usage: glm-worker --eval-ab <run-dir>")
+		}
+		return Command{Mode: ModeEvalAB, Payload: args[1]}, nil
 	default:
 		return Command{Mode: ModeNewTask, Payload: strings.Join(args, " ")}, nil
 	}
@@ -142,6 +148,8 @@ func Execute(cmd Command, cfg config.AppConfig, rf RunnerFactory, stdout, stderr
 		return printStats(st, stdout)
 	case ModeVerifyAutoResume:
 		return printVerifyAutoResume(cmd, cfg, stdout)
+	case ModeEvalAB:
+		return printEvalAB(st, cmd.Payload, stdout)
 	}
 
 	lock, err := AcquireRepoLock(st.LockPath())

@@ -21,6 +21,7 @@ func TestParseCommandModes(t *testing.T) {
 			args: []string{"--verify-auto-resume", "key-1234", "2026-08-12T20:01:20+09:00", "thread-uuid"},
 			mode: ModeVerifyAutoResume,
 		},
+		{name: "eval-ab", args: []string{"--eval-ab", "/tmp/ab-run"}, mode: ModeEvalAB, payload: "/tmp/ab-run"},
 	}
 
 	for _, test := range tests {
@@ -50,6 +51,8 @@ func TestParseCommandRejectsInvalidArguments(t *testing.T) {
 		{"--verify-auto-resume", "key"},
 		{"--verify-auto-resume", "key", "date"},
 		{"--verify-auto-resume", "key", "date", "thread", "extra"},
+		{"--eval-ab"},
+		{"--eval-ab", "dir", "extra"},
 	}
 
 	for _, args := range tests {

@@ -145,6 +145,17 @@
 - 本contractの親behavioral Eval入力・期待判断とproduction guidance/routingの因果は、文面の並記だけに依存させない。`TestEscapedCauseLayerContractWiring`がEVAL.md本節のpositive/negative caseと期待判断を`escaped-cause-layer.md`の適用条件・層定義・対策層整合の契約文へ直接突き合わせて検証する。scripted scenarioの期待終端だけを自己充足的に採用しない方針の本体適用である。
 
 
+## Codex Direct対orchestrated A/B基盤
+
+- 同一repository snapshot commit・初期working tree・USER_REQUEST・完了条件・品質検証条件・Codex model/reasoning条件を比較metadata(spec)として固定し、spec本文のSHA-256を両modeのrun記録が保持して改変を検出する。directはglm-worker委譲なしの通常Codex capability/toolで探索・context・reviewへ人工制限を加えず、orchestratedは同一要求・品質条件でglm-workerを利用する。
+- 測定境界は親USER_REQUEST/task開始から最終完了までの親Codex全体(委譲前処理、Sol decision/review、fix instruction、final acceptanceを含む)で固定し、run記録ごとに開始・完了時刻を保存する。mode間で独立session・独立worktree・先行run出力/cacheの非引継ぎをisolation条件としてmetadataへ必須にし、同一session・同一worktreeのpairを検証で拒否する。
+- actual Codex usageは公式/runtime telemetry由来の実測値だけを記録し、取得できない場合はunknown(零値)とし推定しない。codex_usage.sourceはschema v1の既知source `codex-app-usage-export`だけを受理し、他のsource値・sourceなきtoken値・token値やmodel_callsの負数・direct modeへのGLM usage混入・run条件のspecからの逸脱を検証でfail closedにする。source申告と公式export内容の機械照合は行えない前提を結果表示NOTESへ明示し、将来のsource追加は明示的な契約変更とtestを要する。usage測定のための追加AI promptを発生させない。
+- proxy指標(Sol packet bytes・decision/fix command数・auto-fix round数等)はactual usageと別管理・別表示し、GLM tokenとCodex tokenの合算値を算出しない。orchestrated記録のglm_usage.sourceは`glm-worker-task-stats`だけを受理して既存stats履歴からtask IDで解決し、空task_id・不在taskは零を補完せずerrorとする。
+- 品質評価はtest結果・hidden verification・escaped bug・scope violationを優先し、LLM self-scoringだけを根拠にしない。比較の最重要出力はCodex Reduction(actual usage基準の削減率、欠落時はunknown保持でpercentを出さない)とQuality Deltaとし、所要時間とGLM usageは独立行として表示する。
+- `glm-worker --eval-ab <run-dir>`はspec.json・direct.json・orchestrated.jsonを読み込み、比較前提を検証してから結果表示する参照専用commandで、AI呼出・repo lock取得・状態変更を行わない。各JSON fileは未知fieldと末尾の第2JSON値をfail closedで拒否し、field typoやhash対象外metadataを黙って捨てない。検証失敗時は結果を出力せずerrorを返す。GLM usage解決のためorchestrated run側またはそのstate履歴を持つcheckoutで実行する。
+- fake/local固定corpus(`glm-worker/scenarios/ab-eval.json`)と`internal/abeval` testが、harness契約・usage取得(task stats解決)・aggregation・結果表示をactual/unknown両経路で自動検証する。数値・session・worktreeは架空であり、実Sol High Direct baseline・本番A/B・複数repeat・Codex枠を消費するbenchmarkはユーザーの明示指示後だけ実行する。
+
+
 ## Go品質ゲート
 
 - `go test ./...`が成功する。

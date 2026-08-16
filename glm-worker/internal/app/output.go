@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/abeval"
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/autoresume"
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/config"
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
@@ -245,6 +246,32 @@ func sumInt64Maps(values ...map[string]int64) map[string]int64 {
 		}
 	}
 	return result
+}
+
+// printEvalABはdirect/orchestrated A/B run dir(spec.json・direct.json・orchestrated.json)を
+// 読み込み、glm_usage.sourceがglm-worker-task-statsの記録だけを既存stats履歴から解決し、
+// 比較前提を検証してから結果を表示する。明示commandのため読み込み・解決・検証失敗は
+// errorとして返す。AI呼出は行わない。
+func printEvalAB(st *state.StateStore, dir string, stdout io.Writer) error {
+	spec, direct, orchestrated, err := abeval.LoadPair(dir)
+	if err != nil {
+		return err
+	}
+	if orchestrated.GLMUsage.Source == abeval.GLMUsageSourceTaskStats {
+		all, err := st.AllTaskStats()
+		if err != nil {
+			return err
+		}
+		orchestrated, err = abeval.ResolveFromTaskStats(orchestrated, all)
+		if err != nil {
+			return err
+		}
+	}
+	if err := abeval.ValidatePair(spec, direct, orchestrated); err != nil {
+		return err
+	}
+	fmt.Fprint(stdout, abeval.Format(abeval.Compare(spec, direct, orchestrated)))
+	return nil
 }
 
 func resetState(st *state.StateStore, stdout io.Writer) error {

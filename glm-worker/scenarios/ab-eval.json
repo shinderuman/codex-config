@@ -1,0 +1,224 @@
+{
+  "version": 1,
+  "description": "Codex Direct対orchestratedのA/B比較基盤のfake/local固定Eval corpus。数値・session・worktreeはすべて架空で、harness・比較前提検証・usage取得(task stats解決)・aggregation・結果表示の自動testのためだけに使う。各pairは固定比較metadata(spec)とdirect/orchestrated両modeのrun記録を持ち、expected_codex_reductionでactual usage基準の削減率とunknown保持の両経路を固定する。actual Codex usageは公式/runtime telemetry由来のみを記録し、codex_usage.sourceはcodex-app-usage-exportだけを、glm_usage.sourceはglm-worker-task-statsだけを受理し、orchestrated記録のglm_usage値はtask stats解決済みsnapshotのfake表現とする。取得できないactual usageはunknown(零値)とし推定しない。GLM tokenとCodex tokenの合算値は算出しない。usage測定のための追加AI promptは発生させない。実Sol High Direct baseline・本番A/B・複数repeat・Codex枠を消費するbenchmarkはこのcorpusでは実行せず、ユーザーの明示指示後だけ実行する。実行時の比較run dir構成(spec.json・direct.json・orchestrated.json)はglm-worker --eval-ab <run-dir>が読み込む。",
+  "pairs": [
+    {
+      "spec": {
+        "version": 1,
+        "id": "fixed-eval-abeval-actual-usage-fake",
+        "user_request": "検索結果のcache freshnessを保証するため、既存cache層に明示的な世代確認を追加する",
+        "repo_snapshot_commit": "3f2a9c1d5e7b4a08c9d6e1f2a3b4c5d6e7f8a9b0",
+        "initial_worktree": "clean(未commit変更なし)",
+        "completion_conditions": "go test -count=1 ./...成功、USER_REQUEST要件充足、自己review実施",
+        "quality_verification": "test・hidden verification・escaped bug・scope violationの4観点で確認",
+        "codex_model": "gpt-5.3-codex",
+        "codex_reasoning_effort": "high",
+        "measurement_boundary": "親USER_REQUEST/task開始から最終完了までの親Codex全体(委譲前処理、Sol decision/review、fix instruction、final acceptanceを含む)",
+        "isolation": {
+          "independent_session": true,
+          "independent_worktree": true,
+          "cache_avoidance": "mode間で独立session・独立worktreeを使用し、先行runの出力・cacheを引き継がない"
+        }
+      },
+      "direct": {
+        "version": 1,
+        "spec_id": "fixed-eval-abeval-actual-usage-fake",
+        "spec_sha256": "9ed706add96905f91b9bafda8d1159819ae1f1f868eeb472ef771a1781fb8fec",
+        "mode": "direct",
+        "session_id": "ab-fake-direct-session-01",
+        "worktree_path": "/tmp/abeval-corpus/pair1-direct",
+        "boundary": {
+          "started_at": "2026-08-16T09:00:00Z",
+          "completed_at": "2026-08-16T10:32:00Z"
+        },
+        "run_conditions": {
+          "repo_snapshot_commit": "3f2a9c1d5e7b4a08c9d6e1f2a3b4c5d6e7f8a9b0",
+          "initial_worktree": "clean(未commit変更なし)",
+          "codex_model": "gpt-5.3-codex",
+          "codex_reasoning_effort": "high"
+        },
+        "codex_usage": {
+          "source": "codex-app-usage-export",
+          "input_tokens": 1200000,
+          "output_tokens": 90000
+        },
+        "glm_usage": {
+          "source": "",
+          "input_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 0,
+          "model_calls": 0
+        },
+        "quality": {
+          "tests_run": 246,
+          "test_failures": 0,
+          "hidden_verification": "pass",
+          "escaped_bugs": 0,
+          "scope_violations": 0
+        },
+        "proxy": {
+          "sol_packet_bytes": 0,
+          "sol_decision_commands": 0,
+          "sol_fix_commands": 0,
+          "auto_fix_rounds": 0
+        }
+      },
+      "orchestrated": {
+        "version": 1,
+        "spec_id": "fixed-eval-abeval-actual-usage-fake",
+        "spec_sha256": "9ed706add96905f91b9bafda8d1159819ae1f1f868eeb472ef771a1781fb8fec",
+        "mode": "orchestrated",
+        "session_id": "ab-fake-orchestrated-session-02",
+        "worktree_path": "/tmp/abeval-corpus/pair1-orchestrated",
+        "boundary": {
+          "started_at": "2026-08-16T09:00:00Z",
+          "completed_at": "2026-08-16T09:58:00Z"
+        },
+        "run_conditions": {
+          "repo_snapshot_commit": "3f2a9c1d5e7b4a08c9d6e1f2a3b4c5d6e7f8a9b0",
+          "initial_worktree": "clean(未commit変更なし)",
+          "codex_model": "gpt-5.3-codex",
+          "codex_reasoning_effort": "high"
+        },
+        "codex_usage": {
+          "source": "codex-app-usage-export",
+          "input_tokens": 480000,
+          "output_tokens": 42000
+        },
+        "glm_usage": {
+          "source": "glm-worker-task-stats",
+          "task_id": "ab-fake-task-pair1-orch",
+          "input_tokens": 850000,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 2100000,
+          "output_tokens": 120000,
+          "model_calls": 5
+        },
+        "quality": {
+          "tests_run": 246,
+          "test_failures": 0,
+          "hidden_verification": "pass",
+          "escaped_bugs": 0,
+          "scope_violations": 0
+        },
+        "proxy": {
+          "sol_packet_bytes": 812,
+          "sol_decision_commands": 0,
+          "sol_fix_commands": 0,
+          "auto_fix_rounds": 0
+        }
+      },
+      "expected_codex_reduction": "actual"
+    },
+    {
+      "spec": {
+        "version": 1,
+        "id": "fixed-eval-abeval-usage-unknown-fake",
+        "user_request": "telemetry保存の失敗経路で、原因判定に必要な最小evidenceだけを条件付き保存する",
+        "repo_snapshot_commit": "8b1e4f7a2c9d3e5f6a0b1c2d3e4f5a6b7c8d9e0f",
+        "initial_worktree": "clean(未commit変更なし)",
+        "completion_conditions": "go test -count=1 ./...成功、USER_REQUEST要件充足、自己review実施",
+        "quality_verification": "test・hidden verification・escaped bug・scope violationの4観点で確認",
+        "codex_model": "gpt-5.3-codex",
+        "codex_reasoning_effort": "high",
+        "measurement_boundary": "親USER_REQUEST/task開始から最終完了までの親Codex全体(委譲前処理、Sol decision/review、fix instruction、final acceptanceを含む)",
+        "isolation": {
+          "independent_session": true,
+          "independent_worktree": true,
+          "cache_avoidance": "mode間で独立session・独立worktreeを使用し、先行runの出力・cacheを引き継がない"
+        }
+      },
+      "direct": {
+        "version": 1,
+        "spec_id": "fixed-eval-abeval-usage-unknown-fake",
+        "spec_sha256": "26c681afbb54b871392415120bf8dcbb5d8a430cbd39ebac076c8fa2089441a4",
+        "mode": "direct",
+        "session_id": "ab-fake-direct-session-03",
+        "worktree_path": "/tmp/abeval-corpus/pair2-direct",
+        "boundary": {
+          "started_at": "2026-08-17T09:00:00Z",
+          "completed_at": "2026-08-17T10:05:00Z"
+        },
+        "run_conditions": {
+          "repo_snapshot_commit": "8b1e4f7a2c9d3e5f6a0b1c2d3e4f5a6b7c8d9e0f",
+          "initial_worktree": "clean(未commit変更なし)",
+          "codex_model": "gpt-5.3-codex",
+          "codex_reasoning_effort": "high"
+        },
+        "codex_usage": {
+          "source": "",
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        "glm_usage": {
+          "source": "",
+          "input_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 0,
+          "model_calls": 0
+        },
+        "quality": {
+          "tests_run": 246,
+          "test_failures": 0,
+          "hidden_verification": "pass",
+          "escaped_bugs": 0,
+          "scope_violations": 0
+        },
+        "proxy": {
+          "sol_packet_bytes": 0,
+          "sol_decision_commands": 0,
+          "sol_fix_commands": 0,
+          "auto_fix_rounds": 0
+        }
+      },
+      "orchestrated": {
+        "version": 1,
+        "spec_id": "fixed-eval-abeval-usage-unknown-fake",
+        "spec_sha256": "26c681afbb54b871392415120bf8dcbb5d8a430cbd39ebac076c8fa2089441a4",
+        "mode": "orchestrated",
+        "session_id": "ab-fake-orchestrated-session-04",
+        "worktree_path": "/tmp/abeval-corpus/pair2-orchestrated",
+        "boundary": {
+          "started_at": "2026-08-17T09:00:00Z",
+          "completed_at": "2026-08-17T10:20:00Z"
+        },
+        "run_conditions": {
+          "repo_snapshot_commit": "8b1e4f7a2c9d3e5f6a0b1c2d3e4f5a6b7c8d9e0f",
+          "initial_worktree": "clean(未commit変更なし)",
+          "codex_model": "gpt-5.3-codex",
+          "codex_reasoning_effort": "high"
+        },
+        "codex_usage": {
+          "source": "",
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        "glm_usage": {
+          "source": "glm-worker-task-stats",
+          "task_id": "ab-fake-task-pair2-orch",
+          "input_tokens": 910000,
+          "cache_creation_input_tokens": 120000,
+          "cache_read_input_tokens": 1900000,
+          "output_tokens": 140000,
+          "model_calls": 7
+        },
+        "quality": {
+          "tests_run": 246,
+          "test_failures": 1,
+          "hidden_verification": "fail",
+          "escaped_bugs": 1,
+          "scope_violations": 0
+        },
+        "proxy": {
+          "sol_packet_bytes": 1460,
+          "sol_decision_commands": 1,
+          "sol_fix_commands": 1,
+          "auto_fix_rounds": 2
+        }
+      },
+      "expected_codex_reduction": "unknown"
+    }
+  ]
+}
