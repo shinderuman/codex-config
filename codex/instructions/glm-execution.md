@@ -20,11 +20,13 @@
 ## decision/fix本文の送信
 
 - `--decision`・`--fix`へ渡す判断本文・修正指示本文を、`JSON.stringify`等でshell command文字列へ埋め込むことを禁止する。shellの二重引用符内ではbacktickと`$`がcommand substitution・展開され、本文の一部が失われたりcommand出力が本文へ混入した上で最初のNUL byteで切断されたりする。2026-08-20のBM25 taskではこの経路でdecision本文の過半が静かに喪失した。
-- 本文はstdin modeで送る。`cmd`は`glm-worker --decision-stdin <payload-bytes>`（fixは`--fix-stdin`）とし、shell interpolationを使わない固定文字列だけを構築する。`<payload-bytes>`は本文のUTF-8 byte長で、tool orchestration内で`TextEncoder`相当から送信前に計算する。
-- 呼び出しがsession化されてsession IDを返した場合は、非emptyの`write_stdin`で本文全体を1回だけ送る。byte数が不足する入力はglm-workerがstate変更・model呼出前にfail closedする。
+- 本文はstdin modeで送る。exec_commandは`tty: true`で起動する。`tty: false`のprocessはstdinが即時EOFとなり本文送信前にbyte数不足でfail closedするため、`tty: false`へのfallbackを禁止する。
+- 起動commandは本文を含まない固定形`stty raw -echo && glm-worker --decision-stdin <payload-bytes>`（fixは`--fix-stdin`）とし、shell interpolationを使わない固定文字列だけを構築する。`raw`でinput/output processing・canonical・signals・flow controlをまとめて無効化し、CR/NL置換（ICRNL/INLCR）・制御byteの信号化（ISIG）・flow control（IXON）・stdoutのPTY側加工（OPOST/ONLCR）を防ぐ。`-icanon -echo`だけの弱い設定ではbyte数が同じまま本文が1:1でなく置換され、sha256未指定時にsilent corruptionとなるため使わない。glm-worker起動前にこの`stty`を適用し、`stty`設定が失敗した場合はglm-workerを起動せずfail closedする。canonical modeが有効なままだと末尾改行のないchunkがline bufferに滞留し、byte数へ到達しない。command文字列へ入れてよい本文由来の情報はUTF-8 byte長と任意のSHA-256だけに限る。`<payload-bytes>`は本文のUTF-8 byte長で、tool orchestration内で`TextEncoder`相当から送信前に計算する。
+- 呼び出しがsession化されてsession IDを返した場合は、末尾改行の有無に依存せず非emptyの`write_stdin`で本文全体を1回だけ送る。echo有効のままだと本文全文がtool outputへ複製される。echo有効・`raw`未適用のままの本文送信と、改行だけの追加writeを禁止する。byte数が不足する入力はglm-workerがstate変更・model呼出前にfail closedする。
 - 送信前に本文のSHA-256を計算できる場合は`--sha256 <hex>`を併せ指定し、同じく送信前に照合させる。
 - 本文中のbacktick、dollar、single quote、double quote、改行を無変換で保持する。shell向けのescape・encode・quoteをやり直さない。
 - glm-workerがbyte数不足・sha256不一致で非zero終了した場合、本文の分割再送・短文化・`--decision`/`--fix`へのargv埋込みfallbackを行わない。byte長・hashと送信内容の整合だけを確認し、同じstdin modeで再送する。
+- この固定wrapper command自体はCodex tool側でsandbox外実行する。glm-workerが既存task state/checkpoint/sessionを更新するためである。ただし毎回の再承認要求を本契約へ含めない。
 - 本文送信後は短時間pollingを挟まず、最大待機時間のblocking waitで完了を待つ。
 
 ## 対象repoの生存判定
