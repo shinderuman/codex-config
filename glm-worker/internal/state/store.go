@@ -119,6 +119,7 @@ func (s *StateStore) StartNewTask() (string, error) {
 		"baseline-head",
 		workerEndSnapshotFile,
 		reviewStartSnapshotFile,
+		reportOnlyStartSnapshotFile,
 		snapshotComparisonFile,
 	); err != nil {
 		return "", err
@@ -159,6 +160,7 @@ func taskStateFileNames() []string {
 		resumeStateFile,
 		workerEndSnapshotFile,
 		reviewStartSnapshotFile,
+		reportOnlyStartSnapshotFile,
 		snapshotComparisonFile,
 	}
 }

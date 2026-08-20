@@ -149,6 +149,8 @@ glm-worker --eval-ab "<A/B run dir>"
 
 reviewer呼出しの前後でGit状態を3軸(HEAD・index・worktree/untracked)のdigestで固定・検証する。worker終了時とreviewer開始前、5h上限・provider障害からのresume前、そして各reviewer model callが正常終了した直後かつPASS/FIX_REQUIRED/NEEDS_SOL_REVIEW等を採用する前に、保存snapshotと現在状態を同じ3軸で比較する。reviewerがEdit/Write禁止でもBash・formatter・test・generator等でrepositoryを変更していた場合はreview結果を採用せず、rollbackも黙認もせず`NEEDS_SOL_REVIEW`/`HIGH`へfail closedする。追加のmodel呼出・reviewer層の変更は行わない。
 
+`TARGETS: PACKET`の報告再出力(report-only)workerはEdit/Write等を禁じたReadOnly capabilityでdispatchし、開始直前に保存した3軸snapshotを基準として終了後の同一性を確認するまで通常reviewへ進まない。基準snapshotの取得・保存に失敗した場合はreport-only workerを実行せず、実行前後で1軸でも変化した場合・終了後照合に必要な基準snapshotが読めない場合はreviewerを呼ばず、いずれも変更をrollbackも黙認もせず`NEEDS_SOL_REVIEW`/`HIGH`へfail closedする。5h上限・provider一時障害・resumeを跨いでも同じ開始前snapshotを基準に使い、resume時に新baselineを取り直して変化を隠さない。通常のimplementation auto-fix・explicit fix・decision経路のsnapshot semanticsは変更しない。旧binaryが保存したreport-only checkpoint(report_only field無し)はphase`worker-report-only-<番号>`(packet圧縮suffix`-packet-compact`付きを含む)の厳格な全体一致からreport-onlyへ推定され、基準snapshotを欠く場合はprobe・worker呼出を行う前に同じfail closedへ停止する。fail closedが清除するのはresume checkpointだけで、開始前snapshot・comparison・telemetry・worker session等の診断証拠は`--fix` recoveryでの調査のために残す。
+
 主な環境変数:
 
 | 変数 | 既定値 | 用途 |

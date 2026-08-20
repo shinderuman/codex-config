@@ -37,7 +37,9 @@ type scriptedRunner struct {
 	prompts []string
 	models  []string
 	phases  []string
-	probes  []string
+	// readOnlyCallsは各Run呼出へ渡されたcapability flagを記録する。
+	readOnlyCalls []bool
+	probes        []string
 	// artifactFiles/taskArtifactDirはscenarioのartifact packet検証用。step出力の
 	// {{ARTIFACT_DIR}}予約tokenを現在taskのartifact dirへ置換し、宣言済みfileを保存する。
 	// productionのmodelが委譲時に示されたREPORT_ARTIFACT_DIR配下へ保存する動作の再現。
@@ -49,7 +51,7 @@ func (r *scriptedRunner) Run(
 	_ state.SessionRole,
 	phase string,
 	model string,
-	_ bool,
+	readOnly bool,
 	_ string,
 	prompt string,
 	outputPath string,
@@ -57,6 +59,7 @@ func (r *scriptedRunner) Run(
 	r.prompts = append(r.prompts, prompt)
 	r.models = append(r.models, model)
 	r.phases = append(r.phases, phase)
+	r.readOnlyCalls = append(r.readOnlyCalls, readOnly)
 	index := len(r.prompts) - 1
 	if r.onRun != nil {
 		r.onRun()

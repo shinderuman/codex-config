@@ -43,6 +43,9 @@ type ResumeCheckpoint struct {
 	PacketCompacted bool        `json:"packet_compacted,omitempty"`
 	// RiskFloorReemitは同一reviewer sessionへNEEDS_SOL_REVIEW/HIGH再出力を依頼中の工程を表す。
 	RiskFloorReemit bool `json:"risk_floor_reemit,omitempty"`
+	// ReportOnlyはTARGETS: PACKETの報告再出力専用工程であることを表す。ReadOnly capabilityで
+	// 実行し、resume後もsnapshot-report-only-start.jsonを再撮影せず同じ基準として使う。
+	ReportOnly bool `json:"report_only,omitempty"`
 	// EffectiveRiskはwrapperがworker原文riskと区別して決定した実効risk("HIGH"/"LOW")。
 	// 空文字は旧checkpointなど未計算を表し、resume時に現在stateから安全側へ決定論的に再構成する。
 	EffectiveRisk       string `json:"effective_risk,omitempty"`

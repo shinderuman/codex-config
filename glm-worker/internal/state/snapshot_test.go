@@ -208,6 +208,18 @@ func TestSnapshotSaveLoadAndComparison(t *testing.T) {
 	if loadedComparison.Matched || loadedComparison.Stage != SnapshotStageReviewStart {
 		t.Fatalf("comparison round-trip = %#v", loadedComparison)
 	}
+
+	reportOnlyStart := GitSnapshot{Head: "h3", IndexDigest: "i3", WorktreeDigest: "w3"}
+	if err := st.SaveReportOnlyStartSnapshot(reportOnlyStart); err != nil {
+		t.Fatal(err)
+	}
+	loadedReportOnly, err := st.LoadReportOnlyStartSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !EqualGitSnapshot(loadedReportOnly, reportOnlyStart) {
+		t.Fatalf("report-only-start round-trip = %#v", loadedReportOnly)
+	}
 }
 
 func TestLoadMissingSnapshotsError(t *testing.T) {
@@ -217,6 +229,9 @@ func TestLoadMissingSnapshotsError(t *testing.T) {
 	}
 	if _, err := st.LoadReviewStartSnapshot(); err == nil {
 		t.Fatal("未保存review-start snapshotの読込は失敗する必要があります")
+	}
+	if _, err := st.LoadReportOnlyStartSnapshot(); err == nil {
+		t.Fatal("未保存report-only開始前snapshotの読込は失敗する必要があります")
 	}
 }
 

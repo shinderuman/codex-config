@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	workerEndSnapshotFile   = "snapshot-worker-end.json"
-	reviewStartSnapshotFile = "snapshot-review-start.json"
-	snapshotComparisonFile  = "snapshot-comparison.json"
+	workerEndSnapshotFile       = "snapshot-worker-end.json"
+	reviewStartSnapshotFile     = "snapshot-review-start.json"
+	reportOnlyStartSnapshotFile = "snapshot-report-only-start.json"
+	snapshotComparisonFile      = "snapshot-comparison.json"
 )
 
 // GitSnapshotはworker終了時・review開始時のrepo状態を3軸のdigestで識別する。
@@ -31,10 +32,12 @@ type GitSnapshot struct {
 type SnapshotStage string
 
 const (
-	SnapshotStageWorkerEnd    SnapshotStage = "worker-end"
-	SnapshotStageReviewStart  SnapshotStage = "review-start"
-	SnapshotStageReviewResume SnapshotStage = "review-resume"
-	SnapshotStageReviewEnd    SnapshotStage = "review-end"
+	SnapshotStageWorkerEnd       SnapshotStage = "worker-end"
+	SnapshotStageReviewStart     SnapshotStage = "review-start"
+	SnapshotStageReviewResume    SnapshotStage = "review-resume"
+	SnapshotStageReviewEnd       SnapshotStage = "review-end"
+	SnapshotStageReportOnlyStart SnapshotStage = "report-only-start"
+	SnapshotStageReportOnlyEnd   SnapshotStage = "report-only-end"
 )
 
 // SnapshotComparisonはworker-endとreview-start snapshotの一致判定結果を記録する。
@@ -233,6 +236,20 @@ func (s *StateStore) SaveReviewStartSnapshot(snap GitSnapshot) error {
 
 func (s *StateStore) LoadReviewStartSnapshot() (GitSnapshot, error) {
 	return readSnapshot(s.Path(reviewStartSnapshotFile))
+}
+
+// SaveReportOnlyStartSnapshotはreport-only PACKET再出力workerの開始直前状態を保存する。
+// 通常worker-end/review-start snapshotとは異なり、resumeを跨いでも再保存せず
+// 同一基準として読み続ける。
+func (s *StateStore) SaveReportOnlyStartSnapshot(snap GitSnapshot) error {
+	if err := writeSnapshot(s.Path(reportOnlyStartSnapshotFile), snap); err != nil {
+		return fmt.Errorf("report-only開始前snapshotを書き込めません: %w", err)
+	}
+	return nil
+}
+
+func (s *StateStore) LoadReportOnlyStartSnapshot() (GitSnapshot, error) {
+	return readSnapshot(s.Path(reportOnlyStartSnapshotFile))
 }
 
 func (s *StateStore) SaveSnapshotComparison(comparison SnapshotComparison) error {

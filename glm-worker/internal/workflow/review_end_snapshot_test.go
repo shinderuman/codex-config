@@ -42,13 +42,19 @@ type mutatingRunner struct {
 	steps    []runnerStep
 	prompts  []string
 	models   []string
+	phases   []string
 	repoRoot string
 	mutate   func(repoRoot string) error
+	// mutatePhaseを設定するとreviewer呼出条件へ優先し、指定phaseの呼出だけmutateする。
+	mutatePhase string
+	// readOnlyCallsは各Run呼出へ渡されたcapability flagを記録する。
+	readOnlyCalls []bool
+	probes        []string
 }
 
 func (r *mutatingRunner) Run(
 	role state.SessionRole,
-	_ string,
+	phase string,
 	model string,
 	readOnly bool,
 	effort string,
@@ -57,6 +63,8 @@ func (r *mutatingRunner) Run(
 ) (runner.RunResult, error) {
 	r.prompts = append(r.prompts, prompt)
 	r.models = append(r.models, model)
+	r.phases = append(r.phases, phase)
+	r.readOnlyCalls = append(r.readOnlyCalls, readOnly)
 	step := r.steps[len(r.prompts)-1]
 	if step.output != "" {
 		if err := os.WriteFile(outputPath, []byte(step.output), 0o600); err != nil {
@@ -70,7 +78,11 @@ func (r *mutatingRunner) Run(
 	if result.Response == "" {
 		result.Response = step.output
 	}
-	if role == state.ReviewerRole && step.runErr == nil && r.mutate != nil {
+	mutateTarget := role == state.ReviewerRole
+	if r.mutatePhase != "" {
+		mutateTarget = phase == r.mutatePhase
+	}
+	if mutateTarget && step.runErr == nil && r.mutate != nil {
 		if err := r.mutate(r.repoRoot); err != nil {
 			return runner.RunResult{}, err
 		}
@@ -79,6 +91,7 @@ func (r *mutatingRunner) Run(
 }
 
 func (r *mutatingRunner) Probe(model string) (runner.ProbeResult, error) {
+	r.probes = append(r.probes, model)
 	return runner.ProbeResult{
 		Response: runner.ProbeSentinel,
 		Usage:    runner.TokenUsage{InputTokens: 1, OutputTokens: 1},

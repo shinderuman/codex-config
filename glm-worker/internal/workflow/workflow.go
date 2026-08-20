@@ -250,6 +250,16 @@ func (w *Workflow) ExecuteResume() error {
 		}
 		w.state.RecordResume()
 		w.currentResumeSource = resumeSourceOf(checkpoint)
+		// 旧binary保存のreport-only checkpoint(ReportOnly field無し)は厳格なphase形式から
+		// report-onlyを推定する。基準snapshotが無ければ不変性を確認する基準自体が存在しないため、
+		// probe・worker呼出を1件も実行する前にfail closedし、新baseline撮影で欠損を隠さない。
+		if checkpoint.Stage == state.ResumeStageAutoFix && isReportOnlyResume(checkpoint) {
+			if stopped, err := w.gateReportOnlyResumeSnapshot(); err != nil {
+				return err
+			} else if stopped {
+				return nil
+			}
+		}
 		// provider-unavailable resumeは本taskの前にprobeで疎通確認する。未回復のまま重い実requestを
 		// 浪費しないため。transient失敗でbackoffに入り、上限で同じprovider-unavailable状態を再保存、
 		// 明確な非transient errorはfail closedへ復帰する。
@@ -378,6 +388,16 @@ func (w *Workflow) ExecuteResume() error {
 				checkpoint.AutoFixes,
 			)
 		case state.ResumeStageAutoFix:
+			// report-only resumeは初回開始前に保存した基準snapshotへ再照合する。停止期間中の
+			// 変化も含めて同一性を強制し、resume時に新baselineを取り直して隠さない。
+			// 旧checkpointもphase推定で同じ検証へ載せる。
+			if isReportOnlyResume(checkpoint) {
+				if stopped, err := w.verifyReportOnlyEndSnapshot(); err != nil {
+					return err
+				} else if stopped {
+					return nil
+				}
+			}
 			return w.handleAutoFixResult(
 				checkpoint.Request,
 				result,
@@ -554,10 +574,13 @@ func (w *Workflow) handleReviewResult(
 		decision := w.state.ReadOr("last-decision", "none")
 		prompt := automaticFixPrompt(request, decision, reviewPacket)
 		phase := fmt.Sprintf("worker-auto-fix-%d", nextAutoFixes)
+		reportOnly := isReportOnlyFix(reviewPacket)
 		// TARGETS: PACKETはreviewerがコード・diffを正しいと確認しPACKET/reportの意味情報だけを
 		// 不足と指摘した予約marker。実装修正へ流さず報告再出力専用promptへ分岐する。
 		// 収束上限・risk floor・session/model routingは通常auto-fixと同じ枠で数える。
-		if isReportOnlyFix(reviewPacket) {
+		// report-only workerはReadOnly capabilityで実行し、開始前3軸snapshotを基準とした
+		// 前後同一性をprompt遵守ではなくwrapper側で強制する。
+		if reportOnly {
 			prompt = reportOnlyFixPrompt(request, decision, reviewPacket)
 			phase = fmt.Sprintf("worker-report-only-%d", nextAutoFixes)
 		}
@@ -566,7 +589,8 @@ func (w *Workflow) handleReviewResult(
 			Phase:          phase,
 			Role:           state.WorkerRole,
 			Model:          w.config.WorkerModel,
-			ReadOnly:       false,
+			ReadOnly:       reportOnly,
+			ReportOnly:     reportOnly,
 			Effort:         w.config.RoutineEffort,
 			Prompt:         prompt,
 			OriginalPrompt: prompt,
@@ -577,9 +601,25 @@ func (w *Workflow) handleReviewResult(
 		}
 		w.state.RecordAutoFix()
 
+		if reportOnly {
+			if stopped, err := w.saveReportOnlyStartSnapshot(); err != nil {
+				return err
+			} else if stopped {
+				return nil
+			}
+		}
+
 		fixPacket, err := w.runModel(checkpoint)
 		if err != nil {
 			return err
+		}
+
+		if reportOnly {
+			if stopped, err := w.verifyReportOnlyEndSnapshot(); err != nil {
+				return err
+			} else if stopped {
+				return nil
+			}
 		}
 
 		return w.handleAutoFixResult(
@@ -606,6 +646,38 @@ const reportOnlyFixTargets = "PACKET"
 
 func isReportOnlyFix(reviewPacket packet.Packet) bool {
 	return reviewPacket.Status() == "FIX_REQUIRED" && reviewPacket.Fields["TARGETS"] == reportOnlyFixTargets
+}
+
+// packetCompactPhaseSuffixはpacket圧縮再実行時にrunModelがphase末尾へ付与する固定suffix。
+// reportOnlyFromPhaseが圧縮済み旧checkpointもreport-only推定へ含めるため、生成側と共有する。
+const packetCompactPhaseSuffix = "-packet-compact"
+
+// isReportOnlyResumeはresume checkpointがreport-only PACKET再出力工程かを判定する。
+// 新checkpointはReportOnly fieldを第一判定とし、旧binaryが保存したcheckpointは
+// ReportOnly fieldを持たないため厳格なphase生成形式"worker-report-only-<十進数>"(packet
+// 圧縮suffix付きを含む)の全体一致から推定する。部分一致や類似phase(worker-auto-fix-N等)
+// へ誤適用しない。
+func isReportOnlyResume(checkpoint state.ResumeCheckpoint) bool {
+	return checkpoint.ReportOnly || reportOnlyFromPhase(checkpoint.Phase)
+}
+
+func reportOnlyFromPhase(phase string) bool {
+	if !strings.HasPrefix(phase, "worker-report-only-") {
+		return false
+	}
+	suffix := strings.TrimPrefix(phase, "worker-report-only-")
+	// 圧縮再実行は一度だけしか付与されない(PacketCompactedで再圧縮を禁止)ため、
+	// この固定suffix 1回だけを除去して残りが十進数かを見る。
+	suffix = strings.TrimSuffix(suffix, packetCompactPhaseSuffix)
+	if suffix == "" {
+		return false
+	}
+	for _, r := range suffix {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // effectiveRiskはworker原文risk・既存floor信号(auto-fix/decision/prior-review)・自己保護を統合したwrapperの実効risk。
@@ -837,7 +909,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 		if packet.IsConstraintError(err) && !checkpoint.PacketCompacted {
 			w.state.RecordPacketCompaction()
 			compactCheckpoint := checkpoint
-			compactCheckpoint.Phase += "-packet-compact"
+			compactCheckpoint.Phase += packetCompactPhaseSuffix
 			compactPrompt := packetCompressionPrompt(err.Error())
 			compactCheckpoint.Prompt = compactPrompt
 			compactCheckpoint.OriginalPrompt = compactPrompt
@@ -1484,6 +1556,59 @@ func (w *Workflow) captureWorkerEndSnapshot() (state.GitSnapshot, bool, error) {
 	return workerEnd, false, nil
 }
 
+// saveReportOnlyStartSnapshotはreport-only worker開始直前のHEAD/index/worktreeを基準として
+// 保存する。基準を確保できないときはworkerを実行せずfail closedする。resumeはこの保存済み
+// snapshotを基準に再利用し、再撮影して停止期間中の変化を隠さない。
+func (w *Workflow) saveReportOnlyStartSnapshot() (bool, error) {
+	start, err := w.captureSnapshot(w.config.RepoRoot)
+	if err != nil {
+		return true, w.failClosedReportOnlySnapshot(state.SnapshotStageReportOnlyStart, start, state.GitSnapshot{}, "report-only開始前snapshot取得失敗", err)
+	}
+	if err := w.state.SaveReportOnlyStartSnapshot(start); err != nil {
+		return true, w.failClosedReportOnlySnapshot(state.SnapshotStageReportOnlyStart, start, state.GitSnapshot{}, "report-only開始前snapshot保存失敗", err)
+	}
+	return false, nil
+}
+
+// gateReportOnlyResumeSnapshotはreport-only resumeを実行前に基準snapshotの存在だけを確認する。
+// 基準が無ければprobeもworker呼出も1件も行わずfail closedする。resume時に新baselineを撮って
+// 欠損を隠さないため、存在する基準は必ず初回開始直前に保存されたものである。
+func (w *Workflow) gateReportOnlyResumeSnapshot() (bool, error) {
+	if _, err := w.state.LoadReportOnlyStartSnapshot(); err != nil {
+		return true, w.failClosedReportOnlySnapshot(
+			state.SnapshotStageReportOnlyStart,
+			state.GitSnapshot{},
+			state.GitSnapshot{},
+			"resume再開前にreport-only開始前snapshotが欠損しているため不変性の基準を確認できません(旧形式checkpointを含む)",
+			err,
+		)
+	}
+	return false, nil
+}
+
+// verifyReportOnlyEndSnapshotはreport-only worker終了後、開始直前の保存snapshotへ現在状態を
+// 再照合する。通常auto-fixがworker-end snapshotを新基準として撮り直すreviewUntilStableへ
+// 入る前に強制し、1軸でも変化すれば通常reviewへ進めずfail closedする。rate-limit・provider
+// 障害のresume後も同じ基準を使うため、停止期間中の変化も検出から逃れない。
+func (w *Workflow) verifyReportOnlyEndSnapshot() (bool, error) {
+	start, err := w.state.LoadReportOnlyStartSnapshot()
+	if err != nil {
+		return true, w.failClosedReportOnlySnapshot(state.SnapshotStageReportOnlyEnd, state.GitSnapshot{}, state.GitSnapshot{}, "report-only開始前snapshot読込失敗", err)
+	}
+	current, err := w.captureSnapshot(w.config.RepoRoot)
+	if err != nil {
+		return true, w.failClosedReportOnlySnapshot(state.SnapshotStageReportOnlyEnd, start, state.GitSnapshot{}, "report-only終了後snapshot取得失敗", err)
+	}
+	comparison := state.CompareGitSnapshot(start, current, state.SnapshotStageReportOnlyEnd, "")
+	if err := w.state.SaveSnapshotComparison(comparison); err != nil {
+		return true, w.failClosedReportOnlySnapshot(state.SnapshotStageReportOnlyEnd, start, current, "snapshot comparison保存失敗", err)
+	}
+	if !comparison.Matched {
+		return true, w.failClosedReportOnlySnapshot(state.SnapshotStageReportOnlyEnd, start, current, "report-only worker開始前から終了後までの間にrepository状態が変化しています", nil)
+	}
+	return false, nil
+}
+
 // recordConvergenceRoundはreview round開始境界のrepo状態観測をround logへbest-effort
 // 記録する。reviewer呼出・token・durationはtelemetryが正であるためここへ持たず、
 // 表示側でCapturedAtの時間窓とWorkerPhaseで対応付ける。失敗はround log側のwarning
@@ -1603,7 +1728,19 @@ func (w *Workflow) verifyReviewEndSnapshot() (bool, error) {
 // WaitingSolReview移行中に残存checkpointがresume復元情報と矛盾するのを防ぐ。
 // 併せてsnapshot診断をtelemetry/statsへbest-effort記録する(本flowは止めない)。
 func (w *Workflow) failClosedSnapshot(stage state.SnapshotStage, workerEnd, reviewStart state.GitSnapshot, reason string, cause error) error {
-	w.recordSnapshotEvent(stage, workerEnd, reviewStart, reason, cause)
+	w.recordSnapshotEvent(state.ReviewerRole, stage, workerEnd, reviewStart, reason, cause)
+	return w.failClosedStopped(stage, reason, cause, snapshotFailClosedPacket)
+}
+
+// failClosedReportOnlySnapshotはreport-only worker前後の不変性確認失敗を同じ停止semantics
+// (checkpoint清除・WaitingSolReview・診断記録)へ載せる。検出主体はreviewerではなくworkerの
+// 前後invariantのため、event roleとpacket文言をreview-start/end検証と区別する。
+func (w *Workflow) failClosedReportOnlySnapshot(stage state.SnapshotStage, start, current state.GitSnapshot, reason string, cause error) error {
+	w.recordSnapshotEvent(state.WorkerRole, stage, start, current, reason, cause)
+	return w.failClosedStopped(stage, reason, cause, reportOnlySnapshotFailClosedPacket)
+}
+
+func (w *Workflow) failClosedStopped(stage state.SnapshotStage, reason string, cause error, build func(state.SnapshotStage, string) packet.Packet) error {
 	if err := w.state.ClearResumeCheckpoint(); err != nil {
 		return err
 	}
@@ -1613,16 +1750,16 @@ func (w *Workflow) failClosedSnapshot(stage state.SnapshotStage, workerEnd, revi
 	if cause != nil {
 		reason = fmt.Sprintf("%s: %v", reason, cause)
 	}
-	return w.emitPacket(snapshotFailClosedPacket(stage, workerEnd, reviewStart, reason))
+	return w.emitPacket(build(stage, reason))
 }
 
 // recordSnapshotEventはsnapshot同一性確認失敗をtelemetryへ記録する。比較結果に応じて
 // Outcomeを切り替える: 両snapshot揃って不一致→snapshot_mismatch(mismatch軸を集計)、
 // 揃ったが一致(保存失敗等でfail-closed)→snapshot_save_failed、一方が空(取得失敗等)で
 // 比較未実施→snapshot_unavailable。token消費は持たない(best-effort)。
-func (w *Workflow) recordSnapshotEvent(stage state.SnapshotStage, workerEnd, reviewStart state.GitSnapshot, reason string, cause error) {
-	comparison := state.CompareGitSnapshot(workerEnd, reviewStart, stage, "")
-	diag := state.BuildSnapshotDiagnostic(stage, workerEnd, reviewStart, comparison, reason)
+func (w *Workflow) recordSnapshotEvent(role state.SessionRole, stage state.SnapshotStage, previous, current state.GitSnapshot, reason string, cause error) {
+	comparison := state.CompareGitSnapshot(previous, current, stage, "")
+	diag := state.BuildSnapshotDiagnostic(stage, previous, current, comparison, reason)
 	outcome := "snapshot_unavailable"
 	switch {
 	case diag.Matched != nil && !*diag.Matched:
@@ -1638,7 +1775,7 @@ func (w *Workflow) recordSnapshotEvent(stage state.SnapshotStage, workerEnd, rev
 		StartedAt:   now,
 		CompletedAt: now,
 		Phase:       fmt.Sprintf("%s-snapshot-check", stage),
-		Role:        state.ReviewerRole,
+		Role:        role,
 		Outcome:     outcome,
 		Snapshot:    snapshotDiagnosticPtr(diag),
 	}
@@ -1652,7 +1789,7 @@ func snapshotDiagnosticPtr(diag state.SnapshotDiagnostic) *state.SnapshotDiagnos
 	return &diag
 }
 
-func snapshotFailClosedPacket(stage state.SnapshotStage, workerEnd, reviewStart state.GitSnapshot, reason string) packet.Packet {
+func snapshotFailClosedPacket(stage state.SnapshotStage, reason string) packet.Packet {
 	return packet.FromLines([]string{
 		"STATUS: NEEDS_SOL_REVIEW",
 		"RISK: HIGH",
@@ -1665,6 +1802,25 @@ func snapshotFailClosedPacket(stage state.SnapshotStage, workerEnd, reviewStart 
 		"TARGETS: repository HEAD/index/worktreeの現在状態と保存済みsnapshot state file",
 		"ARTIFACTS: none",
 		"SOL_QUESTION: worker終了状態とreview開始状態の差異・外部変更の有無をSolが判断する",
+	})
+}
+
+// reportOnlySnapshotFailClosedPacketはreport-only PACKET再出力workerの前後同一性確認失敗時の
+// Sol確認packet。reviewer自身のreview-start/end mutation検出とは主体が違い、report-only workerの
+// 開始前snapshot基準であることをSolへ区別可能にする。
+func reportOnlySnapshotFailClosedPacket(stage state.SnapshotStage, reason string) packet.Packet {
+	return packet.FromLines([]string{
+		"STATUS: NEEDS_SOL_REVIEW",
+		"RISK: HIGH",
+		fmt.Sprintf("SUMMARY: report-only PACKET再出力workerの開始前後でHEAD/index/worktree同一性を確認できず(%s)、通常reviewへ進めずSol確認へ昇格", stage),
+		"REQUIREMENT_COVERAGE: report-only workerのrepo不変postconditionを機械強制できなかったためSolが直接確認する必要あり",
+		"INVARIANTS: wrapperはreport-only worker開始前snapshotと終了後状態の3軸一致を確認するまで通常reviewへ進まない",
+		"TEST_EVIDENCE: 開始前保存snapshotと終了後snapshotの比較で不一致または取得失敗を検出",
+		fmt.Sprintf("ISSUES: %s", reason),
+		"RESIDUAL_RISK: report-only workerがrepositoryを変更した可能性とその意図を排除できなかった",
+		"TARGETS: repository HEAD/index/worktreeの現在状態とreport-only開始前snapshot・telemetry記録",
+		"ARTIFACTS: none",
+		"SOL_QUESTION: report-only workerによる変更の意図有無と追跡・修正方針をSolが判断する",
 	})
 }
 

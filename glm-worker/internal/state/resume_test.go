@@ -36,6 +36,21 @@ func TestResumeCheckpointPersists(t *testing.T) {
 	if got.Phase != checkpoint.Phase || got.ResetAtRFC3339 != checkpoint.ResetAtRFC3339 || got.Effort != "high" || got.Model != "sonnet" {
 		t.Fatalf("unexpected checkpoint: %#v", got)
 	}
+
+	checkpoint.Stage = ResumeStageAutoFix
+	checkpoint.Phase = "worker-report-only-1"
+	checkpoint.ReadOnly = true
+	checkpoint.ReportOnly = true
+	if err := st.SaveResumeCheckpoint(checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	got, err = st.LoadResumeCheckpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.ReportOnly || !got.ReadOnly {
+		t.Fatalf("report-only checkpoint field round-trip = %#v", got)
+	}
 }
 
 func TestClearResumeCheckpoint(t *testing.T) {
