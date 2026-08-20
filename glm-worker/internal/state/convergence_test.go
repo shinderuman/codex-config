@@ -190,14 +190,14 @@ func TestCompareRoundRecordsClassifiesDeltas(t *testing.T) {
 	commentOnly.Paths = []RoundPathState{
 		{Path: "main.go", Class: RoundPathClassCode, FullDigest: "f2", SemanticDigest: "s1"},
 	}
-	if got := CompareRoundRecords(&base, &commentOnly); got.Class != RoundDeltaCommentDocFormat || got.ChangedPaths != 1 || got.SemanticPaths != 0 {
-		t.Fatalf("comment/doc/format差分 = %+v", got)
+	if got := CompareRoundRecords(&base, &commentOnly); got.Class != RoundDeltaCommentFormat || got.ChangedPaths != 1 || got.SemanticPaths != 0 || got.DocPaths != 0 {
+		t.Fatalf("comment/format差分 = %+v", got)
 	}
 
-	// doc追記は非意味扱い。
+	// doc追記はcomment/format-onlyへ落ちずdoc-changeとして観測される。
 	docAdded := commentOnly
 	docAdded.Paths = append(docAdded.Paths, RoundPathState{Path: "README.md", Class: RoundPathClassDoc, FullDigest: "d1"})
-	if got := CompareRoundRecords(&base, &docAdded); got.Class != RoundDeltaCommentDocFormat || got.ChangedPaths != 2 || got.SemanticPaths != 0 {
+	if got := CompareRoundRecords(&base, &docAdded); got.Class != RoundDeltaDocChange || got.ChangedPaths != 2 || got.SemanticPaths != 0 || got.DocPaths != 1 {
 		t.Fatalf("doc追記 = %+v", got)
 	}
 
@@ -236,6 +236,138 @@ func TestCompareRoundRecordsClassifiesDeltas(t *testing.T) {
 	outside.Paths = base.Paths
 	if got := CompareRoundRecords(&base, &outside); got.Class != RoundDeltaUnknown {
 		t.Fatalf("範囲外変更 = %+v", got)
+	}
+}
+
+// TestCompareRoundRecordsDocChangesGetOwnClassは文書pathの追加・変更・削除がfile種別
+// だけで非意味へ分類されずdoc-changeとして観測されること、AGENTS・instructions・
+// EVAL・仕様等の行動規定文書がcomment/format-onlyへ落ちないこと、実codeの
+// comment/format-only分類が維持されることを検証する。
+func TestCompareRoundRecordsDocChangesGetOwnClass(t *testing.T) {
+	prev := RoundRecord{
+		Version: 1, TaskID: "task-doc", Seq: 1, ReviewNumber: 1, WorkerPhase: "worker-new",
+		Snapshot: SnapshotDigest{Head: "h", IndexDigest: "i", WorktreeDigest: "w"},
+		Paths: []RoundPathState{
+			{Path: "AGENTS.md", Class: RoundPathClassDoc, FullDigest: "ad1", SemanticDigest: "ad1"},
+			{Path: "EVAL.md", Class: RoundPathClassDoc, FullDigest: "ed1", SemanticDigest: "ed1"},
+			{Path: "codex/instructions/worker/go.md", Class: RoundPathClassDoc, FullDigest: "id1", SemanticDigest: "id1"},
+			{Path: "SPECIFICATION.md", Class: RoundPathClassDoc, FullDigest: "sd1", SemanticDigest: "sd1"},
+			{Path: "NOTES.txt", Class: RoundPathClassDoc, FullDigest: "nd1", SemanticDigest: "nd1"},
+			{Path: "main.go", Class: RoundPathClassCode, FullDigest: "f1", SemanticDigest: "s1"},
+			{Path: "util.go", Class: RoundPathClassCode, FullDigest: "u1", SemanticDigest: "t1"},
+		},
+	}
+	entries := roundPathIndex(prev.Paths)
+	pick := func(path string) RoundPathState {
+		entry, ok := entries[path]
+		if !ok {
+			t.Fatalf("基準recordに%qがありません", path)
+		}
+		return entry
+	}
+	// withDigestは全内容と意味digestが両方変わる差分(doc・code意味差分)。
+	withDigest := func(path string, digest string) RoundPathState {
+		entry := pick(path)
+		entry.FullDigest = digest
+		entry.SemanticDigest = digest
+		return entry
+	}
+	// withFullDigestは全内容だけが変わる差分(code comment/format-only)。
+	withFullDigest := func(path string, digest string) RoundPathState {
+		entry := pick(path)
+		entry.FullDigest = digest
+		return entry
+	}
+	// replaceは基準path集合の同path entryを差し替える。
+	replace := func(mutations ...RoundPathState) []RoundPathState {
+		list := append([]RoundPathState(nil), prev.Paths...)
+		for _, mutation := range mutations {
+			for i := range list {
+				if list[i].Path == mutation.Path {
+					list[i] = mutation
+				}
+			}
+		}
+		return list
+	}
+	// dropは基準path集合からpathを除外する(record上の削除)。
+	drop := func(path string) []RoundPathState {
+		list := make([]RoundPathState, 0, len(prev.Paths)-1)
+		for _, entry := range prev.Paths {
+			if entry.Path != path {
+				list = append(list, entry)
+			}
+		}
+		return list
+	}
+	curr := func(paths ...RoundPathState) RoundRecord {
+		record := prev
+		record.Seq = 2
+		record.ReviewNumber = 2
+		record.Snapshot = SnapshotDigest{Head: "h", IndexDigest: "i", WorktreeDigest: "w2"}
+		record.Paths = paths
+		return record
+	}
+	scenarios := []struct {
+		name     string
+		curr     RoundRecord
+		class    string
+		changed  int
+		semantic int
+		doc      int
+	}{
+		{
+			name:  "行動規定文書の変更",
+			curr:  curr(replace(withDigest("AGENTS.md", "ad2"))...),
+			class: RoundDeltaDocChange, changed: 1, semantic: 0, doc: 1,
+		},
+		{
+			name:  "instructions変更とEVAL変更の同居",
+			curr:  curr(replace(withDigest("EVAL.md", "ed2"), withDigest("codex/instructions/worker/go.md", "id2"))...),
+			class: RoundDeltaDocChange, changed: 2, semantic: 0, doc: 2,
+		},
+		{
+			name:  "doc追加",
+			curr:  curr(append(replace(), RoundPathState{Path: "docs/README.md", Class: RoundPathClassDoc, FullDigest: "d1", SemanticDigest: "d1"})...),
+			class: RoundDeltaDocChange, changed: 1, semantic: 0, doc: 1,
+		},
+		{
+			name:  "doc削除",
+			curr:  curr(drop("SPECIFICATION.md")...),
+			class: RoundDeltaDocChange, changed: 1, semantic: 0, doc: 1,
+		},
+		{
+			name:  "worktree上で削除されたdoc",
+			curr:  curr(replace(RoundPathState{Path: "NOTES.txt", Class: RoundPathClassDoc, Deleted: true})...),
+			class: RoundDeltaDocChange, changed: 1, semantic: 0, doc: 1,
+		},
+		{
+			name:  "doc変更とcode comment-onlyの同居",
+			curr:  curr(replace(withDigest("AGENTS.md", "ad2"), withFullDigest("main.go", "f2"))...),
+			class: RoundDeltaDocChange, changed: 2, semantic: 0, doc: 1,
+		},
+		{
+			name:  "doc変更とcode意味差分の同居",
+			curr:  curr(replace(withDigest("AGENTS.md", "ad2"), withDigest("util.go", "u2"))...),
+			class: RoundDeltaSemantic, changed: 2, semantic: 1, doc: 1,
+		},
+		{
+			name:  "code comment-only単独は維持",
+			curr:  curr(replace(withFullDigest("main.go", "f2"))...),
+			class: RoundDeltaCommentFormat, changed: 1, semantic: 0, doc: 0,
+		},
+		{
+			name:  "docからcode種別への遷移",
+			curr:  curr(replace(RoundPathState{Path: "NOTES.txt", Class: RoundPathClassCode, FullDigest: "n2", SemanticDigest: "n2"})...),
+			class: RoundDeltaDocChange, changed: 1, semantic: 0, doc: 1,
+		},
+	}
+	for _, scenario := range scenarios {
+		delta := CompareRoundRecords(&prev, &scenario.curr)
+		if delta.Class != scenario.class || delta.ChangedPaths != scenario.changed ||
+			delta.SemanticPaths != scenario.semantic || delta.DocPaths != scenario.doc {
+			t.Fatalf("%s = %+v want class=%s changed=%d semantic=%d doc=%d", scenario.name, delta, scenario.class, scenario.changed, scenario.semantic, scenario.doc)
+		}
 	}
 }
 

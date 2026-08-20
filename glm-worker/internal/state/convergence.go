@@ -25,16 +25,17 @@ const (
 	RoundPathClassOther = "other"
 )
 
-// RoundDeltaClassはround間の状態差分の機械分類。semantic-changeとunknownは
-// 省略候補から除外される安全側。verification-onlyはsame-snapshotをevent logの
+// RoundDeltaClassはround間の状態差分の機械分類。doc-change・semantic-change・
+// unknownは省略候補から除外される安全側。verification-onlyはsame-snapshotをevent logの
 // tool観測で細分化したapp層の派生値で、ここではsame-snapshotまでを決める。
 const (
-	RoundDeltaBaseline         = "baseline"
-	RoundDeltaInitial          = "initial"
-	RoundDeltaSameSnapshot     = "same-snapshot"
-	RoundDeltaCommentDocFormat = "comment-doc-format-only"
-	RoundDeltaSemantic         = "semantic-change"
-	RoundDeltaUnknown          = "unknown"
+	RoundDeltaBaseline      = "baseline"
+	RoundDeltaInitial       = "initial"
+	RoundDeltaSameSnapshot  = "same-snapshot"
+	RoundDeltaCommentFormat = "comment-format-only"
+	RoundDeltaDocChange     = "doc-change"
+	RoundDeltaSemantic      = "semantic-change"
+	RoundDeltaUnknown       = "unknown"
 )
 
 // RoundWorkerPhaseBaselineはtask開始時の境界record(worker実行前)を表す予約phase。
@@ -197,8 +198,9 @@ func ClassifyRoundPath(repoRoot string, relPath string) RoundPathState {
 	return entry
 }
 
-// RoundPathClassは拡張子・basenameからpath分類を返す。文書は丸ごと非意味bucketへ置き、
-// 既知の言語だけcode、それ以外(shell・yaml等の複数行文字列を除外できない形式)はother。
+// RoundPathClassは拡張子・basenameからpath分類を返す。文書は言語正規化を適用しない
+// 別扱い(差分はdoc-changeへ観測)とし、既知の言語だけcode、それ以外(shell・yaml等の
+// 複数行文字列を除外できない形式)はother。
 func RoundPathClass(path string) string {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".md", ".markdown", ".rst", ".adoc", ".txt":
@@ -376,11 +378,13 @@ func roundDigest(content []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// RoundDeltaは1 review roundの前境界に対する状態差分の機械分類結果。
+// RoundDeltaは1 review roundの前境界に対する状態差分の機械分類結果。DocPathsは
+// 文書pathの追加・変更・削除へ関与したpath数。
 type RoundDelta struct {
 	Class         string
 	ChangedPaths  int
 	SemanticPaths int
+	DocPaths      int
 }
 
 // CompareRoundRecordsはcurr roundの前round(またはbaseline)recordに対する差分を
@@ -404,13 +408,17 @@ func CompareRoundRecords(prev, curr *RoundRecord) RoundDelta {
 	}
 	previous := roundPathIndex(prev.Paths)
 	current := roundPathIndex(curr.Paths)
-	delta := RoundDelta{Class: RoundDeltaCommentDocFormat}
+	delta := RoundDelta{Class: RoundDeltaCommentFormat}
 	for path, currEntry := range current {
 		prevEntry, existed := previous[path]
 		if existed && prevEntry.FullDigest == currEntry.FullDigest && currEntry.FullDigest != "" {
 			continue
 		}
 		delta.ChangedPaths++
+		if currEntry.Class == RoundPathClassDoc || (existed && prevEntry.Class == RoundPathClassDoc) {
+			delta.addDocPath()
+			continue
+		}
 		if roundPathDeltaNonSemantic(prevEntry, existed, currEntry) {
 			continue
 		}
@@ -423,6 +431,7 @@ func CompareRoundRecords(prev, curr *RoundRecord) RoundDelta {
 		}
 		delta.ChangedPaths++
 		if previous[path].Class == RoundPathClassDoc {
+			delta.addDocPath()
 			continue
 		}
 		delta.SemanticPaths++
@@ -434,13 +443,21 @@ func CompareRoundRecords(prev, curr *RoundRecord) RoundDelta {
 	return delta
 }
 
-// roundPathDeltaNonSemanticはpath 1件の差分がcomment/doc/formatだけと機械確定
-// できるかを返す。正規化digestが両側観測済みで一致するとき、または文書pathの
-// 差分のときだけtrueとし、未観測・言語非対応はfalse(semantic候補)へ倒す。
-func roundPathDeltaNonSemantic(prev RoundPathState, existed bool, curr RoundPathState) bool {
-	if curr.Class == RoundPathClassDoc || (existed && prev.Class == RoundPathClassDoc) {
-		return true
+// addDocPathは文書pathの差分1件をdoc-change側へ計上する。文書はAGENTS・instructions・
+// EVAL等の行動規定を含み得るため内容差の意味を機械確定せず、意味差分が既に観測されて
+// いるときだけsemantic-changeを優先する。
+func (d *RoundDelta) addDocPath() {
+	d.DocPaths++
+	if d.Class != RoundDeltaSemantic {
+		d.Class = RoundDeltaDocChange
 	}
+}
+
+// roundPathDeltaNonSemanticはcode path 1件の差分がcomment/formatだけと機械確定
+// できるかを返す。正規化digestが両側観測済みで一致するときだけtrueとし、追加・削除・
+// 未観測・言語非対応はfalse(semantic候補)へ倒す。文書pathはdoc-change側へ先に
+// 振り分けられるためここへ来ない。
+func roundPathDeltaNonSemantic(prev RoundPathState, existed bool, curr RoundPathState) bool {
 	if !existed || curr.Deleted || prev.Deleted {
 		return false
 	}

@@ -92,7 +92,7 @@ func TestConvergenceRendersRoundsCostsAndSummary(t *testing.T) {
 		"BASELINE: captured=2026-08-20T09:00:00Z paths=0 snapshot=ok",
 		"ROUNDS: 1",
 		"ROUND #1 seq=2 review=1 autofixes=0 worker=worker-new",
-		"ROUND #1 DELTA: class=verification-only changed=0 nonsemantic=0",
+		"ROUND #1 DELTA: class=verification-only changed=0 nonsemantic=0 doc=0",
 		"ROUND #1 SNAPSHOT: head=head1 index=index1 worktree=worktree",
 		"ROUND #1 REVIEW: calls=1 outcome=PASS risk=LOW reported=LOW reemit=no unresolved=no snapshot=matched",
 		"ROUND #1 REVIEWER_COST: calls=1 in=250 out=10 turns=2 dur=5000ms",
@@ -104,6 +104,59 @@ func TestConvergenceRendersRoundsCostsAndSummary(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("convergence表示に%qがありません:\n%s", want, body)
 		}
+	}
+}
+
+// TestConvergenceRendersDocChangeRoundは行動規定文書(AGENTS等)の変更roundが
+// doc-changeとして表示・集計され、comment/format-onlyへ落ちないことを検証する。
+func TestConvergenceRendersDocChangeRound(t *testing.T) {
+	cfg := newAppConfig(t)
+	st, err := state.NewStateStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID, err := st.StartNewTask()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := convergenceBaseTime()
+	appendConvergenceRound(t, st, state.RoundRecord{
+		TaskID: taskID, WorkerPhase: state.RoundWorkerPhaseBaseline, CapturedAt: base,
+		Snapshot: state.SnapshotDigest{Head: "h", IndexDigest: "i", WorktreeDigest: "w"},
+		Paths: []state.RoundPathState{
+			{Path: "AGENTS.md", Class: state.RoundPathClassDoc, FullDigest: "ad1", SemanticDigest: "ad1"},
+		},
+	})
+	appendConvergenceRound(t, st, state.RoundRecord{
+		TaskID: taskID, ReviewNumber: 1, WorkerPhase: "worker-new", CapturedAt: base.Add(10 * time.Second),
+		Snapshot: state.SnapshotDigest{Head: "h", IndexDigest: "i", WorktreeDigest: "w2"},
+		Paths: []state.RoundPathState{
+			{Path: "AGENTS.md", Class: state.RoundPathClassDoc, FullDigest: "ad2", SemanticDigest: "ad2"},
+		},
+	})
+	st.RecordModelCallLog(state.ModelCallLog{
+		TaskID: taskID, CallType: state.CallTypeTask, Role: state.ReviewerRole, Phase: "reviewer-1",
+		StartedAt: base.Add(20 * time.Second), CompletedAt: base.Add(25 * time.Second),
+		TreeUsage:      state.TokenUsage{InputTokens: 200, OutputTokens: 10},
+		WallDurationMS: 5000, TopLevelTurns: 2, PacketStatus: "PASS",
+		EffectiveRisk: "LOW", ReviewerReportedRisk: "LOW",
+	})
+
+	var out bytes.Buffer
+	if err := printConvergence(st, "", &out); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	for _, want := range []string{
+		"ROUND #1 DELTA: class=doc-change changed=1 nonsemantic=0 doc=1",
+		"SUMMARY delta=doc-change rounds=1 reviewer_calls=1 reviewer_in=200 reviewer_out=10 reviewer_dur_ms=5000",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("convergence表示に%qがありません:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "comment-format-only") {
+		t.Fatalf("doc変更roundがcomment/format-onlyへ表示されています:\n%s", body)
 	}
 }
 
@@ -203,13 +256,13 @@ func TestConvergenceGapAndMismatchFallToUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := out.String()
-	if !strings.Contains(body, "ROUND #1 DELTA: class=same-snapshot changed=0 nonsemantic=0 mismatched_reviewer=yes") {
+	if !strings.Contains(body, "ROUND #1 DELTA: class=same-snapshot changed=0 nonsemantic=0 doc=0 mismatched_reviewer=yes") {
 		t.Fatalf("round 1のmismatch表示がありません:\n%s", body)
 	}
 	if !strings.Contains(body, "ROUND #2 seq=5") || !strings.Contains(body, "ROUND #2 DELTA: class=unknown") || !strings.Contains(body, "gap=yes") {
 		t.Fatalf("不連続roundがunknown/gap表示になっていません:\n%s", body)
 	}
-	if strings.Contains(body, "class=comment-doc-format-only") {
+	if strings.Contains(body, "class=comment-format-only") {
 		t.Fatalf("欠落疑いroundの分類がunknownへ倒されていません:\n%s", body)
 	}
 	if !strings.Contains(body, "SUMMARY delta=unknown rounds=1") {
@@ -250,7 +303,7 @@ func TestConvergenceUnresolvedAndHighCounters(t *testing.T) {
 	}
 	body := out.String()
 	for _, want := range []string{
-		"ROUND #1 DELTA: class=initial changed=0 nonsemantic=0",
+		"ROUND #1 DELTA: class=initial changed=0 nonsemantic=0 doc=0",
 		"ROUND #1 REVIEW: calls=1 outcome=FIX_REQUIRED risk=HIGH reported=LOW reemit=no unresolved=yes snapshot=unknown",
 		"SUMMARY delta=initial rounds=1 reviewer_calls=1",
 		"UNRESOLVED_ISSUE_ROUNDS: 1",

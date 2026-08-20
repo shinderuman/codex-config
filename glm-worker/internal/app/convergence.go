@@ -327,8 +327,9 @@ func printConvergenceRound(stdout io.Writer, number int, round convergenceRound)
 	}
 	fmt.Fprintf(
 		stdout,
-		"ROUND #%d DELTA: class=%s changed=%d nonsemantic=%d%s\n",
-		number, deltaClass, round.delta.ChangedPaths, round.delta.ChangedPaths-round.delta.SemanticPaths, note,
+		"ROUND #%d DELTA: class=%s changed=%d nonsemantic=%d doc=%d%s\n",
+		number, deltaClass, round.delta.ChangedPaths,
+		round.delta.ChangedPaths-round.delta.SemanticPaths-round.delta.DocPaths, round.delta.DocPaths, note,
 	)
 	snapshot := record.Snapshot
 	fmt.Fprintf(
@@ -477,7 +478,8 @@ func orderedSummaryClasses(byClass map[string]*convergenceSummary) []string {
 	order := []string{
 		state.RoundDeltaSameSnapshot,
 		convergenceDeltaVerificationOnly,
-		state.RoundDeltaCommentDocFormat,
+		state.RoundDeltaCommentFormat,
+		state.RoundDeltaDocChange,
 		state.RoundDeltaSemantic,
 		state.RoundDeltaUnknown,
 		state.RoundDeltaInitial,
