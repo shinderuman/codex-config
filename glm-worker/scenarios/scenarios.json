@@ -1180,18 +1180,15 @@
       "must_not_pass": true
     },
     {
-      "id": "implementation-plan-absent-fabrication-returns-fix-required",
-      "behavior": "IMPLEMENTATION_PLAN.local.mdが存在しないtaskでworkerが推測・自動生成で同fileを作成した場合、reviewerのFIX_REQUIREDで自動修正へ回し、通常のrepository状態からの作業へ戻してSol確認へ収束する。PASSは許可されない",
+      "id": "implementation-plan-absent-fabrication-fails-closed-before-review",
+      "behavior": "IMPLEMENTATION_PLAN.local.mdが存在しないtaskでworkerが呼出中に同fileを新規作成した場合、wrapperが呼出前後のplan file不変確認でreviewer開始前にfail closed検出しSol確認へ昇格する。reviewerは呼ばれず、作成されたfileはbaselineへ復元されない",
       "request": "READMEの軽微な修正を行う",
       "entry": "new_task",
       "instruction_files": [
         "AGENTS.md",
-        "codex/glm-worker/prompts/WORKER.md",
-        "codex/glm-worker/prompts/REVIEWER.md"
+        "codex/glm-worker/prompts/WORKER.md"
       ],
-      "changed_paths": [
-        "README.md"
-      ],
+      "changed_paths": [],
       "runner_steps": [
         {
           "lines": [
@@ -1203,26 +1200,160 @@
             "UNVERIFIED: none",
             "ARTIFACTS: none"
           ]
-        },
-        {
-          "lines": [
-            "STATUS: FIX_REQUIRED",
-            "RISK: LOW",
-            "SUMMARY: 存在しない計画の自動生成",
-            "REQUIREMENT_COVERAGE: covered",
-            "INVARIANTS: preserved",
-            "TEST_EVIDENCE: 作業前のrepo状態と今回diffを照合",
-            "ISSUES: IMPLEMENTATION_PLAN.local.mdが存在しないtaskで同fileを自動生成した",
-            "RESIDUAL_RISK: 推測由来の計画で進行状態を汚染する",
-            "TARGETS: IMPLEMENTATION_PLAN.local.md",
-            "ARTIFACTS: none"
-          ]
-        },
+        }
+      ],
+      "expected_models": [
+        "opus"
+      ],
+      "worker_mutates_plan_file": true,
+      "plan_file_initially_absent": true,
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true,
+      "expected_output_contains": [
+        "IMPLEMENTATION_PLAN.local.md",
+        "存在しない状態から新規作成"
+      ],
+      "expected_checkpoint": "none",
+      "expected_stats": {
+        "model_calls": 1,
+        "worker_calls": 1,
+        "reviewer_calls": 0,
+        "transient_retries": 0,
+        "resume_commands": 0,
+        "probe_success": 0,
+        "probe_failure": 0,
+        "total_ai_calls": 1
+      },
+      "expected_telemetry": {
+        "task_calls": 1,
+        "probe_calls": 0,
+        "event_calls": 1
+      }
+    },
+    {
+      "id": "implementation-plan-tracked-missing-fails-closed-before-call",
+      "behavior": "Git indexがIMPLEMENTATION_PLAN.local.mdを追跡しているのにworking treeへ存在しないtaskでは、wrapperがmodel呼出前にfail closedしてSol確認へ昇格する。未追跡で最初から存在しない他repositoryとは区別され、planは再生成・復元されない",
+      "request": "READMEの軽微な修正を行う",
+      "entry": "new_task",
+      "instruction_files": [
+        "AGENTS.md"
+      ],
+      "changed_paths": [],
+      "runner_steps": [
         {
           "lines": [
             "STATUS: IMPLEMENTED",
             "RISK: LOW",
-            "SUMMARY: removed fabricated plan and worked from repository state",
+            "SUMMARY: fixed readme",
+            "REQUIREMENT_COVERAGE: covered",
+            "TESTS: pass",
+            "UNVERIFIED: none",
+            "ARTIFACTS: none"
+          ]
+        }
+      ],
+      "expected_models": [
+        "opus"
+      ],
+      "plan_file_tracked_absent": true,
+      "expected_run_count": 0,
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true,
+      "expected_output_contains": [
+        "IMPLEMENTATION_PLAN.local.md",
+        "working treeへ存在しません"
+      ],
+      "expected_checkpoint": "none",
+      "expected_stats": {
+        "model_calls": 0,
+        "worker_calls": 0,
+        "reviewer_calls": 0,
+        "transient_retries": 0,
+        "resume_commands": 0,
+        "probe_success": 0,
+        "probe_failure": 0,
+        "total_ai_calls": 0
+      },
+      "expected_telemetry": {
+        "task_calls": 0,
+        "probe_calls": 0,
+        "event_calls": 1
+      }
+    },
+    {
+      "id": "implementation-plan-worker-mutation-fails-closed-before-review",
+      "behavior": "IMPLEMENTATION_PLAN.local.mdが存在するtaskでworkerが呼出中に同fileを編集した場合、wrapperが呼出前後のplan file不変確認でreviewer開始前にfail closed検出しSol確認へ昇格する。reviewerは呼ばれず、親Codexがcall前に置いた内容へ復元されない",
+      "request": "READMEの記載を更新する",
+      "entry": "new_task",
+      "instruction_files": [
+        "AGENTS.md",
+        "codex/glm-worker/prompts/WORKER.md"
+      ],
+      "changed_paths": [],
+      "runner_steps": [
+        {
+          "lines": [
+            "STATUS: IMPLEMENTED",
+            "RISK: LOW",
+            "SUMMARY: updated readme and plan",
+            "REQUIREMENT_COVERAGE: covered",
+            "TESTS: pass",
+            "UNVERIFIED: none",
+            "ARTIFACTS: none"
+          ]
+        }
+      ],
+      "expected_models": [
+        "opus"
+      ],
+      "worker_mutates_plan_file": true,
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true,
+      "expected_output_contains": [
+        "IMPLEMENTATION_PLAN.local.md",
+        "内容が変化"
+      ],
+      "expected_checkpoint": "none",
+      "expected_stats": {
+        "model_calls": 1,
+        "worker_calls": 1,
+        "reviewer_calls": 0,
+        "transient_retries": 0,
+        "resume_commands": 0,
+        "probe_success": 0,
+        "probe_failure": 0,
+        "total_ai_calls": 1
+      },
+      "expected_telemetry": {
+        "task_calls": 1,
+        "probe_calls": 0,
+        "event_calls": 1
+      }
+    },
+    {
+      "id": "implementation-plan-critical-surface-escalates-self-protection-high",
+      "behavior": "tracked canonical sourceであるIMPLEMENTATION_PLAN.local.mdのdiffを含むtaskは自己保護critical surface(implementation-plan)として扱われ、workerのRISK LOW自己申告とreviewer PASSをwrapperのself-protectionが却下しSol確認へ昇格する",
+      "request": "実施計画の現在状態を更新する",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md",
+        "codex/glm-worker/prompts/REVIEWER.md"
+      ],
+      "changed_paths": [
+        "IMPLEMENTATION_PLAN.local.md"
+      ],
+      "runner_steps": [
+        {
+          "lines": [
+            "STATUS: IMPLEMENTED",
+            "RISK: LOW",
+            "SUMMARY: updated plan current state",
             "REQUIREMENT_COVERAGE: covered",
             "TESTS: pass",
             "UNVERIFIED: none",
@@ -1236,7 +1367,7 @@
             "SUMMARY: pass",
             "REQUIREMENT_COVERAGE: covered",
             "INVARIANTS: preserved",
-            "TEST_EVIDENCE: 自動生成fileの削除と本来変更の範囲を確認",
+            "TEST_EVIDENCE: diffを確認",
             "ISSUES: none",
             "RESIDUAL_RISK: none",
             "TARGETS: none",
@@ -1247,21 +1378,19 @@
           "lines": [
             "STATUS: NEEDS_SOL_REVIEW",
             "RISK: HIGH",
-            "SUMMARY: 自動生成file削除後の最終確認",
+            "SUMMARY: critical surface変更の最終確認",
             "REQUIREMENT_COVERAGE: covered",
             "INVARIANTS: preserved",
-            "TEST_EVIDENCE: 自動修正後reviewでfile削除を確認",
-            "ISSUES: 自動修正を経たためSol確認へ昇格",
-            "RESIDUAL_RISK: なし",
-            "TARGETS: README.mdの最終diff",
+            "TEST_EVIDENCE: risk floorでreviewer PASSを却下",
+            "ISSUES: IMPLEMENTATION_PLAN.local.mdは親Codex専有のcritical surface",
+            "RESIDUAL_RISK: planの意味変更が進行状態の正しさへ影響する",
+            "TARGETS: IMPLEMENTATION_PLAN.local.md",
             "ARTIFACTS: none",
-            "SOL_QUESTION: 自動生成file削除後の結果を採否するか"
+            "SOL_QUESTION: plan変更を採否するか"
           ]
         }
       ],
       "expected_models": [
-        "opus",
-        "haiku",
         "opus",
         "sonnet",
         "sonnet"

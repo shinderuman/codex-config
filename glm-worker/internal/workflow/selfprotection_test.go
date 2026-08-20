@@ -62,6 +62,7 @@ func TestIsCriticalPath(t *testing.T) {
 		{"rules file", "codex/rules/glm-worker.rules", true, "managed-rules"},
 		{"managed AGENTS quality gate", "codex/AGENTS.md", true, "managed-agents"},
 		{"repository root AGENTS bootstrap contract", "AGENTS.md", true, "repo-agents"},
+		{"tracked implementation plan is parent-owned canonical source", "IMPLEMENTATION_PLAN.local.md", true, "implementation-plan"},
 
 		{"test files excluded keeps test-only 4.7", "glm-worker/internal/workflow/workflow_test.go", false, "test"},
 		{"packet test excluded", "glm-worker/internal/packet/packet_test.go", false, "test"},
@@ -127,6 +128,22 @@ func TestSelfProtectionClassifiesEveryTrackedFile(t *testing.T) {
 	}
 	if critical == 0 || nonCritical == 0 {
 		t.Fatalf("classification universe collapsed: critical=%d non-critical=%d", critical, nonCritical)
+	}
+}
+
+// TestImplementationPlanFileIsTrackedCanonicalはplan fileがGit追跡のcanonical sourceである
+// ことをgit ls-filesで固定する。追跡解除・exclude運用へ戻す変更は本検証だけが検知する。
+func TestImplementationPlanFileIsTrackedCanonical(t *testing.T) {
+	root := scenarioRepoRoot(t)
+	if _, err := exec.Command("git", "-C", root, "rev-parse", "--git-dir").Output(); err != nil {
+		t.Skipf("git metadata absent under %s: tracked-file pin unverifiable", root)
+	}
+	out, err := exec.Command("git", "-C", root, "ls-files", "--", implementationPlanFile).Output()
+	if err != nil {
+		t.Fatalf("git ls-files %s: %v", implementationPlanFile, err)
+	}
+	if strings.TrimSpace(string(out)) != implementationPlanFile {
+		t.Fatalf("%sはGit追跡のcanonical sourceであるべきです: git ls-files出力 %q", implementationPlanFile, string(out))
 	}
 }
 

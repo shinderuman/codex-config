@@ -42,6 +42,13 @@ type scenarioArtifact struct {
 
 const scenarioArtifactDirToken = "{{ARTIFACT_DIR}}"
 
+// scenarioPlanSeed/ scenarioPlanMutatedはplan file不変性破壊scenarioのseed(親Codexがcall前に
+// 置いた内容の代役)とworker呼出中の書換内容。検証は内容の変化検出のみへ用いる。
+const (
+	scenarioPlanSeed    = "parent owned plan\n"
+	scenarioPlanMutated = "glm edited plan\n"
+)
+
 // telemetryClockInjectedStartはscenario終端後の全telemetry record時刻が注入fake clockの
 // 開始時刻と一致することを期待するexpected_telemetry_clock値。
 const telemetryClockInjectedStart = "injected-start"
@@ -128,6 +135,16 @@ type scenarioDoc struct {
 	// 開始前後でrepositoryを変更するscenarioで有効化する。scripted packetの成功宣言と
 	// 無関係にreport-only不変性のproduction検証へ失敗させるescaped review固定のhook。
 	ReportOnlyMutatesWorktree bool `json:"report_only_mutates_worktree,omitempty"`
+	// WorkerMutatesPlanFileはworkerがtask呼出中にIMPLEMENTATION_PLAN.local.mdへ書き込む
+	// scenarioで有効化する。scripted packetの成功宣言と無関係にplan file不変性のproduction
+	// 検証がreviewer開始前へfail closedする escaped review固定のhook。
+	WorkerMutatesPlanFile bool `json:"worker_mutates_plan_file,omitempty"`
+	// PlanFileInitiallyAbsentはWorkerMutatesPlanFile対象repoのplan fileを初期欠損にする。
+	// workerによる新規作成(plan生成禁止契約)を再現する。
+	PlanFileInitiallyAbsent bool `json:"plan_file_initially_absent,omitempty"`
+	// PlanFileTrackedAbsentはGit indexがplan fileを追跡するのにworking treeへ欠損した
+	// repoを再現する。追跡中canonical source欠損のmodel呼出前fail closedを固定する。
+	PlanFileTrackedAbsent bool `json:"plan_file_tracked_absent,omitempty"`
 	// ExpectedOutputContainsはwrapper最終出力へ含めるべき本文。終端STATUS期待だけでは
 	// 観測できない「どのgateが発火したか」をfail closed理由文へ直接束ねる。
 	ExpectedOutputContains []string `json:"expected_output_contains,omitempty"`
@@ -267,13 +284,35 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 		if s.MustNotPass && s.ExpectedPacketStatus == "PASS" {
 			return fmt.Errorf("scenario %s must_not_pass with expected PASS", s.ID)
 		}
-		if s.ReviewerMutatesWorktree && s.ReportOnlyMutatesWorktree {
+		if s.ReviewerMutatesWorktree && s.ReportOnlyMutatesWorktree ||
+			s.ReviewerMutatesWorktree && s.WorkerMutatesPlanFile ||
+			s.ReportOnlyMutatesWorktree && s.WorkerMutatesPlanFile {
 			return fmt.Errorf("scenario %s declares multiple mutation hooks", s.ID)
+		}
+		// 追跡中plan欠損scenarioはmutation無しでmodel呼出前に停止する。呼出中の変化を
+		// 扱うhookや0呼出以外の終端と併存した場合、期待内容の再確認を強制する。
+		if s.PlanFileTrackedAbsent {
+			if s.WorkerMutatesPlanFile || s.ReviewerMutatesWorktree || s.ReportOnlyMutatesWorktree {
+				return fmt.Errorf("scenario %s plan_file_tracked_absent with mutation hook", s.ID)
+			}
+			if s.ExpectedPacketStatus != "NEEDS_SOL_REVIEW" {
+				return fmt.Errorf("scenario %s plan file tracked absent must expect fail-closed NEEDS_SOL_REVIEW", s.ID)
+			}
+			if s.ExpectedRunCount == nil || *s.ExpectedRunCount != 0 {
+				return fmt.Errorf("scenario %s plan file tracked absent must expect zero model runs", s.ID)
+			}
 		}
 		// report-only不変性破壊scenarioは、scripted packet成功宣言と無関係にproduction gateが
 		// fail closed終端へ至ること自体が期待値。他終端への書換えは再確認を強制する。
 		if s.ReportOnlyMutatesWorktree && s.ExpectedPacketStatus != "NEEDS_SOL_REVIEW" {
 			return fmt.Errorf("scenario %s report-only mutation must expect fail-closed NEEDS_SOL_REVIEW", s.ID)
+		}
+		// plan file不変性破壊scenarioも同じくfail closed終端が期待値。
+		if s.WorkerMutatesPlanFile && s.ExpectedPacketStatus != "NEEDS_SOL_REVIEW" {
+			return fmt.Errorf("scenario %s plan file mutation must expect fail-closed NEEDS_SOL_REVIEW", s.ID)
+		}
+		if s.PlanFileInitiallyAbsent && !s.WorkerMutatesPlanFile {
+			return fmt.Errorf("scenario %s plan_file_initially_absent without worker_mutates_plan_file", s.ID)
 		}
 		for i, want := range s.ExpectedOutputContains {
 			if want == "" {
@@ -572,6 +611,21 @@ func TestScenarioCorpusContractRejectsInvalid(t *testing.T) {
 		{"report-only mutation without fail-closed terminal", func(sc *scenarioFile, _ *manifestFile) {
 			sc.Scenarios[0].ReportOnlyMutatesWorktree = true
 		}, "must expect fail-closed NEEDS_SOL_REVIEW"},
+		{"plan file mutation without fail-closed terminal", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].WorkerMutatesPlanFile = true
+		}, "plan file mutation must expect fail-closed NEEDS_SOL_REVIEW"},
+		{"plan file initially absent without mutation hook", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].PlanFileInitiallyAbsent = true
+		}, "without worker_mutates_plan_file"},
+		{"plan file tracked absent with mutation hook", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].PlanFileTrackedAbsent = true
+			sc.Scenarios[0].WorkerMutatesPlanFile = true
+			sc.Scenarios[0].ExpectedPacketStatus = "NEEDS_SOL_REVIEW"
+		}, "with mutation hook"},
+		{"plan file tracked absent without zero-run expectation", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].PlanFileTrackedAbsent = true
+			sc.Scenarios[0].ExpectedPacketStatus = "NEEDS_SOL_REVIEW"
+		}, "must expect zero model runs"},
 		{"empty expected output contains", func(sc *scenarioFile, _ *manifestFile) {
 			sc.Scenarios[0].ExpectedOutputContains = []string{""}
 		}, "empty expected_output_contains"},
@@ -749,17 +803,44 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 	buf := &bytes.Buffer{}
 	w.output = buf
 	var mutationRepoRoot string
-	if doc.ReviewerMutatesWorktree || doc.ReportOnlyMutatesWorktree {
+	if doc.ReviewerMutatesWorktree || doc.ReportOnlyMutatesWorktree || doc.WorkerMutatesPlanFile || doc.PlanFileTrackedAbsent {
 		mutationRepoRoot = initMutationRepo(t)
+		mutate := func(root string) error {
+			return os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("mutated\n"), 0o644)
+		}
+		if doc.WorkerMutatesPlanFile {
+			// seedは親Codexがcall前に置いたworking tree内容の代役。初期欠損指定だけ省く。
+			if !doc.PlanFileInitiallyAbsent {
+				if err := os.WriteFile(filepath.Join(mutationRepoRoot, implementationPlanFile), []byte(scenarioPlanSeed), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			mutate = func(root string) error {
+				return os.WriteFile(filepath.Join(root, implementationPlanFile), []byte(scenarioPlanMutated), 0o644)
+			}
+		}
+		if doc.PlanFileTrackedAbsent {
+			// Git indexへ追加済み(追跡中)なのにworking treeへ無い状態をseedする。
+			// このrepoのstaged planと同じくindex追跡がcanonical、working tree欠損を再現する。
+			if err := os.WriteFile(filepath.Join(mutationRepoRoot, implementationPlanFile), []byte(scenarioPlanSeed), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			gitIn(t, mutationRepoRoot, "add", implementationPlanFile)
+			if err := os.Remove(filepath.Join(mutationRepoRoot, implementationPlanFile)); err != nil {
+				t.Fatal(err)
+			}
+			mutate = nil
+		}
 		mr := &mutatingRunner{
 			repoRoot: mutationRepoRoot,
 			steps:    stepsFromScenario(doc),
-			mutate: func(root string) error {
-				return os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("mutated\n"), 0o644)
-			},
+			mutate:   mutate,
 		}
-		if doc.ReportOnlyMutatesWorktree {
+		switch {
+		case doc.ReportOnlyMutatesWorktree:
 			mr.mutatePhase = "worker-report-only-1"
+		case doc.WorkerMutatesPlanFile:
+			mr.mutatePhase = "worker-new"
 		}
 		w.runner = mr
 		w.config.RepoRoot = mutationRepoRoot
@@ -804,15 +885,30 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 		t.Fatalf("unsupported entry %q for scenario %s", doc.Entry, doc.ID)
 	}
 
-	if doc.ReviewerMutatesWorktree || doc.ReportOnlyMutatesWorktree {
+	if doc.ReviewerMutatesWorktree || doc.ReportOnlyMutatesWorktree || doc.WorkerMutatesPlanFile || doc.PlanFileTrackedAbsent {
 		mr := w.runner.(*mutatingRunner)
 		r.prompts = mr.prompts
 		r.models = mr.models
-		if content, err := os.ReadFile(filepath.Join(mutationRepoRoot, "tracked.txt")); err != nil || string(content) != "mutated\n" {
+		if doc.WorkerMutatesPlanFile {
+			// orchestratorがGLMのplan変更をbaselineへ自動復元していないことを検証する。
+			if content, err := os.ReadFile(filepath.Join(mutationRepoRoot, implementationPlanFile)); err != nil || string(content) != scenarioPlanMutated {
+				t.Fatalf("workerによるplan file変更が自動復元・編集されています: %q %v", content, err)
+			}
+		} else if doc.PlanFileTrackedAbsent {
+			// orchestratorが追跡中plan欠損を検出してもfileを再生成・復元しないことを検証する。
+			if _, err := os.Stat(filepath.Join(mutationRepoRoot, implementationPlanFile)); !os.IsNotExist(err) {
+				t.Fatalf("追跡中plan欠損が復元・生成されています: %v", err)
+			}
+			if out := gitIn(t, mutationRepoRoot, "ls-files", "--", implementationPlanFile); out == "" {
+				t.Fatal("seed失敗: plan fileがindexへ追跡されていません")
+			}
+		} else if content, err := os.ReadFile(filepath.Join(mutationRepoRoot, "tracked.txt")); err != nil || string(content) != "mutated\n" {
 			t.Fatalf("mutation hook対象呼出でrepositoryが変更されていません: %q %v", content, err)
 		}
 	}
-	if len(r.prompts) == 0 && doc.ExpectedProbeCount == 0 {
+	// expected_run_count=0はmodel呼出前に停止する終端を明示する期待値であるため、
+	// この検証から除外する。それ以外はproduction codeへ一度も到達しないscenarioを検出する。
+	if len(r.prompts) == 0 && doc.ExpectedProbeCount == 0 && doc.ExpectedRunCount == nil {
 		t.Fatal("production runner was not invoked")
 	}
 	for i, p := range r.prompts {

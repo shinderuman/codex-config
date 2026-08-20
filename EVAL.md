@@ -101,9 +101,10 @@
 
 ## 計画file bootstrap
 
-- repository rootの`AGENTS.md`は、`IMPLEMENTATION_PLAN.local.md`が存在する場合だけ作業開始・再開前に必ず読み、未完了作業と進行状態の唯一の正として扱い、存在しない場合は推測・復元・自動生成せず通常のrepository状態から作業する規則を持つ。
-- `IMPLEMENTATION_PLAN.local.md`はGit管理外(repository-local exclude)で運用し、公開`.gitignore`へ追加しない。global配布用`codex/AGENTS.md`へはこのrepository固有規則を入れない。
-- root `AGENTS.md`変更はself-protectionのHIGH対象(`repo-agents`)とし、file有無両経路とHIGH分類をscenario corpus(`implementation-plan-*`・`repo-agents-root-change-escalates-self-protection-high`)と`internal/workflow` testで固定する。manifest hash pin変更時は該当scenarioの期待結果を現物へ再照合する。
+- repository rootの`AGENTS.md`は、`IMPLEMENTATION_PLAN.local.md`が存在する場合だけ作業開始・再開前に必ず読み、未完了作業と進行状態の唯一の正として扱う規則を持つ。欠損時は推測・復元・自動生成せず、Git indexで追跡されているのにworking treeへ存在しない場合はmodel呼出前にfail closedで親Codexへ返し、未追跡で最初から存在しないrepositoryでは通常のrepository状態から作業する。
+- `IMPLEMENTATION_PLAN.local.md`はGit管理するtracked canonical sourceとし、公開`.gitignore`へ追加しない。plan本文・`[x]`・優先順・現在状態を更新できるのは親Codexだけであり、GLM worker/reviewerは読み取り専用で参照し、更新候補と根拠をPACKETへ報告する。追跡中planのworking tree欠損・呼出中の変更・生成・削除を検出した場合はfail closedで親Codexへ返す。glm-workerはplanを置かない他repositoryでも使うため、未追跡のplan存在を全repo必須にしない。global配布用`codex/AGENTS.md`へはこのrepository固有規則を入れない。
+- wrapperは通常worker・Sol判断後worker・automatic fix・explicit fix・rate-limit/provider resumeの各production worker呼出前後でplan file内容(欠損含む)の不変を機械確認し、Git indexで追跡されるplanのworking tree欠損はmodel呼出前にfail closed、未追跡欠損repoは通常許可、GLM workerによる変更・生成・削除をreviewer開始前にfail closed検出する。baselineはcall開始時のworking tree内容(親Codexがcall前に更新したstaged/working treeを含む)であり、orchestratorは自動復元・編集を行わない。tracked判定は`git ls-files`等のindex現物と`.git` marker構造に基づき特定repository path前提へhardcodeせず、Git repository内で追跡判定不能なGit異常は呼出前fail closedとし、Git管理外directoryだけを未追跡欠損の許可枠にする。reviewerは既存read-only invariant(review-start/end snapshot)を維持し、plan対象の新規gateを追加しない。
+- root `AGENTS.md`変更はself-protectionのHIGH対象(`repo-agents`)とし、file有無両経路とHIGH分類をscenario corpus(`implementation-plan-*`・`repo-agents-root-change-escalates-self-protection-high`)と`internal/workflow` testで固定する。`IMPLEMENTATION_PLAN.local.md`自身はcritical分類(`implementation-plan`)へ分類し、Git追跡状態を`git ls-files`で固定するtestが追跡解除を検出する。worker呼出前後の不変強制は`internal/workflow`のproduction因果testが固定し、corpusへ重複実装しない。manifest hash pin変更時は該当scenarioの期待結果を現物へ再照合する。
 
 
 ## 自己保護critical surface

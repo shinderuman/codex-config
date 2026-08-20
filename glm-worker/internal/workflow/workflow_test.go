@@ -215,6 +215,7 @@ func newWorkflowT(t *testing.T, st *state.StateStore, r *scriptedRunner) *Workfl
 		RoutineEffort:         "high",
 		MaxAutoFixRounds:      2,
 		TelemetryContent:      true,
+		RepoRoot:              t.TempDir(),
 	}, st, r, io.Discard)
 	w.captureSnapshot = func(string) (state.GitSnapshot, error) {
 		return fixedSnapshot, nil

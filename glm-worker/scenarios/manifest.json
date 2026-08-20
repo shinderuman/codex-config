@@ -60,7 +60,7 @@
         "provider-resume-probe-auth-error-fails-closed",
         "provider-transient-probe-mixed-transient-priority-resumes-task",
         "implementation-plan-present-ignored-returns-fix-required",
-        "implementation-plan-absent-fabrication-returns-fix-required",
+        "implementation-plan-absent-fabrication-fails-closed-before-review",
         "repo-agents-root-change-escalates-self-protection-high",
         "install-merge-path-escalates-self-protection-high",
         "managed-settings-content-escalates-self-protection-high",
@@ -70,7 +70,9 @@
         "cmd-entrypoint-escalates-self-protection-high",
         "provider-transient-probe-success-resumed-task-fatal-fails-closed",
         "workflow-clock-telemetry-follows-injected-clock",
-        "report-only-reemission-mutation-fails-closed-before-review"
+        "report-only-reemission-mutation-fails-closed-before-review",
+        "implementation-plan-critical-surface-escalates-self-protection-high",
+        "implementation-plan-worker-mutation-fails-closed-before-review"
       ]
     },
     {
@@ -90,7 +92,6 @@
         "high-sol-review-targets-none-recompacts-to-concrete-targets",
         "high-semantic-info-gap-returns-fix-required-then-sol-review",
         "implementation-plan-present-ignored-returns-fix-required",
-        "implementation-plan-absent-fabrication-returns-fix-required",
         "repo-agents-root-change-escalates-self-protection-high",
         "install-merge-path-escalates-self-protection-high",
         "managed-settings-content-escalates-self-protection-high",
@@ -99,15 +100,18 @@
         "test-and-docs-only-stay-low-risk",
         "cmd-entrypoint-escalates-self-protection-high",
         "workflow-clock-telemetry-follows-injected-clock",
-        "report-only-reemission-mutation-fails-closed-before-review"
+        "report-only-reemission-mutation-fails-closed-before-review",
+        "implementation-plan-critical-surface-escalates-self-protection-high"
       ]
     },
     {
       "path": "AGENTS.md",
-      "sha256": "3ffbc8324f9fd4afa8ce8de12d3fdcbaacfe73f1fb517c6e61ec8b2b18bea1da",
+      "sha256": "b6f1df68aae5a4a66c7afdf9f8931039c49664fc828862666538227995fa7cbe",
       "scenarios": [
         "implementation-plan-present-ignored-returns-fix-required",
-        "implementation-plan-absent-fabrication-returns-fix-required",
+        "implementation-plan-absent-fabrication-fails-closed-before-review",
+        "implementation-plan-tracked-missing-fails-closed-before-call",
+        "implementation-plan-worker-mutation-fails-closed-before-review",
         "repo-agents-root-change-escalates-self-protection-high"
       ]
     },

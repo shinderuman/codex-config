@@ -100,7 +100,7 @@ func (w *Workflow) withTemp(fn func() error) error {
 }
 
 func (w *Workflow) ExecuteNewTask(request string) error {
-	return w.withTemp(func() error {
+	return quietWhenPlanFileGuardStopped(w.withTemp(func() error {
 		if w.state.Exists("pending-decision") {
 			return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: previous task is waiting for Sol decision; use --decision or --reset")
 		}
@@ -146,11 +146,11 @@ func (w *Workflow) ExecuteNewTask(request string) error {
 			return err
 		}
 		return w.handleWorkerResult(request, workerPacket, checkpoint.Phase)
-	})
+	}))
 }
 
 func (w *Workflow) ExecuteDecision(decision string) error {
-	return w.withTemp(func() error {
+	return quietWhenPlanFileGuardStopped(w.withTemp(func() error {
 		if w.state.TaskStatus() != state.TaskStatusWaitingDecision || !w.state.Exists("pending-decision") {
 			return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: no pending Sol decision for this repository")
 		}
@@ -186,11 +186,11 @@ func (w *Workflow) ExecuteDecision(decision string) error {
 			return err
 		}
 		return w.handleWorkerResult(request, workerPacket, checkpoint.Phase)
-	})
+	}))
 }
 
 func (w *Workflow) ExecuteExplicitFix(instruction string) error {
-	return w.withTemp(func() error {
+	return quietWhenPlanFileGuardStopped(w.withTemp(func() error {
 		if w.state.Exists("pending-decision") {
 			return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: task is waiting for Sol decision; resolve it before --fix")
 		}
@@ -228,11 +228,11 @@ func (w *Workflow) ExecuteExplicitFix(instruction string) error {
 			return err
 		}
 		return w.handleWorkerResult(request, workerPacket, checkpoint.Phase)
-	})
+	}))
 }
 
 func (w *Workflow) ExecuteResume() error {
-	return w.withTemp(func() error {
+	return quietWhenPlanFileGuardStopped(w.withTemp(func() error {
 		checkpoint, err := w.state.LoadResumeCheckpoint()
 		if err != nil {
 			return err
@@ -298,6 +298,11 @@ func (w *Workflow) ExecuteResume() error {
 
 		result, err := w.runModel(checkpoint)
 		if err != nil {
+			// plan file不変性違反のfail closedはcheckpoint清除・status移行を完了済みのため、
+			// 保存済みcheckpointの復元で上書きしない。
+			if errors.Is(err, errPlanFileGuardStopped) {
+				return err
+			}
 			var pErr *runner.ProviderUnavailableError
 			if errors.As(err, &pErr) {
 				return err
@@ -408,7 +413,7 @@ func (w *Workflow) ExecuteResume() error {
 		default:
 			return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: unknown resume stage: %s", checkpoint.Stage)
 		}
-	})
+	}))
 }
 
 func isKnownResumeStage(stage state.ResumeStage) bool {
@@ -807,6 +812,12 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 		checkpoint.Effort = w.config.RoutineEffort
 	}
 
+	// plan file baselineはmodel呼出・集計記録の前に固定する。baseline取得に失敗したとき
+	// 呼出を実行していない事実とstats/telemetryの加法整合を保つためである。
+	planBefore, stopped, err := w.capturePlanFileGuard(checkpoint.Role)
+	if stopped {
+		return packet.Packet{}, err
+	}
 	if err := w.state.SaveResumeCheckpoint(checkpoint); err != nil {
 		return packet.Packet{}, err
 	}
@@ -824,6 +835,9 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	)
 	completedAt := w.now().UTC()
 	w.state.RecordModelDuration(checkpoint.Model, completedAt.Sub(startedAt))
+	if stopped, err := w.verifyPlanFileAfterCall(checkpoint, planBefore, runResult, startedAt, completedAt, runErr, outputPath); stopped {
+		return packet.Packet{}, err
+	}
 	failureClass := runner.ProviderFailureClass{}
 	if runErr != nil {
 		failureClass = mergePlainFailureClass(
@@ -849,6 +863,11 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 			completedAt = resumeCompletedAt
 			runErr = nil
 		} else {
+			// recovery中のplan file不変性違反は既にfail closed停止へ遷移済みのため、
+			// 5h/provider停止やfatal扱いに上書きせずそのまま伝播させる。
+			if errors.Is(recErr, errPlanFileGuardStopped) {
+				return packet.Packet{}, recErr
+			}
 			var pErr *runner.ProviderUnavailableError
 			if errors.As(recErr, &pErr) {
 				_ = w.state.SecureArtifactDir()
@@ -1033,6 +1052,12 @@ func (w *Workflow) gateResumeOnProbe(checkpoint state.ResumeCheckpoint) error {
 }
 
 func (w *Workflow) runResumedTask(checkpoint state.ResumeCheckpoint, outputPath string) (bool, runner.RunResult, time.Time, time.Time, error) {
+	// 再開task呼出も初回呼出と同じplan file不変契約の対象とする。baselineはこの呼出の
+	// 開始時内容で、probe待機中の変化がないことを前提に初回呼出と同じく固定する。
+	planBefore, stopped, err := w.capturePlanFileGuard(checkpoint.Role)
+	if stopped {
+		return false, runner.RunResult{}, time.Time{}, time.Time{}, err
+	}
 	startedAt := w.now().UTC()
 	// probe成功後の再実行も本taskのTask Work Callとしてrole別に数える。
 	w.state.RecordTransientRetry()
@@ -1048,6 +1073,9 @@ func (w *Workflow) runResumedTask(checkpoint state.ResumeCheckpoint, outputPath 
 	)
 	completedAt := w.now().UTC()
 	w.state.RecordModelDuration(checkpoint.Model, completedAt.Sub(startedAt))
+	if stopped, err := w.verifyPlanFileAfterCall(checkpoint, planBefore, result, startedAt, completedAt, runErr, outputPath); stopped {
+		return false, result, startedAt, completedAt, err
+	}
 	if runErr == nil {
 		return true, result, startedAt, completedAt, nil
 	}

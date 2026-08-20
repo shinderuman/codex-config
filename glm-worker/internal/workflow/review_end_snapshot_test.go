@@ -47,6 +47,9 @@ type mutatingRunner struct {
 	mutate   func(repoRoot string) error
 	// mutatePhaseを設定するとreviewer呼出条件へ優先し、指定phaseの呼出だけmutateする。
 	mutatePhase string
+	// mutateSkipCallsはmutate適用までに読み飛ばす対象呼出の数。同一phaseの再実行呼出の
+	// うちprobe成功後のresumed taskだけを変更対象にする試験で使う。
+	mutateSkipCalls int
 	// readOnlyCallsは各Run呼出へ渡されたcapability flagを記録する。
 	readOnlyCalls []bool
 	probes        []string
@@ -83,7 +86,9 @@ func (r *mutatingRunner) Run(
 		mutateTarget = phase == r.mutatePhase
 	}
 	if mutateTarget && step.runErr == nil && r.mutate != nil {
-		if err := r.mutate(r.repoRoot); err != nil {
+		if r.mutateSkipCalls > 0 {
+			r.mutateSkipCalls--
+		} else if err := r.mutate(r.repoRoot); err != nil {
 			return runner.RunResult{}, err
 		}
 	}
