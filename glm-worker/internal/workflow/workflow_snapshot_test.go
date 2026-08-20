@@ -97,6 +97,7 @@ func TestSnapshotReviewStartCaptureFailureFailsClosed(t *testing.T) {
 	w := newSnapshotWorkflow(st, r, &out)
 	queue := &queueCapturer{results: []captureResult{
 		{snap: fixedSnapshot},
+		{snap: fixedSnapshot},
 		{err: errors.New("review-start capture unavailable")},
 	}}
 	w.captureSnapshot = queue.capture
@@ -126,6 +127,7 @@ func TestSnapshotWorkerEndReviewStartMismatchFailsClosed(t *testing.T) {
 	workerEnd := state.GitSnapshot{Head: "a", IndexDigest: "a", WorktreeDigest: "a"}
 	reviewStart := state.GitSnapshot{Head: "b", IndexDigest: "b", WorktreeDigest: "b"}
 	queue := &queueCapturer{results: []captureResult{
+		{snap: workerEnd},
 		{snap: workerEnd},
 		{snap: reviewStart},
 	}}

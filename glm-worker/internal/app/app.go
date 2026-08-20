@@ -23,6 +23,7 @@ const (
 	ModeStatus
 	ModeWatch
 	ModeTimeline
+	ModeConvergence
 	ModeStats
 	ModeReset
 	ModeVerifyAutoResume
@@ -43,7 +44,7 @@ type VerifyArgs struct {
 
 func ParseCommand(args []string) (Command, error) {
 	if len(args) == 0 {
-		return Command{}, fmt.Errorf("usage: glm-worker <instruction> | --decision <decision> | --fix <instruction> | --resume | --status | --watch | --timeline [task-id] | --stats | --reset | --eval-ab <run-dir>")
+		return Command{}, fmt.Errorf("usage: glm-worker <instruction> | --decision <decision> | --fix <instruction> | --resume | --status | --watch | --timeline [task-id] | --convergence [task-id] | --stats | --reset | --eval-ab <run-dir>")
 	}
 
 	switch args[0] {
@@ -74,6 +75,14 @@ func ParseCommand(args []string) (Command, error) {
 			return Command{Mode: ModeTimeline, Payload: args[1]}, nil
 		}
 		return Command{Mode: ModeTimeline}, nil
+	case "--convergence":
+		if len(args) > 2 {
+			return Command{}, fmt.Errorf("usage: glm-worker --convergence [task-id]")
+		}
+		if len(args) == 2 {
+			return Command{Mode: ModeConvergence, Payload: args[1]}, nil
+		}
+		return Command{Mode: ModeConvergence}, nil
 	case "--stats":
 		if len(args) != 1 {
 			return Command{}, fmt.Errorf("usage: glm-worker --stats")
@@ -149,7 +158,7 @@ func run(
 }
 
 // Executeはcmdをcfg配下で実行する。runner/workflowはrf経由で注入可能で、
-// --watchと--timelineはstateへ書き込まないread-only参照、--status/--statsはロック取得前に、
+// --watch・--timeline・--convergenceはstateへ書き込まないread-only参照、--status/--statsはロック取得前に、
 // それ以外はプロセス間ロック後に処理する。
 func Execute(cmd Command, cfg config.AppConfig, rf RunnerFactory, stdout, stderr io.Writer) error {
 	if cmd.Mode == ModeWatch {
@@ -157,6 +166,9 @@ func Execute(cmd Command, cfg config.AppConfig, rf RunnerFactory, stdout, stderr
 	}
 	if cmd.Mode == ModeTimeline {
 		return printTimeline(state.AttachStateStore(cfg), cmd.Payload, stdout)
+	}
+	if cmd.Mode == ModeConvergence {
+		return printConvergence(state.AttachStateStore(cfg), cmd.Payload, stdout)
 	}
 
 	st, err := state.NewStateStore(cfg)

@@ -449,7 +449,7 @@ func TestReviewEndCaptureFailureFailsClosedNotMismatch(t *testing.T) {
 	realCapture := w.captureSnapshot
 	w.captureSnapshot = func(root string) (state.GitSnapshot, error) {
 		calls++
-		if calls > 2 {
+		if calls > 3 {
 			return state.GitSnapshot{}, errors.New("review-end capture unavailable")
 		}
 		return realCapture(root)

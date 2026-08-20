@@ -130,7 +130,7 @@ func TestDiagnosticRecordsSnapshotMismatch(t *testing.T) {
 	reviewStart := state.GitSnapshot{Head: "b", IndexDigest: "b", WorktreeDigest: "b"}
 	calls := 0
 	w.captureSnapshot = func(string) (state.GitSnapshot, error) {
-		snaps := []state.GitSnapshot{workerEnd, reviewStart}
+		snaps := []state.GitSnapshot{workerEnd, workerEnd, reviewStart}
 		s := snaps[calls]
 		calls++
 		return s, nil

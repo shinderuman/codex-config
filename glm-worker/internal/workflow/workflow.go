@@ -120,6 +120,7 @@ func (w *Workflow) ExecuteNewTask(request string) error {
 		if err := state.CaptureGitBaseline(w.config, w.state); err != nil {
 			return err
 		}
+		w.recordBaselineRound()
 		if err := w.state.Write("last-request", request); err != nil {
 			return err
 		}
@@ -144,7 +145,7 @@ func (w *Workflow) ExecuteNewTask(request string) error {
 		if err != nil {
 			return err
 		}
-		return w.handleWorkerResult(request, workerPacket)
+		return w.handleWorkerResult(request, workerPacket, checkpoint.Phase)
 	})
 }
 
@@ -184,7 +185,7 @@ func (w *Workflow) ExecuteDecision(decision string) error {
 		if err != nil {
 			return err
 		}
-		return w.handleWorkerResult(request, workerPacket)
+		return w.handleWorkerResult(request, workerPacket, checkpoint.Phase)
 	})
 }
 
@@ -226,7 +227,7 @@ func (w *Workflow) ExecuteExplicitFix(instruction string) error {
 		if err != nil {
 			return err
 		}
-		return w.handleWorkerResult(request, workerPacket)
+		return w.handleWorkerResult(request, workerPacket, checkpoint.Phase)
 	})
 }
 
@@ -323,7 +324,7 @@ func (w *Workflow) ExecuteResume() error {
 
 		switch checkpoint.Stage {
 		case state.ResumeStageWorker:
-			return w.handleWorkerResult(checkpoint.Request, result)
+			return w.handleWorkerResult(checkpoint.Request, result, checkpoint.Phase)
 		case state.ResumeStageReview:
 			workerPacket := packet.FromLines(checkpoint.WorkerPacket)
 			decision := w.state.ReadOr("last-decision", "none")
@@ -382,6 +383,7 @@ func (w *Workflow) ExecuteResume() error {
 				result,
 				checkpoint.ReviewNumber,
 				checkpoint.AutoFixes,
+				checkpoint.Phase,
 			)
 		default:
 			return fmt.Errorf("STATUS: WORKER_ERROR\nERROR: unknown resume stage: %s", checkpoint.Stage)
@@ -410,7 +412,7 @@ func resumeSourceOf(checkpoint state.ResumeCheckpoint) string {
 	}
 }
 
-func (w *Workflow) handleWorkerResult(request string, workerPacket packet.Packet) error {
+func (w *Workflow) handleWorkerResult(request string, workerPacket packet.Packet, workerPhase string) error {
 	switch workerPacket.Status() {
 	case "NEEDS_SOL_DECISION":
 		if err := w.state.Touch("pending-decision"); err != nil {
@@ -427,7 +429,7 @@ func (w *Workflow) handleWorkerResult(request string, workerPacket packet.Packet
 		if err := w.state.SetTaskStatus(state.TaskStatusActive); err != nil {
 			return err
 		}
-		return w.reviewUntilStable(request, workerPacket, 1, 0)
+		return w.reviewUntilStable(request, workerPacket, 1, 0, workerPhase)
 	default:
 		return fmt.Errorf("STATUS: WORKER_ERROR\nPHASE: worker-format\nERROR: worker did not return a valid STATUS")
 	}
@@ -438,12 +440,16 @@ func (w *Workflow) reviewUntilStable(
 	workerPacket packet.Packet,
 	reviewNumber int,
 	autoFixes int,
+	workerPhase string,
 ) error {
-	if stopped, err := w.captureWorkerEndSnapshot(); err != nil {
+	workerEnd, stopped, err := w.captureWorkerEndSnapshot()
+	if err != nil {
 		return err
-	} else if stopped {
+	}
+	if stopped {
 		return nil
 	}
+	w.recordConvergenceRound(reviewNumber, autoFixes, workerPhase, workerEnd)
 
 	decision := w.state.ReadOr("last-decision", "none")
 	hasDecision := w.state.Exists("last-decision")
@@ -581,6 +587,7 @@ func (w *Workflow) handleReviewResult(
 			fixPacket,
 			reviewNumber,
 			nextAutoFixes,
+			phase,
 		)
 
 	default:
@@ -673,6 +680,7 @@ func (w *Workflow) handleAutoFixResult(
 	fixPacket packet.Packet,
 	reviewNumber int,
 	autoFixes int,
+	fixPhase string,
 ) error {
 	switch fixPacket.Status() {
 	case "NEEDS_SOL_DECISION":
@@ -696,6 +704,7 @@ func (w *Workflow) handleAutoFixResult(
 			fixPacket,
 			reviewNumber+1,
 			autoFixes,
+			fixPhase,
 		)
 
 	default:
@@ -1464,15 +1473,66 @@ func riskFloorFailClosedPacket(reemitPacket packet.Packet) packet.Packet {
 	})
 }
 
-func (w *Workflow) captureWorkerEndSnapshot() (bool, error) {
+func (w *Workflow) captureWorkerEndSnapshot() (state.GitSnapshot, bool, error) {
 	workerEnd, err := w.captureSnapshot(w.config.RepoRoot)
 	if err != nil {
-		return true, w.failClosedSnapshot(state.SnapshotStageWorkerEnd, workerEnd, state.GitSnapshot{}, "worker-end snapshot取得失敗", err)
+		return workerEnd, true, w.failClosedSnapshot(state.SnapshotStageWorkerEnd, workerEnd, state.GitSnapshot{}, "worker-end snapshot取得失敗", err)
 	}
 	if err := w.state.SaveWorkerEndSnapshot(workerEnd); err != nil {
-		return true, w.failClosedSnapshot(state.SnapshotStageWorkerEnd, workerEnd, state.GitSnapshot{}, "worker-end snapshot保存失敗", err)
+		return workerEnd, true, w.failClosedSnapshot(state.SnapshotStageWorkerEnd, workerEnd, state.GitSnapshot{}, "worker-end snapshot保存失敗", err)
 	}
-	return false, nil
+	return workerEnd, false, nil
+}
+
+// recordConvergenceRoundはreview round開始境界のrepo状態観測をround logへbest-effort
+// 記録する。reviewer呼出・token・durationはtelemetryが正であるためここへ持たず、
+// 表示側でCapturedAtの時間窓とWorkerPhaseで対応付ける。失敗はround log側のwarning
+// だけとし、review flowへ影響させない。
+func (w *Workflow) recordConvergenceRound(reviewNumber int, autoFixes int, workerPhase string, snap state.GitSnapshot) {
+	record := state.RoundRecord{
+		TaskID:       w.state.ReadOr("task.id", "unknown"),
+		ReviewNumber: reviewNumber,
+		AutoFixes:    autoFixes,
+		WorkerPhase:  workerPhase,
+		CapturedAt:   w.now().UTC(),
+		Snapshot:     state.SnapshotDigest{Head: snap.Head, IndexDigest: snap.IndexDigest, WorktreeDigest: snap.WorktreeDigest},
+	}
+	record.Paths, record.CaptureError = w.classifyRoundPaths()
+	_ = w.state.AppendRoundRecord(record)
+}
+
+// recordBaselineRoundはtask開始時(worker実行前)の境界recordを書き、round 1の差分
+// 分類にtask開始前状態を与える。baseline観測はreview進行へ影響しないため、snapshot
+// 取得失敗もCaptureErrorへ記録するだけとする。
+func (w *Workflow) recordBaselineRound() {
+	record := state.RoundRecord{
+		TaskID:      w.state.ReadOr("task.id", "unknown"),
+		WorkerPhase: state.RoundWorkerPhaseBaseline,
+		CapturedAt:  w.now().UTC(),
+	}
+	snap, err := w.captureSnapshot(w.config.RepoRoot)
+	if err != nil {
+		record.CaptureError = boundedText(err.Error(), packet.MaxDiagnosticBytes)
+	} else {
+		record.Snapshot = state.SnapshotDigest{Head: snap.Head, IndexDigest: snap.IndexDigest, WorktreeDigest: snap.WorktreeDigest}
+	}
+	paths, classErr := w.classifyRoundPaths()
+	if record.CaptureError == "" {
+		record.CaptureError = classErr
+	}
+	record.Paths = paths
+	_ = w.state.AppendRoundRecord(record)
+}
+
+// classifyRoundPathsはself-protectionと同じ変更対象集合をworktree観測へ変換する。
+// 取得失敗はerror文字列へ返し、観測を部分続行しない(欠落pathの誤分類を防ぐ)。
+func (w *Workflow) classifyRoundPaths() ([]state.RoundPathState, string) {
+	baselineHead, _ := w.state.Read("baseline-head")
+	paths, err := w.collectChangedPaths(w.config.RepoRoot, baselineHead)
+	if err != nil {
+		return nil, boundedText(err.Error(), packet.MaxDiagnosticBytes)
+	}
+	return state.ClassifyRoundPaths(w.config.RepoRoot, paths), ""
 }
 
 func (w *Workflow) verifyReviewStartSnapshot() (bool, error) {
