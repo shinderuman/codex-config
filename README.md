@@ -127,7 +127,9 @@ package間の依存は`app`から各機能へ向け、状態永続化とworkflow
 ```sh
 glm-worker "<新規タスク>"
 glm-worker --decision "<Sol判断>"
+glm-worker --decision-stdin <判断本文のUTF-8 byte数> [--sha256 <sha256 hex>]
 glm-worker --fix "<NEEDS_SOL_REVIEWへの修正指示>"
+glm-worker --fix-stdin <指示本文のUTF-8 byte数> [--sha256 <sha256 hex>]
 glm-worker --resume
 glm-worker --status
 glm-worker --watch
@@ -139,6 +141,7 @@ glm-worker --eval-ab "<A/B run dir>"
 ```
 
 - `--decision`は`NEEDS_SOL_DECISION`で停止した同一タスクを継続する。
+- `--decision-stdin`・`--fix-stdin`は本文をstdinから宣言byte数だけ読み取り、同じ継続・差戻し経路へ渡す。読み取り不足・`--sha256`不一致はstate変更・model呼出前にfail closedする。長文decision/fix本文の伝達はshell quotingを通さないこの経路を使い、`--decision`/`--fix`のargv埋込みは後方互換の短文用に残す。
 - `--fix`は`NEEDS_SOL_REVIEW`後だけ利用できる。
 - `--resume`はZ.ai 5時間上限またはprovider一時障害で停止した同一phase・session・checkpointを再開する。
 - `--status`と`--stats`は参照専用、`--reset`は現在の統計をarchiveして実行状態を消去する。

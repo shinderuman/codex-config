@@ -300,6 +300,7 @@ func TestRunUsesInjectedDependencies(t *testing.T) {
 		[]string{"request"},
 		func() (config.AppConfig, error) { return cfg, nil },
 		r.factory(),
+		strings.NewReader(""),
 		&out,
 		io.Discard,
 	)
@@ -317,6 +318,7 @@ func TestRunStopsWhenConfigLoadFails(t *testing.T) {
 		[]string{"request"},
 		func() (config.AppConfig, error) { return config.AppConfig{}, want },
 		nil,
+		strings.NewReader(""),
 		io.Discard,
 		io.Discard,
 	)

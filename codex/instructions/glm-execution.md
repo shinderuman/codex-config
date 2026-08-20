@@ -17,6 +17,16 @@
 - 同一taskがSol判断待ち・review fix・rate limit中なら分割や新規起動へ切り替えず、保存済みtaskとsessionを継続する。
 - モデル配分・token節約・品質バランスの調整を依頼された場合だけ`glm-worker --stats`を実行し、出力の`TELEMETRY_DIR`にあるタスク別JSONLを対象に、phase・role・effort・alias・実モデル・tree usage・top-level usage・prompt・response・結果を比較する。総消費量にはsubagentを含むtree usageを使う。通常作業では調整目的のためだけに詳細ログを読まない。
 
+## decision/fix本文の送信
+
+- `--decision`・`--fix`へ渡す判断本文・修正指示本文を、`JSON.stringify`等でshell command文字列へ埋め込むことを禁止する。shellの二重引用符内ではbacktickと`$`がcommand substitution・展開され、本文の一部が失われたりcommand出力が本文へ混入した上で最初のNUL byteで切断されたりする。2026-08-20のBM25 taskではこの経路でdecision本文の過半が静かに喪失した。
+- 本文はstdin modeで送る。`cmd`は`glm-worker --decision-stdin <payload-bytes>`（fixは`--fix-stdin`）とし、shell interpolationを使わない固定文字列だけを構築する。`<payload-bytes>`は本文のUTF-8 byte長で、tool orchestration内で`TextEncoder`相当から送信前に計算する。
+- 呼び出しがsession化されてsession IDを返した場合は、非emptyの`write_stdin`で本文全体を1回だけ送る。byte数が不足する入力はglm-workerがstate変更・model呼出前にfail closedする。
+- 送信前に本文のSHA-256を計算できる場合は`--sha256 <hex>`を併せ指定し、同じく送信前に照合させる。
+- 本文中のbacktick、dollar、single quote、double quote、改行を無変換で保持する。shell向けのescape・encode・quoteをやり直さない。
+- glm-workerがbyte数不足・sha256不一致で非zero終了した場合、本文の分割再送・短文化・`--decision`/`--fix`へのargv埋込みfallbackを行わない。byte長・hashと送信内容の整合だけを確認し、同じstdin modeで再送する。
+- 本文送信後は短時間pollingを挟まず、最大待機時間のblocking waitで完了を待つ。
+
 ## 対象repoの生存判定
 
 - glm-worker taskの生存判定は`glm-worker --status`の`REPOSITORY_LOCK`(held/free/unknown)と、`TASK_STATUS: active`時の`TASK_LIVENESS`(running/stale/unknown)だけを使う。global process一覧・`pgrep`・Claude Code processの存在を生存判定や起動可否の根拠にしない。lock file内のPIDは診断情報であり、stale PIDやPID reuseでrunning扱いしない。

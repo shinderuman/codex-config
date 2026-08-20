@@ -1,6 +1,9 @@
 package app
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseCommandModes(t *testing.T) {
 	tests := []struct {
@@ -34,6 +37,71 @@ func TestParseCommandModes(t *testing.T) {
 				t.Fatalf("command = %#v", command)
 			}
 		})
+	}
+}
+
+func TestParseCommandStdinPayloadModes(t *testing.T) {
+	digest := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+	tests := []struct {
+		name        string
+		args        []string
+		mode        CommandMode
+		stdinBytes  int64
+		expectedSHA string
+	}{
+		{name: "decision stdin", args: []string{"--decision-stdin", "3850"}, mode: ModeDecision, stdinBytes: 3850},
+		{name: "fix stdin", args: []string{"--fix-stdin", "2507"}, mode: ModeFix, stdinBytes: 2507},
+		{
+			name:        "decision stdin with sha256",
+			args:        []string{"--decision-stdin", "100", "--sha256", strings.ToUpper(digest)},
+			mode:        ModeDecision,
+			stdinBytes:  100,
+			expectedSHA: digest,
+		},
+		{
+			name:        "fix stdin with sha256",
+			args:        []string{"--fix-stdin", "1", "--sha256", digest},
+			mode:        ModeFix,
+			stdinBytes:  1,
+			expectedSHA: digest,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			command, err := ParseCommand(test.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if command.Mode != test.mode || command.StdinBytes != test.stdinBytes || command.Payload != "" || command.SHA256 != test.expectedSHA {
+				t.Fatalf("command = %#v", command)
+			}
+		})
+	}
+}
+
+func TestParseCommandRejectsInvalidStdinArguments(t *testing.T) {
+	digest := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	tests := [][]string{
+		{"--decision-stdin"},
+		{"--decision-stdin", "abc"},
+		{"--decision-stdin", "0"},
+		{"--decision-stdin", "-1"},
+		{"--decision-stdin", "10", "extra"},
+		{"--decision-stdin", "10", "--sha256"},
+		{"--decision-stdin", "10", "--sha256", "short"},
+		{"--decision-stdin", "10", "--sha256", digest[:63] + "g"},
+		{"--decision-stdin", "10", "--sha256", digest, "extra"},
+		{"--decision-stdin", "10", "--decision", "payload"},
+		{"--fix-stdin"},
+		{"--fix-stdin", "10", "--checksum", digest},
+	}
+
+	for _, args := range tests {
+		if _, err := ParseCommand(args); err == nil {
+			t.Fatalf("invalid argsを受理しました: %#v", args)
+		}
 	}
 }
 

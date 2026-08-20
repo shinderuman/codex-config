@@ -11,7 +11,7 @@
 
 - `DECISION`・`EVIDENCE`・`OPTIONS`・`RECOMMENDATION`・`TEST_OBLIGATIONS`を評価する。
 - packetで足りるならリポジトリを再探索しない。判断不能な場合だけ`TARGETS`に限定して現物を確認する。
-- 判断後は元依頼を再記述せず`glm-worker --decision "<判断>"`で同じworker sessionを継続する。
+- 判断後は元依頼を再記述せず、判断本文を`~/.codex/instructions/glm-execution.md`のstdin mode（`--decision-stdin <payload-bytes>`）で同じworker sessionへ継続する。
 
 ## `STATUS: PASS`
 
@@ -22,7 +22,7 @@
 ## `STATUS: NEEDS_SOL_REVIEW`
 
 - `TARGETS`と`SOL_QUESTION`に限定して実コードまたはdiffを確認する。
-- 修正が必要ならCodex自身で編集せず`glm-worker --fix "<修正方針>"`で同じworker sessionへ差し戻す。修正後は独立reviewerまで自動再実行される。
+- 修正が必要ならCodex自身で編集せず、修正方針本文を`~/.codex/instructions/glm-execution.md`のstdin mode（`--fix-stdin <payload-bytes>`）で同じworker sessionへ差し戻す。修正後は独立reviewerまで自動再実行される。
 
 ## `STATUS: WORKER_ERROR`
 
