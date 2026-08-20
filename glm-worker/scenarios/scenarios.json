@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "prompt/instruction変更の品質gateとして、fake runnerが返すpacket列に対するproduction workflow/prompt/gateの終端検証を行うscenario corpus。各scenarioはUSER_REQUEST・scripted packet列・期待model/routing/terminalを持ちproduction経路へ入力し、request/MODE伝達・risk/model routing・FIX_REQUIRED/NEEDS_SOL_REVIEW/NEEDS_SOL_DECISION終端・risk floor/self-protectionによるPASS拒否・NEEDS_SOL_REVIEWのTARGETS契約・FIX_REQUIREDのTARGETS: PACKET報告再出力分岐を決定論検証する。manifest.jsonは根拠instruction fileのSHA-256を固定し内容変更でhash mismatchによりtestを失敗させ影響scenarioの再確認を強制する。永続状態バグそのものの自動検出・modelの規則遵守の検証は行わず後続固定Evalの対象。install_smoke.shの配置grepとは役割を分ける。live model・networkは呼ばない。feasibility-gate-*はwrapperのSTATUS/risk終端検証例に限定し、親Codexがfeasibility-gate.mdを読み委譲・受領を制御する行動の証明ではない。親orchestration行動の固定Evalは未実行で、EVAL.mdの完了条件を満たすまで完了扱いにしない。task-lifecycle-*はwrapperの局所終端例への終端検証に限定し、親Codexが局所終端後に親依頼の未解決作業を再評価し同一taskで継続する行動の証明ではない。failure-evidence-*はwrapperのartifact packet/終端例への検証に限定し、親Codexが委譲前にevidence・sanitization・retention条件を構成し受理時に必要範囲だけ確認する行動の証明ではない。escaped-cause-layer-*はwrapperの層分類・対策方向packetの終端検証例に限定し、親Codexが一次証拠から原因層を分類する行動の証明ではない。workflow-clock-*はscripted packet終端検証に加えtelemetry record時刻・durationの注入clock由来をExecuteNewTask全経路へ課し、workflow production codeへの直接wall clock取得の再導入を終端期待と独立に失敗させる。",
+  "description": "prompt/instruction変更の品質gateとして、fake runnerが返すpacket列に対するproduction workflow/prompt/gateの終端検証を行うscenario corpus。各scenarioはUSER_REQUEST・scripted packet列・期待model/routing/terminalを持ちproduction経路へ入力し、request/MODE伝達・risk/model routing・FIX_REQUIRED/NEEDS_SOL_REVIEW/NEEDS_SOL_DECISION終端・risk floor/self-protectionによるPASS拒否・NEEDS_SOL_REVIEWのTARGETS契約・FIX_REQUIREDのTARGETS: PACKET報告再出力分岐を決定論検証する。manifest.jsonは根拠instruction fileのSHA-256を固定し内容変更でhash mismatchによりtestを失敗させ影響scenarioの再確認を強制する。永続状態バグそのものの自動検出・modelの規則遵守の検証は行わず後続固定Evalの対象。install_smoke.shの配置grepとは役割を分ける。live model・networkは呼ばない。feasibility-gate-*はwrapperのSTATUS/risk終端検証例に限定し、親Codexがfeasibility-gate.mdを読み委譲・受領を制御する行動の証明ではない。親orchestration行動の固定Evalは未実行で、EVAL.mdの完了条件を満たすまで完了扱いにしない。task-lifecycle-*はwrapperの局所終端例への終端検証に限定し、親Codexが局所終端後に親依頼の未解決作業を再評価し同一taskで継続する行動の証明ではない。failure-evidence-*はwrapperのartifact packet/終端例への検証に限定し、親Codexが委譲前にevidence・sanitization・retention条件を構成し受理時に必要範囲だけ確認する行動の証明ではない。escaped-cause-layer-*はwrapperの層分類・対策方向packetの終端検証例に限定し、親Codexが一次証拠から原因層を分類する行動の証明ではない。workflow-clock-*はscripted packet終端検証に加えtelemetry record時刻・durationの注入clock由来をExecuteNewTask全経路へ課し、workflow production codeへの直接wall clock取得の再導入を終端期待と独立に失敗させる。report-only-mutation系scenarioはscripted再出力packetの成功宣言と無関係に、report-only開始前後のrepo不変postconditionがproduction経路で破られた場合へfail closed終端で失敗させる。",
   "scenarios": [
     {
       "id": "state-residual-after-removal",
@@ -2250,6 +2250,43 @@
       "expected_task_status": "waiting-sol-review",
       "must_not_pass": true,
       "expected_telemetry_clock": "injected-start"
+    },
+    {
+      "id": "report-only-reemission-mutation-fails-closed-before-review",
+      "behavior": "TARGETS: PACKET後のreport-only再出力workerが期待packetを返しても開始前後でworking treeを変更した場合、wrapperはpacket成功宣言を採用せずreport-only不変性確認でfail closedしreviewer-2を呼ばない。HIGH変更のsemantic postconditionがproduction経路で破られた場合にscripted packet終端と独立して失敗する",
+      "request": "workflowのFIX_REQUIRED再出力promptへHIGH変更の意味情報圧縮指示を追加する",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md",
+        "codex/glm-worker/prompts/REVIEWER.md"
+      ],
+      "changed_paths": ["glm-worker/internal/workflow/prompts.go"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: HIGH", "SUMMARY: report-only再出力promptへHIGH変更の意味情報圧縮指示を追加した", "REQUIREMENT_COVERAGE: covered", "TESTS: unit pass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: FIX_REQUIRED", "RISK: HIGH", "SUMMARY: HIGH変更の意味情報が報告へ圧縮されていない", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: USER_REQUESTとdiffから変更前後の契約・失敗境界・状態遷移を独立確認", "ISSUES: 変更前後の契約・失敗境界・主要状態遷移・rollback懸念がSUMMARY/TESTS/UNVERIFIEDへ圧縮されていない", "RESIDUAL_RISK: Solがdiff再読なしに判断できない", "TARGETS: PACKET", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: HIGH", "SUMMARY: 変更前後の契約・失敗境界・主要状態遷移を圧縮して再出力した。scripted packetとしては成功を宣言している", "REQUIREMENT_COVERAGE: covered", "TESTS: unit pass", "UNVERIFIED: none", "ARTIFACTS: none"]}
+      ],
+      "expected_models": ["opus", "sonnet", "opus"],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true,
+      "report_only_mutates_worktree": true,
+      "expected_checkpoint": "none",
+      "expected_output_contains": [
+        "report-only PACKET再出力workerの開始前後でHEAD/index/worktree同一性を確認できず",
+        "report-only worker開始前から終了後までの間にrepository状態が変化しています"
+      ],
+      "expected_stats": {
+        "model_calls": 3,
+        "worker_calls": 2,
+        "reviewer_calls": 1,
+        "transient_retries": 0,
+        "resume_commands": 0,
+        "probe_success": 0,
+        "probe_failure": 0,
+        "total_ai_calls": 3
+      }
     }
   ]
 }

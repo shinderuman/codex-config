@@ -69,7 +69,8 @@
         "test-and-docs-only-stay-low-risk",
         "cmd-entrypoint-escalates-self-protection-high",
         "provider-transient-probe-success-resumed-task-fatal-fails-closed",
-        "workflow-clock-telemetry-follows-injected-clock"
+        "workflow-clock-telemetry-follows-injected-clock",
+        "report-only-reemission-mutation-fails-closed-before-review"
       ]
     },
     {
@@ -97,7 +98,8 @@
         "future-internal-package-escalates-self-protection-high",
         "test-and-docs-only-stay-low-risk",
         "cmd-entrypoint-escalates-self-protection-high",
-        "workflow-clock-telemetry-follows-injected-clock"
+        "workflow-clock-telemetry-follows-injected-clock",
+        "report-only-reemission-mutation-fails-closed-before-review"
       ]
     },
     {

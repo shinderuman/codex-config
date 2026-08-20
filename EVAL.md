@@ -91,6 +91,14 @@
 - 当該scenarioはinternal workflow production変更としてself-protection HIGH昇格の`NEEDS_SOL_REVIEW`終端を持つ。manifest hash pin変更時は該当scenarioの期待結果を現物へ再照合する。
 
 
+## HIGH変更の意味postconditionを逃すescaped review
+
+- escaped review `c06f6b2`(report-only PACKET再出力)と`977f94b`(eval-ab read-only違反)の上位原因は、scripted packet・reviewer PASS宣言・routing整合がproduction経路のsemantic postconditionと無関係に自己充足的に成立したことである。prompt文面をcontract enforcementと同一視し、worker capability・開始前後working-tree不変・entrypoint共通初期化副作用を検証しなかった。production修正は`6ec9f8f`・`a032e75`で完了済みであり、本項で再実装しない。
+- scenario corpus(`report-only-reemission-mutation-fails-closed-before-review`)は、TARGETS: PACKET後のreport-only再出力workerが期待packetを返しても開始前後でworking treeを変更した場合に、packet成功宣言とは独立にreport-only不変性確認がfail closedしreviewer-2を呼ばない終端・呼出数・fail closed理由文(`expected_output_contains`)を検証する。report-only不変強制をproduction側から外す変更は、期待packetをそのまま返すscripted終端ではなくこのscenarioで失敗する。ReadOnly capability dispatch・baseline保存順序・resume基準照合などの機構詳細は`internal/workflow/report_only_snapshot_test.go`のproduction因果testが固定し、corpusへ重複実装しない。corpus/manifestから当該scenarioが削除された場合へ失敗するpin testが保持を固定する。
+- `977f94b` eval-abのread-only postconditionは`app.Execute()`のdispatch境界性質であり、workflow入口へ入力するcorpus scenarioでは表現できない。必須production gateは`internal/app/evalab_test.go`のentrypoint test(state directory非作成・既存`repo-root`内容/mtime/file構成不変・runner未構築)とし、corpusへ重複するharnessを作らない。mode分岐前の共通初期化副作用をread-only系entrypointへ戻す変更は本gateで失敗する。
+- reviewer/Solがlive modelでHIGH変更の意味欠陥を検出する親behavioral Evalは未実行の固定Eval caseとする。本corpus scenarioはwrapperのproduction gate終端検証であり、reviewer/Sol自身の検出行動・最終判断をwrapper内で実行したことの証明ではない。positive case: 意味postcondition破りを含むHIGH変更へreviewer/SolがPASSを出さず契約・失敗境界・状態遷移の確認を要求する。negative case: postconditionが保たれたHIGH変更へ形式的な差し戻しをしない。完了条件: reviewer/Solの判断・受理をraw telemetry・task log等の一次証拠で照合できる検証形態が整備されること。live model呼出しを要するためユーザーの明示指示後だけ実行し、完了条件を満たすまでは本項を完了扱いにしない。reviewer packetへの文言checklist追加・新reviewer層・追加AI call・大量repeatは導入しない。
+
+
 ## 計画file bootstrap
 
 - repository rootの`AGENTS.md`は、`IMPLEMENTATION_PLAN.local.md`が存在する場合だけ作業開始・再開前に必ず読み、未完了作業と進行状態の唯一の正として扱い、存在しない場合は推測・復元・自動生成せず通常のrepository状態から作業する規則を持つ。

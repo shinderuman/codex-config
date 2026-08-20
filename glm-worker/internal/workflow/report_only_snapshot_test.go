@@ -941,6 +941,39 @@ func TestReportOnlyProviderUnavailableResumeLegacyCheckpointWithoutSnapshotStops
 	}
 }
 
+// TestReportOnlyPostconditionScenarioPinnedInEscapedCorpusはescaped corpusがreport-only
+// repo不変postconditionのproduction検出scenarioを保持することを固定する。corpus契約testは
+// 存在するscenarioの妥当性だけを検証するため、当該scenarioの削除は本pin検証だけが検知する。
+func TestReportOnlyPostconditionScenarioPinnedInEscapedCorpus(t *testing.T) {
+	sc, mf := loadCorpus(t)
+	found := ""
+	for _, s := range sc.Scenarios {
+		if s.ReportOnlyMutatesWorktree {
+			found = s.ID
+			break
+		}
+	}
+	if found == "" {
+		t.Fatal("escaped corpusにreport-only不変性破壊scenarioがありません")
+	}
+	for _, path := range []string{"codex/glm-worker/prompts/WORKER.md", "codex/glm-worker/prompts/REVIEWER.md"} {
+		listed := false
+		for _, e := range mf.InstructionFiles {
+			if e.Path != path {
+				continue
+			}
+			for _, sid := range e.Scenarios {
+				if sid == found {
+					listed = true
+				}
+			}
+		}
+		if !listed {
+			t.Fatalf("manifestの%sが%sをpinしていません", path, found)
+		}
+	}
+}
+
 // 通常implementation auto-fixのresumeはreport-only推定の対象外で、開始前snapshotが
 // 無くても従来どおりworker再実行からreviewへ進む。
 func TestAutoFixResumeWithoutReportOnlyPhaseKeepsLegacyFlow(t *testing.T) {

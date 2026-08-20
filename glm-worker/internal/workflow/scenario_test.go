@@ -124,6 +124,13 @@ type scenarioDoc struct {
 	SleepAdvanceMinutes int `json:"sleep_advance_minutes,omitempty"`
 	// ReviewerMutatesWorktreeはreviewerがBash相当でrepositoryを変更するscenarioで有効化する。
 	ReviewerMutatesWorktree bool `json:"reviewer_mutates_worktree,omitempty"`
+	// ReportOnlyMutatesWorktreeはreport-only PACKET再出力workerが期待packetを返しながら
+	// 開始前後でrepositoryを変更するscenarioで有効化する。scripted packetの成功宣言と
+	// 無関係にreport-only不変性のproduction検証へ失敗させるescaped review固定のhook。
+	ReportOnlyMutatesWorktree bool `json:"report_only_mutates_worktree,omitempty"`
+	// ExpectedOutputContainsはwrapper最終出力へ含めるべき本文。終端STATUS期待だけでは
+	// 観測できない「どのgateが発火したか」をfail closed理由文へ直接束ねる。
+	ExpectedOutputContains []string `json:"expected_output_contains,omitempty"`
 	// ExpectedStatsは終端後のtask/probe呼出数集計の期待値。
 	ExpectedStats *scenarioStats `json:"expected_stats,omitempty"`
 	// ExpectedTelemetryは終端後のJSONL telemetryの種別別記録数とtoken/costの期待値。
@@ -259,6 +266,19 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 		}
 		if s.MustNotPass && s.ExpectedPacketStatus == "PASS" {
 			return fmt.Errorf("scenario %s must_not_pass with expected PASS", s.ID)
+		}
+		if s.ReviewerMutatesWorktree && s.ReportOnlyMutatesWorktree {
+			return fmt.Errorf("scenario %s declares multiple mutation hooks", s.ID)
+		}
+		// report-only不変性破壊scenarioは、scripted packet成功宣言と無関係にproduction gateが
+		// fail closed終端へ至ること自体が期待値。他終端への書換えは再確認を強制する。
+		if s.ReportOnlyMutatesWorktree && s.ExpectedPacketStatus != "NEEDS_SOL_REVIEW" {
+			return fmt.Errorf("scenario %s report-only mutation must expect fail-closed NEEDS_SOL_REVIEW", s.ID)
+		}
+		for i, want := range s.ExpectedOutputContains {
+			if want == "" {
+				return fmt.Errorf("scenario %s empty expected_output_contains entry %d", s.ID, i)
+			}
 		}
 		if s.ExpectedErrorStatus != "" {
 			if !knownError[s.ExpectedErrorStatus] {
@@ -545,6 +565,16 @@ func TestScenarioCorpusContractRejectsInvalid(t *testing.T) {
 		{"unknown expected packet risk", func(sc *scenarioFile, _ *manifestFile) { sc.Scenarios[0].ExpectedPacketRisk = "MEDIUM" }, "expected packet risk"},
 		{"unknown expected task status", func(sc *scenarioFile, _ *manifestFile) { sc.Scenarios[0].ExpectedTaskStatus = "done" }, "expected task status"},
 		{"must_not_pass with expected PASS", func(sc *scenarioFile, _ *manifestFile) { sc.Scenarios[0].MustNotPass = true }, "must_not_pass"},
+		{"multiple mutation hooks", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].ReviewerMutatesWorktree = true
+			sc.Scenarios[0].ReportOnlyMutatesWorktree = true
+		}, "multiple mutation hooks"},
+		{"report-only mutation without fail-closed terminal", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].ReportOnlyMutatesWorktree = true
+		}, "must expect fail-closed NEEDS_SOL_REVIEW"},
+		{"empty expected output contains", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].ExpectedOutputContains = []string{""}
+		}, "empty expected_output_contains"},
 		{"step count mismatch", func(sc *scenarioFile, _ *manifestFile) {
 			sc.Scenarios[0].ExpectedModels = append(sc.Scenarios[0].ExpectedModels, "sonnet")
 		}, "count mismatch"},
@@ -719,7 +749,7 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 	buf := &bytes.Buffer{}
 	w.output = buf
 	var mutationRepoRoot string
-	if doc.ReviewerMutatesWorktree {
+	if doc.ReviewerMutatesWorktree || doc.ReportOnlyMutatesWorktree {
 		mutationRepoRoot = initMutationRepo(t)
 		mr := &mutatingRunner{
 			repoRoot: mutationRepoRoot,
@@ -727,6 +757,9 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 			mutate: func(root string) error {
 				return os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("mutated\n"), 0o644)
 			},
+		}
+		if doc.ReportOnlyMutatesWorktree {
+			mr.mutatePhase = "worker-report-only-1"
 		}
 		w.runner = mr
 		w.config.RepoRoot = mutationRepoRoot
@@ -771,12 +804,12 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 		t.Fatalf("unsupported entry %q for scenario %s", doc.Entry, doc.ID)
 	}
 
-	if doc.ReviewerMutatesWorktree {
+	if doc.ReviewerMutatesWorktree || doc.ReportOnlyMutatesWorktree {
 		mr := w.runner.(*mutatingRunner)
 		r.prompts = mr.prompts
 		r.models = mr.models
 		if content, err := os.ReadFile(filepath.Join(mutationRepoRoot, "tracked.txt")); err != nil || string(content) != "mutated\n" {
-			t.Fatalf("reviewer mutationが保持されていません: %q %v", content, err)
+			t.Fatalf("mutation hook対象呼出でrepositoryが変更されていません: %q %v", content, err)
 		}
 	}
 	if len(r.prompts) == 0 && doc.ExpectedProbeCount == 0 {
@@ -857,6 +890,11 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 		}
 		if pkt.Risk() != doc.ExpectedPacketRisk {
 			t.Fatalf("packet risk = %q want %q", pkt.Risk(), doc.ExpectedPacketRisk)
+		}
+		for _, want := range doc.ExpectedOutputContains {
+			if !strings.Contains(buf.String(), want) {
+				t.Fatalf("wrapper output does not contain %q:\n%s", want, buf.String())
+			}
 		}
 		if doc.MustNotPass && pkt.Status() == "PASS" {
 			t.Fatalf("must_not_pass scenario ended in PASS")
