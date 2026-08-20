@@ -42,6 +42,10 @@ type scenarioArtifact struct {
 
 const scenarioArtifactDirToken = "{{ARTIFACT_DIR}}"
 
+// telemetryClockInjectedStartはscenario終端後の全telemetry record時刻が注入fake clockの
+// 開始時刻と一致することを期待するexpected_telemetry_clock値。
+const telemetryClockInjectedStart = "injected-start"
+
 type scenarioUsage struct {
 	InputTokens  int64 `json:"input_tokens,omitempty"`
 	OutputTokens int64 `json:"output_tokens,omitempty"`
@@ -124,6 +128,10 @@ type scenarioDoc struct {
 	ExpectedStats *scenarioStats `json:"expected_stats,omitempty"`
 	// ExpectedTelemetryは終端後のJSONL telemetryの種別別記録数とtoken/costの期待値。
 	ExpectedTelemetry *scenarioTelemetry `json:"expected_telemetry,omitempty"`
+	// ExpectedTelemetryClockは終端後の全telemetry record時刻・durationが注入fake clockの
+	// 開始時刻だけから導出されていることを検証する。production codeへwall clock取得が
+	// 再導入されるとrecord時刻が実時間へ分岐し、scripted packet終端期待とは独立に失敗する。
+	ExpectedTelemetryClock string `json:"expected_telemetry_clock,omitempty"`
 	// ExpectedCheckpointは終端時のresume checkpoint状態(none/rate-limited/provider-unavailable)。
 	ExpectedCheckpoint string `json:"expected_checkpoint,omitempty"`
 	// ExpectedProviderClassificationはprovider-unavailable停止時のcheckpoint分類期待値。
@@ -272,6 +280,13 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 		}
 		if s.SleepAdvanceMinutes < 0 {
 			return fmt.Errorf("scenario %s negative sleep_advance_minutes", s.ID)
+		}
+		knownTelemetryClock := map[string]bool{"": true, telemetryClockInjectedStart: true}
+		if !knownTelemetryClock[s.ExpectedTelemetryClock] {
+			return fmt.Errorf("scenario %s unknown expected telemetry clock %q", s.ID, s.ExpectedTelemetryClock)
+		}
+		if s.ExpectedTelemetryClock == telemetryClockInjectedStart && s.SleepAdvanceMinutes > 0 {
+			return fmt.Errorf("scenario %s injected-start telemetry clock conflicts with sleep_advance_minutes", s.ID)
 		}
 		if s.ExpectedProviderClassification != "" && s.ExpectedCheckpoint != "provider-unavailable" {
 			return fmt.Errorf("scenario %s expected_provider_classification without provider-unavailable checkpoint", s.ID)
@@ -571,6 +586,13 @@ func TestScenarioCorpusContractRejectsInvalid(t *testing.T) {
 		{"negative sleep advance", func(sc *scenarioFile, _ *manifestFile) {
 			sc.Scenarios[0].SleepAdvanceMinutes = -1
 		}, "negative sleep_advance_minutes"},
+		{"unknown expected telemetry clock", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].ExpectedTelemetryClock = "wall"
+		}, "unknown expected telemetry clock"},
+		{"telemetry clock with sleep advance", func(sc *scenarioFile, _ *manifestFile) {
+			sc.Scenarios[0].ExpectedTelemetryClock = telemetryClockInjectedStart
+			sc.Scenarios[0].SleepAdvanceMinutes = 90
+		}, "conflicts with sleep_advance_minutes"},
 		{"classification without unavailable checkpoint", func(sc *scenarioFile, _ *manifestFile) {
 			sc.Scenarios[0].ExpectedProviderClassification = "probe-contract"
 		}, "without provider-unavailable checkpoint"},
@@ -869,6 +891,11 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 	if doc.ExpectedTelemetry != nil {
 		verifyScenarioTelemetry(t, st, *doc.ExpectedTelemetry)
 	}
+	if doc.ExpectedTelemetryClock == telemetryClockInjectedStart {
+		if err := checkTelemetryClock(taskLogs(t, st)); err != nil {
+			t.Fatalf("scenario %s telemetry clock: %v", doc.ID, err)
+		}
+	}
 }
 
 // verifyScenarioStatsはtask/probe呼出数の加法整合性(total = task + probe)を検証する。
@@ -931,6 +958,24 @@ func verifyScenarioTelemetry(t *testing.T, st *state.StateStore, want scenarioTe
 	}
 }
 
+// checkTelemetryClockは全telemetry recordの時刻とdurationが注入fake clockだけから導出
+// されていることを検証する。sleepでclockを進めないscenarioでは全recordが開始時刻に一致し、
+// workflow production codeへ直接wall clock取得が再導入されると実時間へ分岐したrecordで失敗する。
+func checkTelemetryClock(logs []state.ModelCallLog) error {
+	if len(logs) == 0 {
+		return errors.New("telemetry recordが無いためclock検証が空で通過")
+	}
+	for i, l := range logs {
+		if l.StartedAt != testFixedTime || l.CompletedAt != testFixedTime {
+			return fmt.Errorf("record %d (%s %s)時刻 = %s/%s want %s: wall clock取得の再導入", i, l.CallType, l.Phase, l.StartedAt, l.CompletedAt, testFixedTime)
+		}
+		if l.WallDurationMS != 0 {
+			return fmt.Errorf("record %d (%s %s)wall duration = %d: wall clock由来のduration", i, l.CallType, l.Phase, l.WallDurationMS)
+		}
+	}
+	return nil
+}
+
 func TestScenarioCorpusDrivenThroughProductionGate(t *testing.T) {
 	sc, mf := loadCorpus(t)
 	if err := validateCorpus(sc, mf); err != nil {
@@ -943,6 +988,48 @@ func TestScenarioCorpusDrivenThroughProductionGate(t *testing.T) {
 		doc := doc
 		t.Run(doc.ID, func(t *testing.T) {
 			runScenario(t, doc)
+		})
+	}
+}
+
+// TestTelemetryClockCheckRejectsWallClockRecordsはclock検証がwall clock由来のrecordを
+// 実際に拒否することを確認する。空recordでの無条件通過も拒否する。
+func TestTelemetryClockCheckRejectsWallClockRecords(t *testing.T) {
+	injected := state.ModelCallLog{CallType: state.CallTypeTask, Phase: "worker-new", StartedAt: testFixedTime, CompletedAt: testFixedTime}
+	if err := checkTelemetryClock([]state.ModelCallLog{injected}); err != nil {
+		t.Fatalf("注入clock由来recordが拒否されました: %v", err)
+	}
+	wallNow := time.Now().UTC()
+	cases := []struct {
+		name string
+		logs []state.ModelCallLog
+		want string
+	}{
+		{"wall clock timestamps", []state.ModelCallLog{{
+			CallType:    state.CallTypeTask,
+			Phase:       "worker-new",
+			StartedAt:   wallNow,
+			CompletedAt: wallNow,
+		}}, "wall clock取得の再導入"},
+		{"wall clock duration", []state.ModelCallLog{injected, {
+			CallType:       state.CallTypeTask,
+			Phase:          "review",
+			StartedAt:      testFixedTime,
+			CompletedAt:    testFixedTime,
+			WallDurationMS: wallNow.Sub(testFixedTime).Milliseconds(),
+		}}, "wall clock由来のduration"},
+		{"no records", nil, "clock検証が空で通過"},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			err := checkTelemetryClock(c.logs)
+			if err == nil {
+				t.Fatal("wall clock由来recordが検出されません")
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("err = %q want substring %q", err.Error(), c.want)
+			}
 		})
 	}
 }

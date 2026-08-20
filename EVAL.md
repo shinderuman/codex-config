@@ -84,6 +84,13 @@
 - stats mirrorまたはtelemetryが破損・書き込み不能でも通常workflowとresetを継続し、warningを出す。
 
 
+## workflow telemetry clock
+
+- workflowのtimestamp/durationは`NewWorkflow`のnow注入seamだけから供給する。production source guard(`internal/workflow/clock_test.go`)がworkflow package production fileへの`time.Now()`・`time.Since()`等の直接wall clock取得と`ModTime()`利用を禁止し、initial/recovery/probe/resume各経路のfake-clock testが時刻・durationの導出を固定する。`d9ca442`で完了済みのproduction契約を本corpus項目で再実装しない。
+- scenario corpus(`workflow-clock-telemetry-follows-injected-clock`)は、scripted packet終端検証に加えて`ExecuteNewTask`全経路のtelemetry record時刻・durationが注入fake clockだけから導出されることを検証する。worker/reviewerがworkflow production codeへ直接wall clock取得を再導入したcaseは、期待packetを返すscripted終端ではなくこのrecord時刻検証で失敗する。検証自身の空通過・wall clock由来recordの受理を拒否するnegative testと、corpus/manifestから当該scenarioが削除された場合へ失敗するpin testが保持を固定する。sleepでclockを進めるscenarioとの組み合わせはcorpus契約検証で拒否する。
+- 当該scenarioはinternal workflow production変更としてself-protection HIGH昇格の`NEEDS_SOL_REVIEW`終端を持つ。manifest hash pin変更時は該当scenarioの期待結果を現物へ再照合する。
+
+
 ## 計画file bootstrap
 
 - repository rootの`AGENTS.md`は、`IMPLEMENTATION_PLAN.local.md`が存在する場合だけ作業開始・再開前に必ず読み、未完了作業と進行状態の唯一の正として扱い、存在しない場合は推測・復元・自動生成せず通常のrepository状態から作業する規則を持つ。

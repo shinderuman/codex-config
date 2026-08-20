@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "prompt/instruction変更の品質gateとして、fake runnerが返すpacket列に対するproduction workflow/prompt/gateの終端検証を行うscenario corpus。各scenarioはUSER_REQUEST・scripted packet列・期待model/routing/terminalを持ちproduction経路へ入力し、request/MODE伝達・risk/model routing・FIX_REQUIRED/NEEDS_SOL_REVIEW/NEEDS_SOL_DECISION終端・risk floor/self-protectionによるPASS拒否・NEEDS_SOL_REVIEWのTARGETS契約・FIX_REQUIREDのTARGETS: PACKET報告再出力分岐を決定論検証する。manifest.jsonは根拠instruction fileのSHA-256を固定し内容変更でhash mismatchによりtestを失敗させ影響scenarioの再確認を強制する。永続状態バグそのものの自動検出・modelの規則遵守の検証は行わず後続固定Evalの対象。install_smoke.shの配置grepとは役割を分ける。live model・networkは呼ばない。feasibility-gate-*はwrapperのSTATUS/risk終端検証例に限定し、親Codexがfeasibility-gate.mdを読み委譲・受領を制御する行動の証明ではない。親orchestration行動の固定Evalは未実行で、EVAL.mdの完了条件を満たすまで完了扱いにしない。task-lifecycle-*はwrapperの局所終端例への終端検証に限定し、親Codexが局所終端後に親依頼の未解決作業を再評価し同一taskで継続する行動の証明ではない。failure-evidence-*はwrapperのartifact packet/終端例への検証に限定し、親Codexが委譲前にevidence・sanitization・retention条件を構成し受理時に必要範囲だけ確認する行動の証明ではない。escaped-cause-layer-*はwrapperの層分類・対策方向packetの終端検証例に限定し、親Codexが一次証拠から原因層を分類する行動の証明ではない。",
+  "description": "prompt/instruction変更の品質gateとして、fake runnerが返すpacket列に対するproduction workflow/prompt/gateの終端検証を行うscenario corpus。各scenarioはUSER_REQUEST・scripted packet列・期待model/routing/terminalを持ちproduction経路へ入力し、request/MODE伝達・risk/model routing・FIX_REQUIRED/NEEDS_SOL_REVIEW/NEEDS_SOL_DECISION終端・risk floor/self-protectionによるPASS拒否・NEEDS_SOL_REVIEWのTARGETS契約・FIX_REQUIREDのTARGETS: PACKET報告再出力分岐を決定論検証する。manifest.jsonは根拠instruction fileのSHA-256を固定し内容変更でhash mismatchによりtestを失敗させ影響scenarioの再確認を強制する。永続状態バグそのものの自動検出・modelの規則遵守の検証は行わず後続固定Evalの対象。install_smoke.shの配置grepとは役割を分ける。live model・networkは呼ばない。feasibility-gate-*はwrapperのSTATUS/risk終端検証例に限定し、親Codexがfeasibility-gate.mdを読み委譲・受領を制御する行動の証明ではない。親orchestration行動の固定Evalは未実行で、EVAL.mdの完了条件を満たすまで完了扱いにしない。task-lifecycle-*はwrapperの局所終端例への終端検証に限定し、親Codexが局所終端後に親依頼の未解決作業を再評価し同一taskで継続する行動の証明ではない。failure-evidence-*はwrapperのartifact packet/終端例への検証に限定し、親Codexが委譲前にevidence・sanitization・retention条件を構成し受理時に必要範囲だけ確認する行動の証明ではない。escaped-cause-layer-*はwrapperの層分類・対策方向packetの終端検証例に限定し、親Codexが一次証拠から原因層を分類する行動の証明ではない。workflow-clock-*はscripted packet終端検証に加えtelemetry record時刻・durationの注入clock由来をExecuteNewTask全経路へ課し、workflow production codeへの直接wall clock取得の再導入を終端期待と独立に失敗させる。",
   "scenarios": [
     {
       "id": "state-residual-after-removal",
@@ -2228,6 +2228,28 @@
       "expected_packet_risk": "LOW",
       "expected_task_status": "complete",
       "must_not_pass": false
+    },
+    {
+      "id": "workflow-clock-telemetry-follows-injected-clock",
+      "behavior": "workflow production codeへtime.Now()等の直接wall clock取得を再導入するとtelemetry record時刻が注入clockから導出されなくなり、scripted packet終端期待とは独立なcorpus側の時刻・duration検証が失敗する。internal workflow変更のself-protection HIGH昇格終端を併せ持つ",
+      "request": "workflowの呼出telemetry時刻とdurationを注入clockへ統一する",
+      "entry": "new_task",
+      "instruction_files": [
+        "codex/glm-worker/prompts/WORKER.md",
+        "codex/glm-worker/prompts/REVIEWER.md"
+      ],
+      "changed_paths": ["glm-worker/internal/workflow/workflow.go"],
+      "runner_steps": [
+        {"lines": ["STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: telemetry時刻とdurationを注入clockへ統一した", "REQUIREMENT_COVERAGE: covered", "TESTS: fake-clock経路testとsource guardがpass", "UNVERIFIED: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: PASS", "RISK: LOW", "SUMMARY: telemetry時刻の注入clock統一を確認", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: diffとtelemetry記録を確認", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"]},
+        {"lines": ["STATUS: NEEDS_SOL_REVIEW", "RISK: HIGH", "SUMMARY: internal workflow変更の最終確認", "REQUIREMENT_COVERAGE: covered", "INVARIANTS: preserved", "TEST_EVIDENCE: risk floorでreviewer PASSを却下", "ISSUES: telemetry時刻の注入clock統一維持をSol確認する", "RESIDUAL_RISK: wall clock再導入でtelemetryが実時間へ分岐する恐れ", "TARGETS: glm-worker/internal/workflow/workflow.go", "ARTIFACTS: none", "SOL_QUESTION: telemetry時刻の注入clock統一を採否するか"]}
+      ],
+      "expected_models": ["opus", "sonnet", "sonnet"],
+      "expected_packet_status": "NEEDS_SOL_REVIEW",
+      "expected_packet_risk": "HIGH",
+      "expected_task_status": "waiting-sol-review",
+      "must_not_pass": true,
+      "expected_telemetry_clock": "injected-start"
     }
   ]
 }
