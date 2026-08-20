@@ -158,8 +158,8 @@ func run(
 }
 
 // Executeはcmdをcfg配下で実行する。runner/workflowはrf経由で注入可能で、
-// --watch・--timeline・--convergenceはstateへ書き込まないread-only参照、--status/--statsはロック取得前に、
-// それ以外はプロセス間ロック後に処理する。
+// --watch・--timeline・--convergence・--eval-abはstateへ書き込まないread-only参照、
+// --status/--statsはロック取得前に、それ以外はプロセス間ロック後に処理する。
 func Execute(cmd Command, cfg config.AppConfig, rf RunnerFactory, stdout, stderr io.Writer) error {
 	if cmd.Mode == ModeWatch {
 		return printWatch(state.AttachStateStore(cfg), stdout, defaultWatchFollowInterval, nil)
@@ -169,6 +169,9 @@ func Execute(cmd Command, cfg config.AppConfig, rf RunnerFactory, stdout, stderr
 	}
 	if cmd.Mode == ModeConvergence {
 		return printConvergence(state.AttachStateStore(cfg), cmd.Payload, stdout)
+	}
+	if cmd.Mode == ModeEvalAB {
+		return printEvalAB(state.AttachStateStore(cfg), cmd.Payload, stdout)
 	}
 
 	st, err := state.NewStateStore(cfg)
@@ -183,8 +186,6 @@ func Execute(cmd Command, cfg config.AppConfig, rf RunnerFactory, stdout, stderr
 		return printStats(st, stdout)
 	case ModeVerifyAutoResume:
 		return printVerifyAutoResume(cmd, cfg, stdout)
-	case ModeEvalAB:
-		return printEvalAB(st, cmd.Payload, stdout)
 	}
 
 	lock, err := AcquireRepoLock(st.LockPath())

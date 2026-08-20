@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/abeval"
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/config"
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/workflow"
 )
 
 func evalABTestConfig(t *testing.T) config.AppConfig {
@@ -273,5 +276,125 @@ func TestExecuteEvalABRejectsRunDirWithUnknownField(t *testing.T) {
 	}
 	if stdout.Len() > 0 {
 		t.Fatalf("strict decode失敗時に比較結果を出力していません: %s", stdout.String())
+	}
+}
+
+// unusedRunnerFactoryは--eval-abがrunner/workflow構築へ到達しないことを
+// production entrypoint側で検出するための呼出記録付きfactory。
+func unusedRunnerFactory(calls *int) RunnerFactory {
+	return func(_ config.AppConfig, _ *state.StateStore) workflow.ModelRunner {
+		*calls++
+		return nil
+	}
+}
+
+func TestExecuteEvalABDoesNotCreateStateDirectory(t *testing.T) {
+	cfg := evalABTestConfig(t)
+	spec := evalABSpec()
+	dir := writeEvalABRunDir(t, spec, evalABDirectRecord(spec), evalABOrchestratedRecord(spec))
+	stateDir := filepath.Join(cfg.StateBase, cfg.RepoHash)
+	runnerCalls := 0
+	rf := unusedRunnerFactory(&runnerCalls)
+
+	if _, err := os.Stat(stateDir); !os.IsNotExist(err) {
+		t.Fatalf("前提違反: stateディレクトリが既に存在します: %s", stateDir)
+	}
+
+	err := Execute(Command{Mode: ModeEvalAB, Payload: dir}, cfg, rf, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "task-ab-1") {
+		t.Fatalf("stats不在taskでfail closedしませんでした: %v", err)
+	}
+	if _, err := os.Stat(stateDir); !os.IsNotExist(err) {
+		t.Fatalf("実行後にstateディレクトリが作成されました: %s", stateDir)
+	}
+
+	missingDir := Execute(Command{Mode: ModeEvalAB, Payload: filepath.Join(t.TempDir(), "absent")}, cfg, rf, &bytes.Buffer{}, &bytes.Buffer{})
+	if missingDir == nil {
+		t.Fatal("存在しないrun dirが受理されました")
+	}
+	if _, err := os.Stat(stateDir); !os.IsNotExist(err) {
+		t.Fatalf("run dir検証失敗時にもstateディレクトリが作成されました: %s", stateDir)
+	}
+	if runnerCalls != 0 {
+		t.Fatalf("--eval-abでrunnerが%d回構築されました", runnerCalls)
+	}
+}
+
+func listStateFiles(t *testing.T, root string) []string {
+	t.Helper()
+	var paths []string
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		paths = append(paths, rel)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func TestExecuteEvalABKeepsExistingStateUnchanged(t *testing.T) {
+	cfg := evalABTestConfig(t)
+	spec := evalABSpec()
+	dir := writeEvalABRunDir(t, spec, evalABDirectRecord(spec), evalABOrchestratedRecord(spec))
+	writeABStatsArchive(t, cfg, abFakeTaskStats("task-ab-1"))
+	runnerCalls := 0
+
+	// writeFileAtomicはtemp+renameで必ずmtimeを更新するため、
+	// repo-rootを過去の時刻へ固定すれば再書込みはmtime変化として検出できる。
+	repoRootPath := filepath.Join(cfg.StateBase, cfg.RepoHash, "repo-root")
+	past := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(repoRootPath, past, past); err != nil {
+		t.Fatal(err)
+	}
+	beforeContent, err := os.ReadFile(repoRootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeInfo, err := os.Stat(repoRootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeFiles := listStateFiles(t, filepath.Join(cfg.StateBase, cfg.RepoHash))
+
+	var stdout bytes.Buffer
+	if err := Execute(Command{Mode: ModeEvalAB, Payload: dir}, cfg, unusedRunnerFactory(&runnerCalls), &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "CODEX_REDUCTION:") {
+		t.Fatalf("比較結果が出力されていません: %s", stdout.String())
+	}
+
+	afterContent, err := os.ReadFile(repoRootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterInfo, err := os.Stat(repoRootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterContent) != string(beforeContent) {
+		t.Fatalf("repo-rootの内容が更新されました: %q -> %q", string(beforeContent), string(afterContent))
+	}
+	if !afterInfo.ModTime().Equal(beforeInfo.ModTime()) {
+		t.Fatalf("repo-rootのmtimeが更新されました: %s -> %s", beforeInfo.ModTime(), afterInfo.ModTime())
+	}
+	afterFiles := listStateFiles(t, filepath.Join(cfg.StateBase, cfg.RepoHash))
+	if !slices.Equal(afterFiles, beforeFiles) {
+		t.Fatalf("stateファイル構成が変化しました: %v -> %v", beforeFiles, afterFiles)
+	}
+	if runnerCalls != 0 {
+		t.Fatalf("--eval-abでrunnerが%d回構築されました", runnerCalls)
 	}
 }
