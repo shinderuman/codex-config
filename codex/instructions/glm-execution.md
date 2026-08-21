@@ -51,6 +51,16 @@
 - 完了時はユーザーの追加入力を待たず、packet処理と可能な次工程を進める。ユーザーの判断・追加情報・許可が本当に必要な場合だけ停止する。
 - packet受理・個別commit・install完了は局所終端であり、親USER_REQUESTの完了か次の継続操作かは`~/.codex/instructions/task-lifecycle.md`を読んで判断する。
 
+## 親tool orchestrationのterminal payload単一描画
+
+- 実運用で3回再現したterminal payload二面表示の原因層はglm-worker内部emitではなく親Codex orchestrationである。glm-workerの主呼出は受理したterminal resultをstdoutへ1回だけ出力する。Codex desktopがbackground `functions.exec`の完了outputと後続`functions.wait`のresult cardで同じraw terminal payloadを二面描画するため、境界はcaller側で解消する。structured JSON移行後も結果object全体が同じ境界で二度描画され得る前提を維持し、JSON化を解決根拠にしない。
+- 単一postconditionは「1 accepted terminal resultにつき、親tool orchestration全体でユーザー可視payloadは1回」である。repo内emitの再調査・原因境界の特定だけでこの症状を解消扱いしない。
+- 長時間cell(主`glm-worker`呼出)では、`functions.exec`のorchestration内でnested `exec_command`・`write_stdin`の各outputを変数へ蓄積し、raw stdout・packetをtext・notify・image等の即時描画経路へ一切出さない。
+- cell終端では、蓄積したraw terminal payloadをFunctionsのstoreへtask固有keyで保存し、cellの返り値は短いcaptured marker(`GLM_TERMINAL_CAPTURED <key>`)だけにする。
+- `functions.wait`でcell終端を受け取った後、別の短い同期`functions.exec`でstoreのload(key)を読み、text(raw)として1回だけ親へ渡す。この同期callで追加AI call・追加のglm-worker実行を行わない。
+- background cellの完了outputと`functions.wait`の双方へ同じraw payloadを流す運用は禁止する。repo側のPACKET/JSON blind dedupeと正当な別terminal resultの抑止も行わない。
+- 境界検証は追加AI callなしのdelayed markerと実`glm-worker` terminal resultを同じbackground exec→wait→同期取得境界で行う。2026-08-21の本契約適用taskで、raw payloadがlong cellとwaitへ表示されず`GLM_TERMINAL_CAPTURED` markerだけになり、同期load後にterminal result全文が1回だけユーザー可視表示されたことを実機確認済みである。将来のCodex desktop変更で同一境界の二面表示が再発した場合は本契約の手順へ戻す。
+
 ## `STATUS: RATE_LIMITED`
 
 - `LIMIT: ZAI_GLM_CODING_PLAN_5H`は正常な一時停止であり、`WORKER_ERROR`にしない。`RESET_AT_CST`は中国標準時（UTC+8）。

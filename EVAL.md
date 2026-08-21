@@ -56,7 +56,7 @@
 - 結果の表示は6 KiB・1 field 1536 bytes以内・各field改行なし。STATUS別必須field・RISK整合性・TARGETS予約値`PACKET`・artifact実在検証はwrapper側の意味検証(`packet.ValidateWorkerResult`/`ValidateReviewerResult`)が強制する。
 - 意味検証不合格時は同一sessionへ作業を再実行させない結果の修正再出力を1回だけ依頼する。schemaが保証する構造(status enum・必須field・型)への違反・`structured_output`欠損・retry枯渇(`error_max_structured_output_retries`)は修正再依頼なしのfail closedとし、transient recoveryへ入れない。
 - 構造保証がschemaへ移ったことで旧marker構造gate(複数packet・marker対応破綻の再圧縮)は廃止した。LLM instructionだけの保証を機械contract扱いしていた点がescaped reviewの原因のため、schema適合と意味検証のwrapper強制scenario(corpus `structured-schema-mismatch-fails-closed`・`high-sol-review-targets-none-corrects-to-concrete-targets`)を欠落させない。
-- wrapperの最終stdoutは受理した結果だけを1回出力する。修正再依頼・risk floor再出力・resume前の旧応答を採用結果へ連結・再解析せず、model応答の受理は毎回新規の出力file経由でのみ行う。caller側echoの二重表示はrepo外のため検証対象外。
+- wrapperの最終stdoutは受理した結果だけを1回出力する。修正再依頼・risk floor再出力・resume前の旧応答を採用結果へ連結・再解析せず、model応答の受理は毎回新規の出力file経由でのみ行う。caller側で親tool orchestrationが同一payloadを二面描画する境界をrepo外として検証対象から除外しない。「親tool orchestrationのterminal payload単一描画」節の契約で検証する。
 - packetへ収まらない正確な成果物はtask別artifactへ保存し、packetではtask専用dir配下に実在する通常ファイルの絶対パスだけを返す。artifact dir外・欠落・directory・symlinkを拒否し、所有者限定権限を検証する。
 - worker errorの診断tailは6 KiBを超えない。
 
@@ -179,6 +179,19 @@
 - scenario corpus(`escaped-cause-layer-*`)はwrapperのSTATUS/risk終端検証例に限定する。親orchestration失敗の層分類・対策方向提案の`NEEDS_SOL_DECISION`終端とPASS完結拒否(`escaped-cause-layer-parent-orchestration-cause-returns-to-sol`)、`glm-worker`内部pipeline失敗確定後の直接修正が`NEEDS_SOL_REVIEW`/HIGHへ至る例(`escaped-cause-layer-worker-pipeline-cause-fix-returns-to-sol-review`)、escaped caseと無関係な通常taskの条件外完遂(`escaped-cause-layer-unrelated-normal-task-completes`)。scripted packet列に対するwrapper終端検証であり、親Codexが分類を行う行動の証明ではない。根拠instructionとして`codex/AGENTS.md`・`codex/instructions/glm-execution.md`・`codex/instructions/escaped-cause-layer.md`の3 fileをmanifest hash pinし、変更時は該当scenarioの期待結果を現物へ再照合する。
 - 親Codex behavioral Evalは未実行の固定Eval caseとする。positive case: escaped bug・escaped review原因分析の委譲前に一次証拠の種別を構成し、受理した層分類に基づき親側原因なら親contract対策を選択してworker/reviewer prompt・個別gate・重複する新対策の追加を拒否する。`glm-worker`内部pipeline失敗なら通常の直接修正pathへ移す。negative case: 通常task・review通過確認へ層分類を要求しない。完了条件: 親Codexの分類判断・委譲内容・対策選択をraw telemetry・task log等の一次証拠で照合できる検証形態が整備されること。live model呼出しを要するためユーザーの明示指示後だけ実行し、完了条件を満たすまでは本項を完了扱いにしない。
 - 本contractの親behavioral Eval入力・期待判断とproduction guidance/routingの因果は、文面の並記だけに依存させない。`TestEscapedCauseLayerContractWiring`がEVAL.md本節のpositive/negative caseと期待判断を`escaped-cause-layer.md`の適用条件・層定義・対策層整合の契約文へ直接突き合わせて検証する。scripted scenarioの期待終端だけを自己充足的に採用しない方針の本体適用である。
+
+
+## 親tool orchestrationのterminal payload単一描画
+
+- 実運用で3回再現したterminal payload二面表示の原因層は、`glm-worker`内部emitではなく親Codex orchestration失敗である。`glm-worker`の主呼出は受理したterminal resultをstdoutへ1回だけ出力しており、repo内の二重emitは0件に確認済み。Codex desktopがbackground `functions.exec`の完了outputと後続`functions.wait`のresult cardで同じraw terminal payloadを二面描画する境界が直接原因である。
+- 3回の報告を通過した上位原因は、`EVAL.md`がcaller側echoの二重表示をrepo外として検証対象から除外し、親behavioral Evalも未実行の文書contractに留まったため、親Codexが完了条件を「ユーザー可視payload 1回」から「repo内emit調査・原因境界特定」へ狭めても機械的に拒否しなかったことである。このcaller除外は撤回済みであり、caller側の二重描画をrepo外として検証対象から除外し直さない。
+- 単一postconditionは「1 accepted terminal resultにつき、親tool orchestration全体でユーザー可視payloadは1回」だけとする。repo内emitの再調査・原因境界の特定だけで本項を完了扱いしない。
+- production caller手順は`codex/instructions/glm-execution.md`のterminal payload単一描画契約で固定する。長時間cellではraw stdout・packetをtext・notify・image等の即時描画経路へ出さず内部store(task固有key)へ蓄積し、cell終端後の短い同期callでのloadで1回だけ親へ渡す。
+- 禁止: 同一raw payloadをbackground cellの完了outputと`functions.wait`双方へ流す実装・運用、repo側PACKET/JSON blind dedupe、正当な別terminal resultの抑止。structured JSON object全体も同じ境界で二度描画され得る前提を維持し、JSON化を解決根拠にしない。
+- fixed Eval(`internal/app/terminal_payload_boundary_test.go`の`TestTerminalPayloadBoundarySingleRender`)は、長時間cell内のraw非描画・内部storeへのtask固有key保存・cell返り値のcaptured marker化・短い同期load 1回というtool orchestration semanticsをmodel化し、追加AI callなしのdelayed markerと実`glm-worker` binaryのterminal resultを同じbackground exec→wait→同期取得境界で検証する。契約手順では親が描画する全経路のaggregate内に該当payloadが1回だけ現れ、rawをcell返り値へ流す旧形では2回現れることを同じ境界で検出する。実`glm-worker` terminal resultはfake claude binary固定応答で追加AI callなしに取得する。
+- wiring test `TestTerminalPayloadSingleRenderContractWiring`(`internal/workflow`)は、EVAL.md本節の期待判断と`glm-execution.md`のcaller契約文を直接突き合わせて検証し、撤回済みcaller除外文とfile直接読出し手順の再混入とworker/reviewer promptへのchecklist追加を拒否する。
+- 親production callerのlive positive Evalは2026-08-21に実施済みである。本契約を適用したtask自身のstructured terminal resultが同じbackground `functions.exec`→`functions.wait`→同期load境界で実行され、raw payloadはlong cellとwait result cardへ表示されず`GLM_TERMINAL_CAPTURED` markerだけが表示され、同期load後にterminal result全文が1回だけユーザー可視表示された。fixed Evalと本live観測を本項の完了証拠とする。negative case: 短時間cellが同期`functions.exec`で即時完了する通常呼出へ、内部storeと同期load手順を形式的に適用しない。
+- 境界の残余risk: fixed Eval・wiring testはcaller契約と境界検出の決定論検証であり、実機の単一描画確認は上記live観測が担う。将来のCodex desktop描画実装変更で同一境界の二面表示が再発した場合は本契約手順へ戻して再検証する。親behavioral Evalの代替として`terminal-payload-*`scenarioをcorpusへ追加せず、repo側dedupe実装で代替しない。worker/reviewer promptへ本契約のchecklistを追加しない。
 
 
 ## Codex Direct対orchestrated A/B基盤
