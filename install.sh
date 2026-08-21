@@ -203,14 +203,16 @@ build_glm_worker() {
 preflight() {
     build_dir=$(mktemp -d "${TMPDIR:-/tmp}/codex-worker-orchestrator-preflight.XXXXXX")
 
+    # if ! (...)内ではerrexitが無視され、subshell全体の成否は最後のcommandだけで決まる。
+    # 失敗を後続の成功で上書きさせないため、各commandは失敗時に明示的に非0でsubshellを抜ける。
     if ! (
-        cd "$repo_root/glm-worker"
-        go test ./...
-        go build -buildvcs=false -trimpath -o "$build_dir/glm-worker" ./cmd/glm-worker
+        cd "$repo_root/glm-worker" || exit
+        go test ./... || exit
+        go build -buildvcs=false -trimpath -o "$build_dir/glm-worker" ./cmd/glm-worker || exit
 
-        cd "$repo_root/tools/merge-json"
-        go test ./...
-        go build -buildvcs=false -trimpath -o "$build_dir/merge-json" .
+        cd "$repo_root/tools/merge-json" || exit
+        go test ./... || exit
+        go build -buildvcs=false -trimpath -o "$build_dir/merge-json" . || exit
     ); then
         rm -rf "$build_dir"
         return 1
@@ -270,7 +272,7 @@ require awk
 require install
 
 printf '%s\n' 'preflight: validating source before applying managed files'
-preflight
+preflight || exit $?
 build_glm_worker
 install_codex_files
 merge_codex_config

@@ -16,10 +16,10 @@ GLM委譲率、PACKETサイズ、GLM token、Solへ戻した回数等は代理�
 
 ## 現在作業中
 
-- Task: `install.sh` preflightが途中のtest/build failure後も配置を続行するfail-openを修正し、watch本配置を再検証する
-- 発見経路: watch本配置時、tracked `IMPLEMENTATION_HISTORY.md`未分類でworkflow testが失敗した一方、preflight subshellは`if ! (...)`文脈で後続commandへ進み、最後の成功をsubshell成功としてbinary/instruction配置まで続行した
-- 前段完了: plan/history両surfaceの親Codex専有・self-protection/model-call前後guardと、after-read failureを含む実行済みTask Work Call telemetry exact-onceを独立review・Sol品質ゲート後にcommit済み
-- 次の操作: installer preflightの最初の失敗を確実に伝播し、managed file/binaryへ触れず停止するcontractを独立taskで実装・review・commitする。全test通過後に再install・binary/instruction一致・実運用watch終了を確認する
+- Task: `ba2414b` BM25 repo-search coreのfingerprint domainをproduction Searchの検索/index corpus境界と整合させる
+- 前段完了: watch non-active終端、plan/history親専有guardとTask Work Call telemetry exact-once、installer preflight fail-closedをそれぞれ独立review・Sol品質ゲート後にcommit。本配置preflight成功、本配置binary/instruction byte一致、既存`waiting-sol-review` taskへの実`--watch`が保存済みeventをdrain後`WATCH_EXIT`を出して追加AI callなしでexit 0することを確認済み
+- 原因分類: `glm-worker`内部pipeline/review失敗。repository境界を`enumerateFiles()` helperの局所contractとして確認し、production `Search()`のfingerprint→enumeration→rebuild全体で同じcorpus policyを共有するか確認しなかった
+- 次の操作: nested repo・submodule・default/追加exclude・large file・binary・symlinkを検索/index対象とfreshness無効化対象の責務として整理し、stale cacheを許さずproduction `Search()` testで固定する独立taskを開始する
 
 更新タイミング:
 
@@ -44,8 +44,6 @@ GLMにはcommitさせない。独立review・必要なSol確認・品質ゲー�
 
 ## 未完了（優先順）
 
-- [ ] `install.sh` preflightで途中のtest/build failureが後続commandの成功に上書きされ配置が続行するfail-openを修正し、最初の失敗でmanaged file/binaryへ触れず停止することをtestで固定する
-- [ ] task terminal status後も`glm-worker --watch`が終了せず親Codexが無出力待機を続ける実運用問題を、watch process lifecycleと親completion wait contractの境界で特定・修正する
 - [ ] `ba2414b` BM25 repo-search coreのfalse-completeを修正する。fingerprintとenumeration/rebuildでrepository/corpus policyを共有し、nested repo・submodule・default/追加exclude・large file・binary・symlinkの検索対象外状態とcache freshness影響をproduction `Search()` testで固定する
 - [ ] tracked canonical planのstale-by-oneを解消する。commit-ready→commit→親Codex plan最終同期→同一commit amend等の単純contractを確定し、commit前の虚偽完了とcommit後のobsolete HEADを両方防ぐ。大規模ledgerは追加しない
 - [ ] Codex↔GLM structured output PoCを実施する

@@ -32,13 +32,108 @@ copy_source() {
 run_installer() {
     source_dir=$1
     case_dir=$2
+    installer_path=${3:-}
 
     HOME="$case_dir/home" \
     CODEX_CONFIG_DIR="$case_dir/codex" \
     GLM_WORKER_BIN_DIR="$case_dir/bin" \
     GLM_WORKER_HOME="$case_dir/glm-home" \
     CLAUDE_SETTINGS_FILE="$case_dir/claude/settings.json" \
+    PATH="${installer_path:+$installer_path:}$PATH" \
         "$source_dir/install.sh"
+}
+
+prepare_preflight_failure_case() {
+    source_dir=$1
+    case_dir=$2
+
+    copy_source "$source_dir"
+    # self-protection testはtracked file前提で走るため、空repoではなく
+    # 全fileをindexへ乗せた実運用相当のgit状態を作る。
+    git -C "$source_dir" init -q
+    git -C "$source_dir" add -A
+    chmod 0644 "$source_dir/.githooks/post-merge"
+
+    mkdir -p "$case_dir/codex" "$case_dir/claude"
+    printf '%s\n' 'preflight-sentinel' >"$case_dir/codex/AGENTS.md"
+    printf '%s\n' '{"existing":"keep"}' >"$case_dir/claude/settings.json"
+    cp "$case_dir/claude/settings.json" "$case_dir/claude/original.json"
+}
+
+# 本物のgoへ結果ごと透過しつつ全呼出を記録し、forced_build_packageに一致する
+# 末尾package引数のgo buildだけを失敗させるshimを作る。
+# 失敗段階より後のpreflight commandやbuild_glm_worker/go runの実行有無は
+# この呼出記録で段階ごとに固定する。
+make_go_shim() {
+    shim_dir=$1
+    forced_build_package=$2
+
+    mkdir -p "$shim_dir"
+    real_go=$(command -v go)
+
+    cat >"$shim_dir/go" <<EOF
+#!/bin/sh
+real_go='$real_go'
+log_file='$shim_dir/invocations.log'
+forced_build_package='$forced_build_package'
+
+subcommand=\$1
+for package in "\$@"; do
+    :
+done
+module=\${PWD##*/}
+
+if [ "\$subcommand" = build ] && [ -n "\$forced_build_package" ] && [ "\$package" = "\$forced_build_package" ]; then
+    printf '%s %s forced-fail\n' "\$subcommand" "\$module" >>"\$log_file"
+    printf 'go shim: forced build failure (%s)\n' "\$package" >&2
+    exit 1
+fi
+
+"\$real_go" "\$@"
+status=\$?
+printf '%s %s %s\n' "\$subcommand" "\$module" "\$status" >>"\$log_file"
+exit "\$status"
+EOF
+    chmod +x "$shim_dir/go"
+}
+
+expect_preflight_failure() {
+    label=$1
+    source_dir=$2
+    case_dir=$3
+    shim_dir=$4
+    expected_log=$5
+
+    if run_installer "$source_dir" "$case_dir" "$shim_dir"; then
+        printf '%s\n' "preflight失敗($label)時にinstall.shが成功しました" >&2
+        exit 1
+    fi
+
+    assert_preflight_refused "$source_dir" "$case_dir"
+
+    if ! cmp -s "$shim_dir/invocations.log" "$expected_log"; then
+        printf '%s\n' "preflight失敗($label)時のgo呼出順序が期待と異なります:" >&2
+        cat "$shim_dir/invocations.log" >&2
+        exit 1
+    fi
+}
+
+assert_preflight_refused() {
+    source_dir=$1
+    case_dir=$2
+
+    test "$(sed -n '1p' "$case_dir/codex/AGENTS.md")" = 'preflight-sentinel'
+    test ! -e "$case_dir/bin"
+    test ! -e "$case_dir/codex/config.toml"
+    test ! -e "$case_dir/codex/rules/glm-worker.rules"
+    test ! -e "$case_dir/codex/.codex-config-managed-files"
+    test ! -d "$case_dir/glm-home"
+    cmp -s "$case_dir/claude/settings.json" "$case_dir/claude/original.json"
+    test ! -x "$source_dir/.githooks/post-merge"
+    if git -C "$source_dir" config --local --get core.hooksPath >/dev/null 2>&1; then
+        printf '%s\n' 'preflight失敗時にgit hookを有効化しました' >&2
+        exit 1
+    fi
 }
 
 success_source="$test_root/success-source"
@@ -192,20 +287,81 @@ if ! cmp -s "$upgrade_case/first.json" "$upgrade_case/claude/settings.json"; the
     exit 1
 fi
 
-failure_source="$test_root/failure-source"
-failure_case="$test_root/failure-case"
-copy_source "$failure_source"
-mkdir -p "$failure_case/codex"
-printf '%s\n' 'preflight-sentinel' >"$failure_case/codex/AGENTS.md"
-printf '%s\n' 'this is not valid Go' >>"$failure_source/glm-worker/internal/config/config.go"
+# preflight各段階(glm-worker test/build、merge-json test/build)の失敗は、
+# binary・managed files・Claude settings・git hookなどへの配置前に停止しなければならない。
+# 各caseの期待呼出順序は、失敗段階より後のgo commandが一度も実行されていないことを固定する。
+printf '%s\n' \
+    'test glm-worker 1' \
+    >"$test_root/expected-glm-worker-test-fail.log"
+printf '%s\n' \
+    'test glm-worker 0' \
+    'build glm-worker forced-fail' \
+    >"$test_root/expected-glm-worker-build-fail.log"
+printf '%s\n' \
+    'test glm-worker 0' \
+    'build glm-worker 0' \
+    'test merge-json 1' \
+    >"$test_root/expected-merge-json-test-fail.log"
+printf '%s\n' \
+    'test glm-worker 0' \
+    'build glm-worker 0' \
+    'test merge-json 0' \
+    'build merge-json forced-fail' \
+    >"$test_root/expected-merge-json-build-fail.log"
 
-if run_installer "$failure_source" "$failure_case"; then
-    printf '%s\n' 'preflight失敗時にinstall.shが成功しました' >&2
-    exit 1
-fi
+glm_worker_test_fail_source="$test_root/glm-worker-test-fail-source"
+glm_worker_test_fail_case="$test_root/glm-worker-test-fail-case"
+glm_worker_test_fail_shim="$test_root/glm-worker-test-fail-shim"
+prepare_preflight_failure_case "$glm_worker_test_fail_source" "$glm_worker_test_fail_case"
+make_go_shim "$glm_worker_test_fail_shim" ''
+cat >"$glm_worker_test_fail_source/glm-worker/internal/config/preflight_fail_test.go" <<'EOF'
+package config
 
-test "$(sed -n '1p' "$failure_case/codex/AGENTS.md")" = 'preflight-sentinel'
-test ! -e "$failure_case/bin/glm-worker"
+import "testing"
+
+func TestInstallSmokePreflightFail(t *testing.T) {
+    t.Fatal("install smoke: preflight failure probe")
+}
+EOF
+expect_preflight_failure 'glm-worker test' \
+    "$glm_worker_test_fail_source" "$glm_worker_test_fail_case" \
+    "$glm_worker_test_fail_shim" "$test_root/expected-glm-worker-test-fail.log"
+
+glm_worker_build_fail_source="$test_root/glm-worker-build-fail-source"
+glm_worker_build_fail_case="$test_root/glm-worker-build-fail-case"
+glm_worker_build_fail_shim="$test_root/glm-worker-build-fail-shim"
+prepare_preflight_failure_case "$glm_worker_build_fail_source" "$glm_worker_build_fail_case"
+make_go_shim "$glm_worker_build_fail_shim" './cmd/glm-worker'
+expect_preflight_failure 'glm-worker build' \
+    "$glm_worker_build_fail_source" "$glm_worker_build_fail_case" \
+    "$glm_worker_build_fail_shim" "$test_root/expected-glm-worker-build-fail.log"
+
+merge_json_test_fail_source="$test_root/merge-json-test-fail-source"
+merge_json_test_fail_case="$test_root/merge-json-test-fail-case"
+merge_json_test_fail_shim="$test_root/merge-json-test-fail-shim"
+prepare_preflight_failure_case "$merge_json_test_fail_source" "$merge_json_test_fail_case"
+make_go_shim "$merge_json_test_fail_shim" ''
+cat >"$merge_json_test_fail_source/tools/merge-json/preflight_fail_test.go" <<'EOF'
+package main
+
+import "testing"
+
+func TestInstallSmokePreflightFail(t *testing.T) {
+    t.Fatal("install smoke: preflight failure probe")
+}
+EOF
+expect_preflight_failure 'merge-json test' \
+    "$merge_json_test_fail_source" "$merge_json_test_fail_case" \
+    "$merge_json_test_fail_shim" "$test_root/expected-merge-json-test-fail.log"
+
+merge_json_build_fail_source="$test_root/merge-json-build-fail-source"
+merge_json_build_fail_case="$test_root/merge-json-build-fail-case"
+merge_json_build_fail_shim="$test_root/merge-json-build-fail-shim"
+prepare_preflight_failure_case "$merge_json_build_fail_source" "$merge_json_build_fail_case"
+make_go_shim "$merge_json_build_fail_shim" '.'
+expect_preflight_failure 'merge-json build' \
+    "$merge_json_build_fail_source" "$merge_json_build_fail_case" \
+    "$merge_json_build_fail_shim" "$test_root/expected-merge-json-build-fail.log"
 
 override_source="$test_root/override-source"
 override_case="$test_root/override-case"
