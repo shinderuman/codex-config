@@ -15,6 +15,7 @@ Sol High相当の品質をできるだけ維持しながらCodex / Sol側の実�
 - `IMPLEMENTATION_TASKS/002-plan-final-head-postcondition.md`
 - `IMPLEMENTATION_TASKS/003-targets-element-semantics.md`
 - `IMPLEMENTATION_TASKS/004-self-contained-stdin-pty.md`
+- `IMPLEMENTATION_TASKS/instruction-fixed-context-audit.md`
 - `IMPLEMENTATION_TASKS/005-multi-repository-isolation.md`
 - `IMPLEMENTATION_TASKS/006-codex-facing-compact-result.md`
 - `IMPLEMENTATION_TASKS/007-machine-only-legacy-cleanup.md`
@@ -47,7 +48,7 @@ Sol High相当の品質をできるだけ維持しながらCodex / Sol側の実�
 
 - branch: `main`
 - implementation baseline: `ce86313`
-- metadata boundary: 全未完了taskの新RULES migration後、task固有の補正・evaluation detailをRULESから除去して恒久invariantへ収束。Task 001 checkpointへのproduction code変更なし
+- metadata boundary: 全未完了taskを現RULESへ収束し、Task 004後のinstruction固定context監査taskを追加。Task 001 checkpointへのproduction code変更なし
 - push: 禁止
 
 ## 現在の停止理由
