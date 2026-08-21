@@ -6,7 +6,18 @@ blocked-user-permission
 
 ## Original instruction
 
-session aging実測後まで保留し、compactionとは別論点として扱う。
+````text
+# 14. BLOCKED / USER PERMISSION WAITとして保持するtask
+
+以下はtask fileを作ってよいが、`blocked-user-permission`とし自動開始しない。
+
+---
+
+## Blocked E: session rotation
+
+session aging実測後。
+compactionとは別論点。
+````
 
 ## Amendments
 
@@ -62,8 +73,8 @@ session aging telemetry。
 
 ## Dependencies
 
-- 009-worker-call-outliers.md
-- 010-task-splitting-milestones.md
+- `IMPLEMENTATION_TASKS/009-worker-call-outliers.md`
+- `IMPLEMENTATION_TASKS/010-task-splitting-milestones.md`
 
 ## Review findings
 

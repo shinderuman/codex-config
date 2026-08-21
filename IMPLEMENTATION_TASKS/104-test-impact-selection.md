@@ -6,7 +6,17 @@ blocked-user-permission
 
 ## Original instruction
 
-品質証拠後までtest省略を保留する。
+````text
+# 14. BLOCKED / USER PERMISSION WAITとして保持するtask
+
+以下はtask fileを作ってよいが、`blocked-user-permission`とし自動開始しない。
+
+---
+
+## Blocked D: test impactによるtest省略
+
+品質証拠後。
+````
 
 ## Amendments
 
@@ -62,7 +72,7 @@ full test gate。
 
 ## Dependencies
 
-- 014-test-impact-evaluation.md
+- `IMPLEMENTATION_TASKS/014-test-impact-evaluation.md`
 
 ## Review findings
 

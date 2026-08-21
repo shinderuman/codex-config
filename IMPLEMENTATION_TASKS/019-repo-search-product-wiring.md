@@ -6,7 +6,19 @@ planned
 
 ## Original instruction
 
-repo-searchのfeature flag、CLI、install.sh distribution、managed instruction、installer smokeをproduction wiringし、既存BM25 pure coreを壊さない。
+````text
+## Task 019: repo-search feature flag / CLI / install integration
+
+- feature flag
+- CLI
+- install.sh distribution
+- managed instruction
+- installer smoke
+
+をproduction wiring。
+
+既存BM25 pure coreを壊さない。
+````
 
 ## Amendments
 
@@ -36,8 +48,8 @@ repo-searchを管理可能なproduction featureとして配布する。
 
 ## Dependencies
 
-- 016-worker-repo-search-integration.md
-- 018-exhaustive-search-gate.md
+- `IMPLEMENTATION_TASKS/016-worker-repo-search-integration.md`
+- `IMPLEMENTATION_TASKS/018-exhaustive-search-gate.md`
 
 ## Review findings
 

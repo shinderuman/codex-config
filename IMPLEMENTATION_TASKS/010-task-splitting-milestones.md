@@ -6,7 +6,21 @@ planned
 
 ## Original instruction
 
-Task 009と新task management導入後のデータを使い、巨大taskの事前分割、意味milestone checkpoint、resume boundaryが品質を落とさずcall長大化を抑えるか評価する。hard turn capは証拠なしに導入しない。
+````text
+## Task 010: task事前分割 / semantic milestoneの運用評価
+
+Task 009のデータを使い、
+
+-巨大taskの事前分割
+-意味milestone checkpoint
+- resume boundary
+
+が品質を落とさずcall長大化を抑えるか評価する。
+
+このTask management再設計自体の導入後データも使う。
+
+hard capは証拠なしに導入しない。
+````
 
 ## Amendments
 
@@ -37,7 +51,7 @@ worker call長大化を機械的切断ではなく責務境界で抑える。
 
 ## Dependencies
 
-- 009-worker-call-outliers.md
+- `IMPLEMENTATION_TASKS/009-worker-call-outliers.md`
 
 ## Review findings
 

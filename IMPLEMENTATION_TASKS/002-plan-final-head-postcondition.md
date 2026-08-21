@@ -70,7 +70,7 @@ canonical Planが次sessionの誤った制御情報になる再発を親orchestr
 
 ## Dependencies
 
-- 001-requirement-task-lifecycle.md
+- `IMPLEMENTATION_TASKS/001-requirement-task-lifecycle.md`
 
 ## Review findings
 

@@ -127,7 +127,6 @@ Task 005がPTY A/Bの実integrationをacceptanceに含むため、Task 004への
 
 ## Dependencies
 
-- `IMPLEMENTATION_TASKS/001-requirement-task-lifecycle.md`
 - `IMPLEMENTATION_TASKS/004-self-contained-stdin-pty.md`
 
 ## Review findings

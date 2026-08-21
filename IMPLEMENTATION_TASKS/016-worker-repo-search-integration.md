@@ -6,7 +6,13 @@ planned
 
 ## Original instruction
 
-workerが対象不明時だけrepo-searchを使うproduction routingを実装し、毎回BM25を強制しない。
+````text
+## Task 016: worker repo-search integration
+
+workerが対象不明時だけrepo-searchを使うproduction routingを実装。
+
+毎回BM25を強制しない。
+````
 
 ## Amendments
 
@@ -62,7 +68,7 @@ retry tree、複数search backend、embedding fallback等を追加しないで�
 
 ## Dependencies
 
-- 001-requirement-task-lifecycle.md
+none
 
 ## Review findings
 

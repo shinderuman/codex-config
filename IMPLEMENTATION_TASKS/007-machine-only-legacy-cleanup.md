@@ -143,7 +143,7 @@ parser/state分岐とescaped surfaceを削減しcurrent contractへ収束する�
 
 ## Dependencies
 
-- 006-codex-facing-compact-result.md
+- `IMPLEMENTATION_TASKS/006-codex-facing-compact-result.md`
 
 ## Review findings
 

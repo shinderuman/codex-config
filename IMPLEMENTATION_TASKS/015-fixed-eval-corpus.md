@@ -6,7 +6,24 @@ planned
 
 ## Original instruction
 
-wrapperで固定できるoffline/fake-provider scenarioだけを対象に、HIGH semantic defectをreviewer/Solが逃すcase、external feasibility未検証なのにproductionへ進むcase、safe-stopだけで親USER_REQUEST完了扱いするcase、診断に本文が必要なのにstatus/sizeだけ残すcaseを統合する。既にwiring済みcontractはfalse-complete確認だけ行い、重複checklistを増殖させない。実Sol/Codexを使うlive positive/negative Evalはユーザー明示許可待ちとして分離する。
+````text
+## Task 015: fixed Eval harness/corpusの未実装部分統合
+
+wrapperで固定できるoffline/fake-provider scenarioだけを対象。
+
+以下の既存contractを重複実装しない。
+
+- HIGH semantic defectをreviewer/Solが逃すcase
+- external feasibility未検証なのにproductionへ進むcase
+- safe-stopだけで親USER_REQUEST完了扱いするcase
+- diagnosisに本文が必要なのにstatus/sizeだけ残すcase
+
+既にwiring済みのものはfalse-complete確認だけし、追加checklistを増殖させない。
+
+### live behavior
+
+実Sol/Codexを消費するpositive/negative Evalは別途ユーザー明示許可待ちとし、Task 015完了条件へ混ぜない。
+````
 
 ## Amendments
 
@@ -37,7 +54,7 @@ none
 
 ## Dependencies
 
-- 001-requirement-task-lifecycle.md
+- `IMPLEMENTATION_TASKS/001-requirement-task-lifecycle.md`
 
 ## Review findings
 

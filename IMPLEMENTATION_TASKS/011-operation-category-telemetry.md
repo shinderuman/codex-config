@@ -6,7 +6,28 @@ planned
 
 ## Original instruction
 
-raw command本文を保存せず、search、test、build、format、install、git-read、git-write、file-read、file-write、other等のcoarse allowlist categoryをevent metadataへ追加する。分類のためのAI callを追加せず、privacyと肥大化を避ける。
+````text
+## Task 011: operation category telemetry
+
+raw command本文を保存せず、
+
+- search
+- test
+- build
+- format
+- install
+- git-read
+- git-write
+- file-read
+- file-write
+- other
+
+等のallowlist coarse categoryをevent metadataへ追加する。
+
+分類のために新しいAI callを追加しない。
+
+command文字列のprivacy/肥大化を避ける。
+````
 
 ## Amendments
 
@@ -75,7 +96,7 @@ compaction、test impact、tool usageを生commandなしで評価可能にする
 
 ## Dependencies
 
-- 001-requirement-task-lifecycle.md
+none
 
 ## Review findings
 

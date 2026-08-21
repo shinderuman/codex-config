@@ -6,7 +6,13 @@ planned
 
 ## Original instruction
 
-repo-searchをDirect/orchestrated A/Bへ接続できるtelemetryとfixed Eval hookを実装する。本番benchmark自体はユーザー許可待ち。
+````text
+## Task 020: repo-search telemetry / Eval hooks
+
+Direct/orchestrated A/Bへ接続できるtelemetryを実装。
+
+本番benchmark自体は許可待ち。
+````
 
 ## Amendments
 
@@ -36,7 +42,7 @@ search導入のCodex ReductionとQuality Deltaを測定可能にする。
 
 ## Dependencies
 
-- 019-repo-search-product-wiring.md
+- `IMPLEMENTATION_TASKS/019-repo-search-product-wiring.md`
 
 ## Review findings
 

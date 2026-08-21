@@ -6,7 +6,13 @@ planned
 
 ## Original instruction
 
-GLM-4.7等はsample不足のため、実運用データが揃うまで品質証拠なしのdowngradeをしない。ユーザー許可のないbenchmark目的追加callは禁止する。
+````text
+## Task 013: worker model routing評価
+
+GLM-4.7等のsample不足を解消できる実運用データが溜まるまで、品質証拠なしのdowngradeをしない。
+
+ユーザー許可のないbenchmark目的追加callは禁止。
+````
 
 ## Amendments
 
@@ -53,8 +59,7 @@ Codex/GLM costとQuality Deltaを実データで比較できるようにする�
 
 ## Dependencies
 
-- 009-worker-call-outliers.md
-- 011-operation-category-telemetry.md
+none
 
 ## Review findings
 

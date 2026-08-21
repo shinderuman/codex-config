@@ -6,7 +6,15 @@ planned
 
 ## Original instruction
 
-Task 011と既存telemetryを使いcompaction threshold変更を評価可能にし、task file再読方式でcompaction後の要求保持が改善したかを別軸で観測する。threshold変更そのものはユーザー許可と品質証拠まで保留する。
+````text
+## Task 012: compaction threshold評価
+
+Task 011と既存telemetryを使い、compaction threshold変更を評価可能にする。
+
+変更そのものはユーザー許可/品質証拠の条件を満たすまで保留。
+
+今回導入するtask file再読方式で「compaction後の要求保持」が改善したかも別軸で観測する。
+````
 
 ## Amendments
 
@@ -101,8 +109,8 @@ Task 012の目的は、
 
 ## Dependencies
 
-- 001-requirement-task-lifecycle.md
-- 011-operation-category-telemetry.md
+- `IMPLEMENTATION_TASKS/001-requirement-task-lifecycle.md`
+- `IMPLEMENTATION_TASKS/011-operation-category-telemetry.md`
 
 ## Review findings
 

@@ -6,7 +6,18 @@ planned
 
 ## Original instruction
 
-v3 worker-new 41 callのturn中央値55・p95 137に対しstructured移行task resumeは320 turn・約20.08。まずtask/phase/session/modelごとのoutlierを追加AI callなしで可視化する。hard turn capやsession rotationはまだ導入しない。
+````text
+## Task 009: worker call outlier可視化
+
+現観測:
+
+- v3 worker-new 41 call: turn median 55 / p95 137
+- structured移行task resume: 320 turn / 約20.08
+
+まずtask/phase/session/modelごとのoutlierを追加AI callなしで見えるようにする。
+
+hard turn capやsession rotationはまだ導入しない。
+````
 
 ## Amendments
 
@@ -21,6 +32,10 @@ Task 008をhard dependencyから外してください。
 
 Task 008を先にやるpriorityを維持すること自体は構いません。
 ````
+
+## Resolved references
+
+- 2026-08-22追加指示の`009-worker-call-outlier.md` = 現存する`IMPLEMENTATION_TASKS/009-worker-call-outliers.md`
 
 ## Purpose
 
@@ -47,7 +62,7 @@ Task 008を先にやるpriorityを維持すること自体は構いません。
 
 ## Dependencies
 
-- `IMPLEMENTATION_TASKS/001-requirement-task-lifecycle.md`
+none
 
 ## Review findings
 

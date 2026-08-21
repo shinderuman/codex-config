@@ -6,7 +6,13 @@ planned
 
 ## Original instruction
 
-Task 008、009、011等の結果で効果が確認された改善だけを採用し、事前に便利そうという理由で追加しない。
+````text
+## Task 021: conditional review/tool output改善
+
+Task 008/009/011等の結果で効果が確認されたものだけ採用。
+
+事前に「便利そう」で追加しない。
+````
 
 ## Amendments
 

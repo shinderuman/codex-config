@@ -66,8 +66,8 @@ protocol簡素化が見た目ではなくCodex Reductionとmaintenance costへ�
 
 ## Dependencies
 
-- 006-codex-facing-compact-result.md
-- 007-machine-only-legacy-cleanup.md
+- `IMPLEMENTATION_TASKS/006-codex-facing-compact-result.md`
+- `IMPLEMENTATION_TASKS/007-machine-only-legacy-cleanup.md`
 
 ## Review findings
 

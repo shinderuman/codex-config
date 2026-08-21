@@ -6,7 +6,13 @@ planned
 
 ## Original instruction
 
-operation categoryで実際に何testを実行しているかを可視化してから、省略可能性を評価する。品質証拠なしにtestを削らない。
+````text
+## Task 014: test impact selection評価
+
+operation categoryを使い、実際に何testを実行しているかを可視化してから省略可能性を評価。
+
+品質証拠なしにtestを削らない。
+````
 
 ## Amendments
 
@@ -96,7 +102,7 @@ raw commandを保存しない原則を維持したまま、既存stream-json/eve
 
 ## Dependencies
 
-- 011-operation-category-telemetry.md
+- `IMPLEMENTATION_TASKS/011-operation-category-telemetry.md`
 
 ## Review findings
 

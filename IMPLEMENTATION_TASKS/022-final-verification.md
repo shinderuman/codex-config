@@ -6,7 +6,37 @@ planned
 
 ## Original instruction
 
-全未完了implementation完了後だけ、go test ./...、race、vet、build、gofmt、install smoke、self-protection、provider accounting、packet/result semantic、parent metadata guards、task lifecycle、PTY、multi-repo、repo-search、fixed Eval offline corpus、clean worktree、Plan/Task/History整合を確認する。このtask自身で新機能を追加せず、failureは該当taskをreopenする。
+````text
+## Task 022: 全体verification
+
+全未完了implementation完了後にのみ実施。
+
+最低限:
+
+- `go test ./...`
+- `go test -race ./...`
+- `go vet ./...`
+- build
+- gofmt clean
+- install smoke
+- self-protection
+- provider accounting
+- packet/result semantic contract
+- parent-managed metadata guards
+- task lifecycle scenario
+- PTY integration
+- multi-repo integration
+- repo-search integration
+- fixed Eval offline corpus
+- clean worktree
+- Plan/Task/History final consistency
+
+を確認。
+
+このtask自身で新機能を足さない。
+
+failureは該当taskをreopenする。
+````
 
 ## Amendments
 

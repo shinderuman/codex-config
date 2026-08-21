@@ -31,6 +31,8 @@ conversation memoryやcompaction summaryをtask requirementの正にしない。
 - derived sectionが十分詳細でもOriginal instructionを要約してよい理由にはしない。token削減はderived sectionと通常resume経路で行い、一次要求sourceを削らない
 - 長い指示を複数taskへ分割する場合、各taskの要求・理由・禁止事項・完了条件を理解するために必要な原文sectionをlosslessに保存する。共通前提を暗黙依存にせず、必要部分を含めるかtrackedな共通sourceを明示参照する
 - derived sectionへOriginal instruction全文を複製せず、compactな作業・review indexとして維持する
+- RULES変更が既存の未完了taskへretroactiveに影響する場合、親Codexはrule変更だけで完了扱いせず、既存task corpusのmigration要否を明示判定する。migrationが必要なら、全未完了taskについて一次要求source、Dependencies、workflow順序、quality gate、blocked activation、acceptanceとの矛盾を確認し、新RULESと同じcontractで実行できることをpostconditionとしてから完了する
+- source-of-truthをRULESへ分離しても、RULESと既存taskの一時的不整合を許容したまま作業を再開しない。新RULESがtaskの旧contractを暗黙上書きしたとは扱わず、矛盾するtask metadataを実際にmigrationする
 
 ## parent maintenance
 

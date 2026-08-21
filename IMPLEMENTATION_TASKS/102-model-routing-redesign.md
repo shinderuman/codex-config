@@ -6,7 +6,17 @@ blocked-user-permission
 
 ## Original instruction
 
-実測品質証拠と許可条件が揃うまで保留する。
+````text
+# 14. BLOCKED / USER PERMISSION WAITとして保持するtask
+
+以下はtask fileを作ってよいが、`blocked-user-permission`とし自動開始しない。
+
+---
+
+## Blocked B: GLM-5-Turbo等model routing再設計
+
+実測品質証拠と許可条件が揃うまで保留。
+````
 
 ## Amendments
 
@@ -62,7 +72,7 @@ GLM-4.7 sample不足。
 
 ## Dependencies
 
-- 013-worker-model-routing-evaluation.md
+- `IMPLEMENTATION_TASKS/013-worker-model-routing-evaluation.md`
 
 ## Review findings
 

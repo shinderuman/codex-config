@@ -6,7 +6,19 @@ blocked-user-permission
 
 ## Original instruction
 
-同一snapshot、verification-only、non-semantic round等が安全に縮小できるconvergence証拠が出た場合だけ検討する。
+````text
+# 14. BLOCKED / USER PERMISSION WAITとして保持するtask
+
+以下はtask fileを作ってよいが、`blocked-user-permission`とし自動開始しない。
+
+---
+
+## Blocked F: review/fix model call縮小
+
+convergence実測後。
+
+同一snapshot / verification-only / non-semantic round等が安全に縮小できる証拠が出た場合のみ。
+````
 
 ## Amendments
 
@@ -62,8 +74,8 @@ reviewer FIX_REQUIRED率、risk floor。
 
 ## Dependencies
 
-- 008-machine-protocol-measurement.md
-- 009-worker-call-outliers.md
+- `IMPLEMENTATION_TASKS/008-machine-protocol-measurement.md`
+- `IMPLEMENTATION_TASKS/009-worker-call-outliers.md`
 
 ## Review findings
 

@@ -6,7 +6,13 @@ planned
 
 ## Original instruction
 
-exhaustive確認が要求されたcaseではBM25 top-Nだけで完了扱いせず、worker query/resultをreviewerが独立検証する。
+````text
+## Task 018: exhaustive search gate
+
+「exhaustive確認」が要求されたcaseではBM25 top-Nだけで完了扱いしない。
+
+worker query/resultをreviewerが独立検証する。
+````
 
 ## Amendments
 
@@ -78,8 +84,8 @@ ranking上位だけで網羅性を誤認するfalse-completeを防ぐ。
 
 ## Dependencies
 
-- 016-worker-repo-search-integration.md
-- 017-reviewer-diff-first-search.md
+- `IMPLEMENTATION_TASKS/016-worker-repo-search-integration.md`
+- `IMPLEMENTATION_TASKS/017-reviewer-diff-first-search.md`
 
 ## Review findings
 

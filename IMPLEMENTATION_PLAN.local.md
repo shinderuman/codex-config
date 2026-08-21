@@ -47,7 +47,7 @@ Sol High相当の品質をできるだけ維持しながらCodex / Sol側の実�
 
 - branch: `main`
 - implementation baseline: `ce86313`
-- metadata boundary: priority/hard dependency、cross-cutting install、dynamic final gate、evaluation evidenceを整理。Task 001 checkpointへのproduction code変更なし
+- metadata boundary: 新RULESへ全未完了task corpusをmigrationし、lossless Original、dependency path、dynamic gate、conditional quality gate、blocked activationの整合を確認。Task 001 checkpointへのproduction code変更なし
 - push: 禁止
 
 ## 現在の停止理由

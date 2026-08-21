@@ -6,7 +6,17 @@ blocked-user-permission
 
 ## Original instruction
 
-評価taskとrequirement保持改善の実測後まで保留する。
+````text
+# 14. BLOCKED / USER PERMISSION WAITとして保持するtask
+
+以下はtask fileを作ってよいが、`blocked-user-permission`とし自動開始しない。
+
+---
+
+## Blocked C: compaction threshold変更
+
+評価taskと要求保持改善の実測後。
+````
 
 ## Amendments
 
@@ -62,7 +72,7 @@ compactionとsession agingを分離。
 
 ## Dependencies
 
-- 012-compaction-threshold-evaluation.md
+- `IMPLEMENTATION_TASKS/012-compaction-threshold-evaluation.md`
 
 ## Review findings
 

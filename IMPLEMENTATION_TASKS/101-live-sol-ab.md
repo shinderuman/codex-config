@@ -6,7 +6,22 @@ blocked-user-permission
 
 ## Original instruction
 
-ユーザー明示許可後だけ同一条件で実行し、Codex ReductionとQuality Deltaを最上位判定する。
+````text
+# 14. BLOCKED / USER PERMISSION WAITとして保持するtask
+
+以下はtask fileを作ってよいが、`blocked-user-permission`とし自動開始しない。
+
+---
+
+## Blocked A: 実Sol High Direct baseline vs orchestrated本番A/B
+
+ユーザー明示許可後のみ。
+
+最上位判定:
+
+- Codex Reduction
+- Quality Delta
+````
 
 ## Amendments
 
@@ -78,9 +93,9 @@ fixed eval-ab基盤。`glm-worker/internal/abeval/usage.go`の`GLMUsageFromTaskS
 
 ## Dependencies
 
-- 008-machine-protocol-measurement.md
-- 020-repo-search-telemetry-eval.md
-- 022-final-verification.md
+- `IMPLEMENTATION_TASKS/008-machine-protocol-measurement.md`
+- `IMPLEMENTATION_TASKS/020-repo-search-telemetry-eval.md`
+- `IMPLEMENTATION_TASKS/022-final-verification.md`
 
 ## Review findings
 

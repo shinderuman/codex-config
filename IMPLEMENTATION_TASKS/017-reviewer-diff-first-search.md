@@ -6,7 +6,15 @@ planned
 
 ## Original instruction
 
-reviewerはまずdiff起点でimpact expansionし、必要な時だけ独立searchする。worker search結果をそのまま信頼せず独立に検証する。
+````text
+## Task 017: reviewer diff-first impact expansion + independent search
+
+reviewerはまずdiff起点。
+
+impact expansion後、必要な時だけ独立search。
+
+worker search結果をそのまま信頼しない。
+````
 
 ## Amendments
 
@@ -36,7 +44,7 @@ review tokenを抑えつつ影響範囲漏れと自己充足reviewを防ぐ。
 
 ## Dependencies
 
-- 016-worker-repo-search-integration.md
+- `IMPLEMENTATION_TASKS/016-worker-repo-search-integration.md`
 
 ## Review findings
 
