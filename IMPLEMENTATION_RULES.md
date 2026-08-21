@@ -6,18 +6,18 @@
 
 作業開始・再開時は次の順を正とする。
 
-1. Git / working treeの現物
-2. `IMPLEMENTATION_RULES.md`
-3. `IMPLEMENTATION_PLAN.local.md`
-4. Planが示すACTIVE `IMPLEMENTATION_TASKS/*.md`
-5. ACTIVE taskが明示参照する`IMPLEMENTATION_HISTORY.md`の必要箇所
-6. conversation context、compaction summary、internal TODO
+- Git / working treeの現物
+- `IMPLEMENTATION_RULES.md`
+- `IMPLEMENTATION_PLAN.local.md`
+- Planが示すACTIVE `IMPLEMENTATION_TASKS/*.md`
+- ACTIVE taskが明示参照する`IMPLEMENTATION_HISTORY.md`の必要箇所
+- conversation context、compaction summary、internal TODO
 
 conversation memoryやcompaction summaryをtask requirementの正にしない。Git現物とPlan/Taskが矛盾する場合、親Codexが現物確認後にPlan/Taskを修正してから続行する。
 
 ## task受領と原要求保持
 
-- ユーザーから実装・調査・review指示を受けたら、GLM call、長時間調査、実装開始より前に親Codexがtask fileを作成するか既存taskの`Amendments`へ追記する。「後でPlanへまとめる」は禁止する
+- ユーザーから実装・調査・review指示を受けたら、GLM call、長時間調査、実装開始より前に親Codexが内容を表すsemantic slugのtask fileを作成するか既存taskの`Amendments`へ追記する。「後でPlanへまとめる」は禁止する
 - 各taskの`Original instruction`はimmutableとし、契機となったユーザー指示・詳細指示を意味要約せず可能な限り原文で保存する。後から書き換えず、追加変更は`Amendments`へ時系列追記する
 - 「これ」「さっきの」「前のreview」等の会話依存参照はOriginal instructionを書き換えず、`Resolved references`へ具体化する
 - task fileへ進捗日記を追加せず、requirement contractと最小の`Current boundary`だけを保持する。長い診断はartifact/telemetry、完了証跡はHistoryへ置く
@@ -25,6 +25,15 @@ conversation memoryやcompaction summaryをtask requirementの正にしない。
 ## task file必須構造
 
 全task fileは最低限、`Status`、`Original instruction`、`Amendments`、必要時の`Resolved references`、`Purpose`、`Contract`、`Must not`、`Acceptance criteria`、`Historical invariants`、`Dependencies`、未解決時の`Review findings`、`Current boundary`を持つ。
+
+## task filename
+
+- 新規`IMPLEMENTATION_TASKS/*.md`は内容を表すsemantic slugだけをfilenameに使用し、sequence、priority、status、dependency、completion順、作成順、permission wait分類を表すnumeric prefixを付けない
+- 実行順序とpriorityは`IMPLEMENTATION_PLAN.local.md`のACTIVE / NEXT / BLOCKEDを正とし、dependencyは各task fileの`Dependencies`へpathで明示する。filenameや番号大小から推論しない
+- 割り込みtaskもsemantic filenameを追加してPlan上の位置だけを変更する。順序へ割り込むための番号、枝番、BLOCKED専用番号帯を作らない
+- この規則導入前から存在する番号付きtask fileはrenameせず、reopen時も既存filenameを維持する
+- numeric prefixを禁止するためだけの複雑なvalidatorは追加せず、新規taskを作る親instructionと生成経路でsemantic filenameを固定する
+- Planを含むtask scheduling listはunordered marker `-`を使い、source上の行順をpriorityとする。割り込み時は項目の移動・追加だけを行い、numeric markerを付けない
 
 ## task粒度とdispatch
 
@@ -37,10 +46,10 @@ conversation memoryやcompaction summaryをtask requirementの正にしない。
 
 新session、compaction後、rate limit/provider-unavailable後、長時間停止後、user追加指示後、`--resume`、internal TODO不一致時、reviewer差戻し後は、コードへ触る前に次を読む。
 
-1. `IMPLEMENTATION_RULES.md`全文
-2. `IMPLEMENTATION_PLAN.local.md`全文
-3. ACTIVE task file全文（Original instructionとAmendmentsを省略しない）
-4. taskが明示したHistory見出しだけ
+- `IMPLEMENTATION_RULES.md`全文
+- `IMPLEMENTATION_PLAN.local.md`全文
+- ACTIVE task file全文（Original instructionとAmendmentsを省略しない）
+- taskが明示したHistory見出しだけ
 
 NEXT taskは開始時まで全文を読む必要はない。
 

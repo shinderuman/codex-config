@@ -12,28 +12,28 @@ Sol High相当の品質をできるだけ維持しながらCodex / Sol側の実�
 
 ## NEXT（優先順）
 
-1. `IMPLEMENTATION_TASKS/002-plan-final-head-postcondition.md`
-2. `IMPLEMENTATION_TASKS/003-targets-element-semantics.md`
-3. `IMPLEMENTATION_TASKS/004-self-contained-stdin-pty.md`
-4. `IMPLEMENTATION_TASKS/005-multi-repository-isolation.md`
-5. `IMPLEMENTATION_TASKS/006-codex-facing-compact-result.md`
-6. `IMPLEMENTATION_TASKS/007-machine-only-legacy-cleanup.md`
-7. `IMPLEMENTATION_TASKS/008-machine-protocol-measurement.md`
-8. `IMPLEMENTATION_TASKS/009-worker-call-outliers.md`
-9. `IMPLEMENTATION_TASKS/010-task-splitting-milestones.md`
-10. `IMPLEMENTATION_TASKS/011-operation-category-telemetry.md`
-11. `IMPLEMENTATION_TASKS/012-compaction-threshold-evaluation.md`
-12. `IMPLEMENTATION_TASKS/013-worker-model-routing-evaluation.md`
-13. `IMPLEMENTATION_TASKS/014-test-impact-evaluation.md`
-14. `IMPLEMENTATION_TASKS/015-fixed-eval-corpus.md`
-15. `IMPLEMENTATION_TASKS/016-worker-repo-search-integration.md`
-16. `IMPLEMENTATION_TASKS/017-reviewer-diff-first-search.md`
-17. `IMPLEMENTATION_TASKS/018-exhaustive-search-gate.md`
-18. `IMPLEMENTATION_TASKS/019-repo-search-product-wiring.md`
-19. `IMPLEMENTATION_TASKS/020-repo-search-telemetry-eval.md`
-20. `IMPLEMENTATION_TASKS/021-conditional-improvements.md`
-21. `IMPLEMENTATION_TASKS/022-final-verification.md`
-22. `IMPLEMENTATION_TASKS/023-installed-state-verification.md`
+- `IMPLEMENTATION_TASKS/002-plan-final-head-postcondition.md`
+- `IMPLEMENTATION_TASKS/003-targets-element-semantics.md`
+- `IMPLEMENTATION_TASKS/004-self-contained-stdin-pty.md`
+- `IMPLEMENTATION_TASKS/005-multi-repository-isolation.md`
+- `IMPLEMENTATION_TASKS/006-codex-facing-compact-result.md`
+- `IMPLEMENTATION_TASKS/007-machine-only-legacy-cleanup.md`
+- `IMPLEMENTATION_TASKS/008-machine-protocol-measurement.md`
+- `IMPLEMENTATION_TASKS/009-worker-call-outliers.md`
+- `IMPLEMENTATION_TASKS/010-task-splitting-milestones.md`
+- `IMPLEMENTATION_TASKS/011-operation-category-telemetry.md`
+- `IMPLEMENTATION_TASKS/012-compaction-threshold-evaluation.md`
+- `IMPLEMENTATION_TASKS/013-worker-model-routing-evaluation.md`
+- `IMPLEMENTATION_TASKS/014-test-impact-evaluation.md`
+- `IMPLEMENTATION_TASKS/015-fixed-eval-corpus.md`
+- `IMPLEMENTATION_TASKS/016-worker-repo-search-integration.md`
+- `IMPLEMENTATION_TASKS/017-reviewer-diff-first-search.md`
+- `IMPLEMENTATION_TASKS/018-exhaustive-search-gate.md`
+- `IMPLEMENTATION_TASKS/019-repo-search-product-wiring.md`
+- `IMPLEMENTATION_TASKS/020-repo-search-telemetry-eval.md`
+- `IMPLEMENTATION_TASKS/021-conditional-improvements.md`
+- `IMPLEMENTATION_TASKS/022-final-verification.md`
+- `IMPLEMENTATION_TASKS/023-installed-state-verification.md`
 
 ## BLOCKED / USER_PERMISSION_WAIT
 
@@ -48,7 +48,7 @@ Sol High相当の品質をできるだけ維持しながらCodex / Sol側の実�
 
 - branch: `main`
 - implementation baseline: `ce86313`
-- metadata boundary: Task 001の4層metadata baselineをこのcommitでtracked化済み。production code変更なし
+- metadata boundary: semantic filenameとstable ordered-list source規則を追加し、既存番号付きtaskは維持。Task 001 checkpointへのproduction code変更なし
 - push: 禁止
 
 ## 現在の停止理由
