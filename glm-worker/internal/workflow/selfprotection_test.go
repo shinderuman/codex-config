@@ -486,7 +486,7 @@ func TestSelfProtectionResumePreservesSavedHighFloor(t *testing.T) {
 		Prompt:              "review",
 		OriginalPrompt:      "review",
 		Request:             "request",
-		WorkerPacket:        []string{"STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: done", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"},
+		WorkerResult:        workerResultFromLines("STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: done", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"),
 		ReviewNumber:        1,
 		RateLimited:         true,
 		EffectiveRisk:       "HIGH",
@@ -535,7 +535,7 @@ func TestSelfProtectionResumeSavedLowReEscalatesOnCriticalChange(t *testing.T) {
 		Prompt:              "review",
 		OriginalPrompt:      "review",
 		Request:             "request",
-		WorkerPacket:        []string{"STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: done", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"},
+		WorkerResult:        workerResultFromLines("STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: done", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"),
 		ReviewNumber:        1,
 		RateLimited:         true,
 		EffectiveRisk:       "LOW",
@@ -582,7 +582,7 @@ func TestSelfProtectionResumeLegacyCheckpointReconstructsToSafeSide(t *testing.T
 		Prompt:         "review",
 		OriginalPrompt: "review",
 		Request:        "request",
-		WorkerPacket:   []string{"STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: done", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"},
+		WorkerResult:   workerResultFromLines("STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: done", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"),
 		ReviewNumber:   1,
 		RateLimited:    true,
 	}); err != nil {
@@ -642,6 +642,6 @@ func TestSelfProtectionDecisionFloorStaysHighWithoutCriticalPath(t *testing.T) {
 
 var errSelfProtectionSentinel = errors.New("classify io failure")
 
-func packetOfRisk(risk string) packet.Packet {
-	return packet.FromLines([]string{"STATUS: IMPLEMENTED", "RISK: " + risk})
+func packetOfRisk(risk string) packet.Result {
+	return resultFromLines("STATUS: IMPLEMENTED", "RISK: "+risk)
 }

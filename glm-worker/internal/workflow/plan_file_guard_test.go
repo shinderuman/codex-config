@@ -64,8 +64,8 @@ func requirePlanFileFailClosed(t *testing.T, st *state.StateStore, r *mutatingRu
 		t.Fatal("plan file違反時にresume checkpointが残っています")
 	}
 	pkt := lastPacketFromOutput(t, out.String())
-	if pkt.Status() != "NEEDS_SOL_REVIEW" || pkt.Risk() != "HIGH" {
-		t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status(), pkt.Risk(), out.String())
+	if pkt.Status != "NEEDS_SOL_REVIEW" || pkt.Risk != "HIGH" {
+		t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status, pkt.Risk, out.String())
 	}
 	if !strings.Contains(out.String(), wantReason) {
 		t.Fatalf("fail closed理由 %qが出力されていません:\n%s", wantReason, out.String())
@@ -216,8 +216,8 @@ func TestPlanFileTrackedMissingFailsClosedBeforeCall(t *testing.T) {
 				t.Fatal("追跡中plan欠損のfail closed後にresume checkpointが残っています")
 			}
 			pkt := lastPacketFromOutput(t, out.String())
-			if pkt.Status() != "NEEDS_SOL_REVIEW" || pkt.Risk() != "HIGH" {
-				t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status(), pkt.Risk(), out.String())
+			if pkt.Status != "NEEDS_SOL_REVIEW" || pkt.Risk != "HIGH" {
+				t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status, pkt.Risk, out.String())
 			}
 			if !strings.Contains(out.String(), "working treeへ存在しません") {
 				t.Fatalf("追跡中plan欠損理由が出力されていません:\n%s", out.String())
@@ -268,8 +268,8 @@ func TestPlanFileTrackingIndeterminateFailsClosedBeforeCall(t *testing.T) {
 		t.Fatal("追跡判定失敗のfail closed後にresume checkpointが残っています")
 	}
 	pkt := lastPacketFromOutput(t, out.String())
-	if pkt.Status() != "NEEDS_SOL_REVIEW" || pkt.Risk() != "HIGH" {
-		t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status(), pkt.Risk(), out.String())
+	if pkt.Status != "NEEDS_SOL_REVIEW" || pkt.Risk != "HIGH" {
+		t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status, pkt.Risk, out.String())
 	}
 	if !strings.Contains(out.String(), "Git追跡判定に失敗") {
 		t.Fatalf("追跡判定失敗理由が出力されていません:\n%s", out.String())
@@ -489,8 +489,8 @@ func TestPlanFileReadErrorFailsClosedBeforeCall(t *testing.T) {
 		t.Fatalf("task status = %q want waiting-sol-review", st.TaskStatus())
 	}
 	pkt := lastPacketFromOutput(t, out.String())
-	if pkt.Status() != "NEEDS_SOL_REVIEW" || pkt.Risk() != "HIGH" {
-		t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status(), pkt.Risk(), out.String())
+	if pkt.Status != "NEEDS_SOL_REVIEW" || pkt.Risk != "HIGH" {
+		t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status, pkt.Risk, out.String())
 	}
 	if !strings.Contains(out.String(), "baseline取得失敗") {
 		t.Fatalf("baseline取得失敗理由が出力されていません:\n%s", out.String())
@@ -848,8 +848,8 @@ func TestHistoryFileTrackedMissingFailsClosedBeforeCall(t *testing.T) {
 				t.Fatal("追跡中history欠損のfail closed後にresume checkpointが残っています")
 			}
 			pkt := lastPacketFromOutput(t, out.String())
-			if pkt.Status() != "NEEDS_SOL_REVIEW" || pkt.Risk() != "HIGH" {
-				t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status(), pkt.Risk(), out.String())
+			if pkt.Status != "NEEDS_SOL_REVIEW" || pkt.Risk != "HIGH" {
+				t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status, pkt.Risk, out.String())
 			}
 			if !strings.Contains(out.String(), implementationHistoryFile+"がworking treeへ存在しません") {
 				t.Fatalf("追跡中history欠損理由が出力されていません:\n%s", out.String())
@@ -895,8 +895,8 @@ func TestHistoryFileReadErrorFailsClosedBeforeCall(t *testing.T) {
 		t.Fatalf("task status = %q want waiting-sol-review", st.TaskStatus())
 	}
 	pkt := lastPacketFromOutput(t, out.String())
-	if pkt.Status() != "NEEDS_SOL_REVIEW" || pkt.Risk() != "HIGH" {
-		t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status(), pkt.Risk(), out.String())
+	if pkt.Status != "NEEDS_SOL_REVIEW" || pkt.Risk != "HIGH" {
+		t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status, pkt.Risk, out.String())
 	}
 	if !strings.Contains(out.String(), "history file baseline取得失敗") {
 		t.Fatalf("history baseline取得失敗理由が出力されていません:\n%s", out.String())

@@ -65,10 +65,16 @@ type TaskStats struct {
 	NeedsSolReviewPackets                   int              `json:"needs_sol_review_packets"`
 	PassPackets                             int              `json:"pass_packets"`
 	RateLimits                              int              `json:"rate_limits"`
-	PacketCompactions                       int              `json:"packet_compactions"`
-	SolPacketBytes                          int              `json:"sol_packet_bytes"`
-	ProviderUnavailable                     int              `json:"provider_unavailable"`
-	ProviderUnavailableByAlias              map[string]int   `json:"provider_unavailable_by_alias,omitempty"`
+	// PacketCompactionsは旧テキストPACKET protocolの構造欠陥再圧縮回数。structured output
+	// 移行後は新規に計上されず、旧archive読込と時系列比較のためだけ残す。
+	PacketCompactions int `json:"packet_compactions"`
+	SolPacketBytes    int `json:"sol_packet_bytes"`
+	// ResultCorrectionsはtyped結果の意味検証不合格後に同一sessionで1回だけ実行した
+	// 修正再依頼回数。StructuredRetryExhaustedはCLI内部のschema適合retry枯渇回数。
+	ResultCorrections          int            `json:"result_corrections,omitempty"`
+	StructuredRetryExhausted   int            `json:"structured_retry_exhausted,omitempty"`
+	ProviderUnavailable        int            `json:"provider_unavailable"`
+	ProviderUnavailableByAlias map[string]int `json:"provider_unavailable_by_alias,omitempty"`
 	// 診断集計(v2のままomitempty追加)。旧archiveは該当map欠落=未観測(0寄与)で、
 	// --stats集計でcaptured record/archiveだけが計上される。比率(分母)は算出しない。
 	RiskFloorByCategory    map[string]int `json:"risk_floor_by_category,omitempty"`
@@ -320,6 +326,20 @@ func (s *StateStore) RecordPacketCompaction() {
 	})
 }
 
+// RecordResultCorrectionは意味検証不合格後の修正再依頼1回を計上する。
+func (s *StateStore) RecordResultCorrection() {
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		stats.ResultCorrections++
+	})
+}
+
+// RecordStructuredRetryExhaustedはCLIのschema適合retry枯渇を計上する。
+func (s *StateStore) RecordStructuredRetryExhausted() {
+	s.UpdateTaskStats(func(stats *TaskStats) {
+		stats.StructuredRetryExhausted++
+	})
+}
+
 // RecordRiskFloorはrisk floorがactive(HIGH)だったreview roundをcategory別に集計する。
 // categoryはrisk_floor_sourceから正規化した安定bucketで、self-protectionのpath詳細は含まない。
 func (s *StateStore) RecordRiskFloor(category string) {
@@ -365,15 +385,15 @@ func (s *StateStore) RecordProbeOutcome(outcome string) {
 	})
 }
 
-func (s *StateStore) RecordSolPacket(value packet.Packet) {
+func (s *StateStore) RecordSolResult(value packet.Result) {
 	s.UpdateTaskStats(func(stats *TaskStats) {
 		stats.SolPacketBytes += value.ByteSize()
-		switch value.Status() {
-		case "NEEDS_SOL_DECISION":
+		switch value.Status {
+		case packet.StatusNeedsSolDecision:
 			stats.NeedsSolDecisionPackets++
-		case "NEEDS_SOL_REVIEW":
+		case packet.StatusNeedsSolReview:
 			stats.NeedsSolReviewPackets++
-		case "PASS":
+		case packet.StatusPass:
 			stats.PassPackets++
 		}
 	})

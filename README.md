@@ -276,7 +276,7 @@ glm-worker --resume
 - Claude Code sessionはリポジトリ永久ではなくタスク単位。新規タスク開始時にworker/reviewer session IDを更新する。
 - 同一タスク内の`--decision`、自動fix、Z.ai 5h limit後の`--resume`ではsessionを維持する。
 - `--fix`は`NEEDS_SOL_REVIEW`後だけ使用できる。`PASS`後の追加依頼は新規タスクとして開始し、worker/reviewer sessionを更新する。
-- worker/reviewer packetは最大15行・6 KiB・1行1536 bytes。各fieldを1物理行に限定し、STATUS別の必須field・RISK整合性・field重複を検証する。契約違反時は同じsessionへ作業をやり直さない再圧縮を1回だけ要求する。
+- worker/reviewer呼出にはrole別のtyped JSON schemaを`--json-schema`として渡し、結果はresult eventの`structured_output`だけを権威として受理する。status・risk enum・必須field・型はschemaが強制し、STATUS別必須field・RISK整合性・artifact実在などの意味契約はwrapperの意味検証が強制する。結果は6 KiB・1 field 1536 bytes以内。意味検証不合格時は同じsessionへ作業をやり直さない結果の修正再出力を1回だけ要求し、schema違反・`structured_output`欠損・retry枯渇は修正再依頼なしにfail closedする。
 - packetへ収まらない正確な一覧・監査報告・生成物だけをtask別`ARTIFACT_DIR`へ保存し、worker packetから最終reviewer packetまで`ARTIFACTS`の絶対パスだけを引き継ぐ。`ARTIFACTS`は`none`またはtask専用dir配下の実在通常ファイルに限定し、複数パスはセミコロンで区切る。artifactはstate配下でディレクトリ`0700`・通常ファイル`0600`に揃え、symlinkと特殊ファイルを拒否する。
 - worker errorの診断tailは最大6 KiBに制限し、Codexへ不要な大量ログを返さない。
 
@@ -300,7 +300,7 @@ glm-worker --stats
 - alias別の呼出しツリー全体、およびClaude CLIが報告した実モデル別のinput、cache creation、cache read、output token
 - Sol判断・明示fix・resume・自動fixの回数
 - `NEEDS_SOL_DECISION`、`NEEDS_SOL_REVIEW`、`PASS`の件数
-- model alias別rate limit、packet再圧縮、Solへ返したpacket bytes
+- model alias別rate limit、結果の意味修正再依頼、Solへ返したpacket bytes
 - model alias別provider-unavailable件数
 - risk floor件数(category別)、snapshot mismatch件数(軸別)、packet reject件数(reason別)、probe成功失敗
 - probe呼出数(`PROBE_CALLS`)、total AI call数(`TOTAL_AI_CALLS` = task呼出+probe呼出)、transient retry数

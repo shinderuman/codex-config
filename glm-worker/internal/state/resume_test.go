@@ -96,3 +96,34 @@ func TestResumeCheckpointRequiresModel(t *testing.T) {
 		t.Fatalf("load error = %v", err)
 	}
 }
+
+// v2 checkpoint(worker_packet表示行・packet_compacted)はv3表現へ等価変換してresumeさせる。
+// 5h上限中断中のtaskがprotocol移行でresume不能にならないことの保証。
+func TestLoadResumeCheckpointConvertsLegacyV2(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	legacy := `{"version":2,"stage":"reviewer","phase":"reviewer-1","model":"sonnet","request":"req","worker_packet":["STATUS: IMPLEMENTED","RISK: LOW","SUMMARY: s","TESTS: t"],"packet_compacted":true}`
+	if err := os.WriteFile(st.Path(resumeStateFile), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.LoadResumeCheckpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WorkerResult == nil || got.WorkerResult.Status != "IMPLEMENTED" || got.WorkerResult.Summary != "s" {
+		t.Fatalf("worker result変換 = %#v", got.WorkerResult)
+	}
+	if !got.ResultCorrection {
+		t.Fatal("packet_compactedはresult_correctionへ読み替える")
+	}
+	if got.Version != resumeStateVersion {
+		t.Fatalf("version = %d", got.Version)
+	}
+
+	broken := `{"version":2,"stage":"worker","model":"opus","worker_packet":["plain text"]}`
+	if err := os.WriteFile(st.Path(resumeStateFile), []byte(broken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.LoadResumeCheckpoint(); err == nil || !strings.Contains(err.Error(), "worker_packetを変換できません") {
+		t.Fatalf("broken v2 error = %v", err)
+	}
+}

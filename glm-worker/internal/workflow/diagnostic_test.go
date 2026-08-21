@@ -386,7 +386,7 @@ func TestDiagnosticResumePreservesSavedHighRiskFloor(t *testing.T) {
 		Prompt:              "review",
 		OriginalPrompt:      "review",
 		Request:             "request",
-		WorkerPacket:        workerPacketLines(),
+		WorkerResult:        workerResultFromLines(workerPacketLines()...),
 		ReviewNumber:        1,
 		RateLimited:         true,
 		EffectiveRisk:       "HIGH",

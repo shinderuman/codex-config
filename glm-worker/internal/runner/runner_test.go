@@ -58,7 +58,7 @@ func TestClaudeRunnerRunStartsThenResumesSession(t *testing.T) {
 
 	argumentsPath := filepath.Join(t.TempDir(), "args")
 	commandPath := filepath.Join(t.TempDir(), "fake-claude")
-	commandScript := "#!/bin/sh\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_FILE\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"runner output\\n\",\"duration_ms\":1200,\"duration_api_ms\":900,\"num_turns\":2,\"usage\":{\"input_tokens\":11,\"cache_creation_input_tokens\":12,\"cache_read_input_tokens\":13,\"output_tokens\":14},\"modelUsage\":{\"glm-5.3\":{\"inputTokens\":11,\"cacheCreationInputTokens\":12,\"cacheReadInputTokens\":13,\"outputTokens\":14}}}'\n"
+	commandScript := "#!/bin/sh\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_FILE\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"structured_output\":{\"status\":\"IMPLEMENTED\",\"risk\":\"LOW\",\"summary\":\"done\",\"requirement_coverage\":\"covered\",\"tests\":\"pass\",\"unverified\":\"none\"},\"result\":\"runner output\\n\",\"duration_ms\":1200,\"duration_api_ms\":900,\"num_turns\":2,\"usage\":{\"input_tokens\":11,\"cache_creation_input_tokens\":12,\"cache_read_input_tokens\":13,\"output_tokens\":14},\"modelUsage\":{\"glm-5.3\":{\"inputTokens\":11,\"cacheCreationInputTokens\":12,\"cacheReadInputTokens\":13,\"outputTokens\":14}}}'\n"
 	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -550,7 +550,7 @@ func TestClaudeRunnerReMintSessionOnStaleIsolationPolicy(t *testing.T) {
 	}
 	argumentsPath := filepath.Join(t.TempDir(), "args")
 	commandPath := filepath.Join(t.TempDir(), "fake-claude")
-	commandScript := "#!/bin/sh\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_FILE\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
+	commandScript := "#!/bin/sh\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_FILE\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"structured_output\":{\"status\":\"IMPLEMENTED\",\"risk\":\"LOW\",\"summary\":\"done\",\"requirement_coverage\":\"covered\",\"tests\":\"pass\",\"unverified\":\"none\"},\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
 	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -620,7 +620,7 @@ func newIsolationMigrationFixture(t *testing.T) isolationMigrationFixture {
 		t.Fatal(err)
 	}
 	commandPath := filepath.Join(t.TempDir(), "fake-claude")
-	commandScript := "#!/bin/sh\nn=$(cat \"$GLM_ARGS_DIR/count\" 2>/dev/null || echo 0)\nn=$((n+1))\nprintf '%s\\n' \"$n\" >\"$GLM_ARGS_DIR/count\"\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_DIR/run-$n\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
+	commandScript := "#!/bin/sh\nn=$(cat \"$GLM_ARGS_DIR/count\" 2>/dev/null || echo 0)\nn=$((n+1))\nprintf '%s\\n' \"$n\" >\"$GLM_ARGS_DIR/count\"\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_DIR/run-$n\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"structured_output\":{\"status\":\"IMPLEMENTED\",\"risk\":\"LOW\",\"summary\":\"done\",\"requirement_coverage\":\"covered\",\"tests\":\"pass\",\"unverified\":\"none\"},\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
 	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -771,7 +771,7 @@ func TestIsolationPolicyPersistedBeforeExecutionOnFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	commandPath := filepath.Join(t.TempDir(), "fake-claude")
-	commandScript := "#!/bin/sh\nn=$(cat \"$GLM_ARGS_DIR/count\" 2>/dev/null || echo 0)\nn=$((n+1))\nprintf '%s\\n' \"$n\" >\"$GLM_ARGS_DIR/count\"\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_DIR/run-$n\"\nif [ \"$n\" -eq 1 ]; then\n  printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"error\",\"is_error\":true,\"result\":\"boom\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n  exit 1\nfi\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
+	commandScript := "#!/bin/sh\nn=$(cat \"$GLM_ARGS_DIR/count\" 2>/dev/null || echo 0)\nn=$((n+1))\nprintf '%s\\n' \"$n\" >\"$GLM_ARGS_DIR/count\"\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_DIR/run-$n\"\nif [ \"$n\" -eq 1 ]; then\n  printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"error\",\"is_error\":true,\"result\":\"boom\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n  exit 1\nfi\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"structured_output\":{\"status\":\"IMPLEMENTED\",\"risk\":\"LOW\",\"summary\":\"done\",\"requirement_coverage\":\"covered\",\"tests\":\"pass\",\"unverified\":\"none\"},\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
 	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -843,7 +843,7 @@ func newFiveHourLimitResumeFixture(t *testing.T, role state.SessionRole) (*Claud
 		t.Fatal(err)
 	}
 	commandPath := filepath.Join(t.TempDir(), "fake-claude")
-	commandScript := "#!/bin/sh\nn=$(cat \"$GLM_ARGS_DIR/count\" 2>/dev/null || echo 0)\nn=$((n+1))\nprintf '%s\\n' \"$n\" >\"$GLM_ARGS_DIR/count\"\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_DIR/run-$n\"\nif [ \"$n\" -eq 1 ]; then\n  printf '%s\\n' 'API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour. Your limit will reset at 2026-07-22 14:06:34]'\n  exit 1\nfi\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
+	commandScript := "#!/bin/sh\nn=$(cat \"$GLM_ARGS_DIR/count\" 2>/dev/null || echo 0)\nn=$((n+1))\nprintf '%s\\n' \"$n\" >\"$GLM_ARGS_DIR/count\"\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_DIR/run-$n\"\nif [ \"$n\" -eq 1 ]; then\n  printf '%s\\n' 'API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour. Your limit will reset at 2026-07-22 14:06:34]'\n  exit 1\nfi\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"structured_output\":{\"status\":\"IMPLEMENTED\",\"risk\":\"LOW\",\"summary\":\"done\",\"requirement_coverage\":\"covered\",\"tests\":\"pass\",\"unverified\":\"none\"},\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
 	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -949,7 +949,7 @@ func TestIsolationPolicyWriteFailureAbortsBeforeClaude(t *testing.T) {
 	}
 	invokedPath := filepath.Join(t.TempDir(), "claude-invoked")
 	commandPath := filepath.Join(t.TempDir(), "fake-claude")
-	commandScript := "#!/bin/sh\nprintf '1' >\"" + invokedPath + "\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
+	commandScript := "#!/bin/sh\nprintf '1' >\"" + invokedPath + "\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"structured_output\":{\"status\":\"IMPLEMENTED\",\"risk\":\"LOW\",\"summary\":\"done\",\"requirement_coverage\":\"covered\",\"tests\":\"pass\",\"unverified\":\"none\"},\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
 	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -1062,7 +1062,7 @@ func TestIsolationArgsIdenticalAcrossRoleAndResume(t *testing.T) {
 	commandPath := filepath.Join(t.TempDir(), "fake-claude")
 	// 呼出しごとに連番ファイルへ引数を書き出す。空文字列引数(--setting-sources "")も
 	// 行として保持するため、読み側は末尾改行1件だけ除去するreadLinesを使う。
-	commandScript := "#!/bin/sh\nn=$(cat \"$GLM_ARGS_DIR/count\" 2>/dev/null || echo 0)\nn=$((n+1))\nprintf '%s\\n' \"$n\" >\"$GLM_ARGS_DIR/count\"\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_DIR/run-$n\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
+	commandScript := "#!/bin/sh\nn=$(cat \"$GLM_ARGS_DIR/count\" 2>/dev/null || echo 0)\nn=$((n+1))\nprintf '%s\\n' \"$n\" >\"$GLM_ARGS_DIR/count\"\nprintf '%s\\n' \"$@\" >\"$GLM_ARGS_DIR/run-$n\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"structured_output\":{\"status\":\"IMPLEMENTED\",\"risk\":\"LOW\",\"summary\":\"done\",\"requirement_coverage\":\"covered\",\"tests\":\"pass\",\"unverified\":\"none\"},\"result\":\"ok\\n\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
 	if err := os.WriteFile(commandPath, []byte(commandScript), 0o700); err != nil {
 		t.Fatal(err)
 	}

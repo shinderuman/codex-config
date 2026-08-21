@@ -219,8 +219,11 @@ grep -Fq '同一tool orchestration内で完了までblocking wait' "$success_cas
 grep -Fq '1回のwaitに最大待機時間を使い' "$success_case/codex/instructions/glm-execution.md"
 grep -Fq '短時間・固定間隔の反復wait' "$success_case/codex/instructions/glm-execution.md"
 grep -Fq '進捗報告目的のwake' "$success_case/codex/instructions/glm-execution.md"
-grep -Fq 'ちょうど1物理行' "$success_case/codex/glm-worker/prompts/WORKER.md"
-grep -Fq 'ARTIFACTS:' "$success_case/codex/glm-worker/prompts/REVIEWER.md"
+grep -Fq 'NEEDS_SOL_DECISION' "$success_case/codex/glm-worker/prompts/WORKER.md"
+grep -Fq '意味契約' "$success_case/codex/glm-worker/prompts/WORKER.md"
+grep -Fq '構造化出力' "$success_case/codex/glm-worker/prompts/WORKER.md"
+grep -Fq '構造化出力' "$success_case/codex/glm-worker/prompts/REVIEWER.md"
+grep -Fq '`ARTIFACTS`: worker報告にある大容量成果物のうち最終結果に必要な絶対パスの配列' "$success_case/codex/glm-worker/prompts/REVIEWER.md"
 test -f "$success_case/codex/instructions/worker/state-transitions.md"
 grep -Fq '時間軸上の意味ある状態遷移' "$success_case/codex/instructions/worker/state-transitions.md"
 grep -Fq '意味変更の意図の有無に関わらず' "$success_case/codex/instructions/worker/state-transitions.md"
@@ -230,6 +233,8 @@ grep -Fq 'silent no-op' "$success_case/codex/instructions/worker/state-transitio
 grep -Fq '部分消失stateを安易に安全復旧' "$success_case/codex/instructions/worker/state-transitions.md"
 grep -Fq 'renameは既存環境を見落としやすく' "$success_case/codex/instructions/worker/state-transitions.md"
 grep -Fq 'state-transitions.md' "$success_case/codex/glm-worker/prompts/WORKER.md"
+grep -Fq 'verify_claude_cli || exit $?' "$repo_root/install.sh"
+grep -Fq -- '--json-schema' "$repo_root/install.sh"
 grep -Fq 'state-transitions.md' "$success_case/codex/glm-worker/prompts/REVIEWER.md"
 test -f "$success_case/codex/instructions/local-unmanaged.md"
 test ! -e "$success_case/codex/instructions/obsolete-managed.md"
@@ -367,6 +372,53 @@ make_go_shim "$merge_json_build_fail_shim" '.'
 expect_preflight_failure 'merge-json build' \
     "$merge_json_build_fail_source" "$merge_json_build_fail_case" \
     "$merge_json_build_fail_shim" "$test_root/expected-merge-json-build-fail.log"
+
+# claude CLI shim。--help応答の文言で--json-schema契約支援有無を切り替え、呼出引数を
+# 記録する。AI呼出は一切行わない。
+make_claude_shim() {
+    shim_dir=$1
+    help_text=$2
+
+    mkdir -p "$shim_dir"
+    cat >"$shim_dir/claude" <<EOF
+#!/bin/sh
+log_file='$shim_dir/claude-invocations.log'
+
+printf '%s\n' "\$*" >>"\$log_file"
+
+if [ "\$1" = "--help" ]; then
+    printf '%s\n' '$help_text'
+    exit 0
+fi
+
+exit 1
+EOF
+    chmod +x "$shim_dir/claude"
+}
+
+# --json-schemaを案内しないclaude CLIではverify_claude_cliがpreflight通過後に
+# installをfail closedさせ、binary・managed files・settingsへの配置は起きない。
+# go呼出記録はpreflight全段階の成功だけを示し、claude呼出記録はprobe実行を固定する。
+claude_probe_fail_source="$test_root/claude-probe-fail-source"
+claude_probe_fail_case="$test_root/claude-probe-fail-case"
+claude_probe_fail_shim="$test_root/claude-probe-fail-shim"
+prepare_preflight_failure_case "$claude_probe_fail_source" "$claude_probe_fail_case"
+make_go_shim "$claude_probe_fail_shim" ''
+make_claude_shim "$claude_probe_fail_shim" 'usage: claude [-p prompt] [--model name]'
+printf '%s\n' \
+    'test glm-worker 0' \
+    'build glm-worker 0' \
+    'test merge-json 0' \
+    'build merge-json 0' \
+    >"$test_root/expected-claude-probe-fail.log"
+expect_preflight_failure 'claude cli probe' \
+    "$claude_probe_fail_source" "$claude_probe_fail_case" \
+    "$claude_probe_fail_shim" "$test_root/expected-claude-probe-fail.log"
+test "$(sed -n '1p' "$claude_probe_fail_shim/claude-invocations.log")" = '--help'
+if [ -n "$(sed -n '2p' "$claude_probe_fail_shim/claude-invocations.log")" ]; then
+    printf '%s\n' 'claude probeは--helpだけを呼び出さなければなりません' >&2
+    exit 1
+fi
 
 override_source="$test_root/override-source"
 override_case="$test_root/override-case"

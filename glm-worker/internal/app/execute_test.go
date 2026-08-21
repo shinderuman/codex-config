@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/config"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/packet"
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/runner"
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/workflow"
@@ -48,7 +50,30 @@ func (r *fakeRunner) Run(
 			return runner.RunResult{}, err
 		}
 	}
-	return runner.RunResult{SessionID: "test-session", Response: step.output}, step.runErr
+	structured := structuredFromAppOutput(step.output)
+	return runner.RunResult{SessionID: "test-session", StructuredOutput: structured, Response: string(structured)}, step.runErr
+}
+
+// structuredFromAppOutputはfake stepの表示行textをtyped結果JSONへ変換する。
+// workflow testのstructuredFromScriptedOutputと同じ変換規則で、変換できない原文は
+// そのまま返しschema-mismatch経路へ流す。
+func structuredFromAppOutput(output string) json.RawMessage {
+	if output == "" {
+		return nil
+	}
+	var body []string
+	for _, line := range strings.Split(strings.TrimRight(output, "\n"), "\n") {
+		if strings.TrimSpace(line) == "PACKET_BEGIN" || strings.TrimSpace(line) == "PACKET_END" {
+			continue
+		}
+		body = append(body, line)
+	}
+	if value, err := packet.FromDisplayLines(body); err == nil {
+		if data, err := json.Marshal(value); err == nil {
+			return data
+		}
+	}
+	return json.RawMessage(output)
 }
 
 func (r *fakeRunner) Probe(model string) (runner.ProbeResult, error) {

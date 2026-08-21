@@ -141,11 +141,11 @@ func (w *Workflow) ExecuteNewTask(request string) error {
 			Request:        request,
 		}
 
-		workerPacket, err := w.runModel(checkpoint)
+		workerResult, err := w.runModel(checkpoint)
 		if err != nil {
 			return err
 		}
-		return w.handleWorkerResult(request, workerPacket, checkpoint.Phase)
+		return w.handleWorkerResult(request, workerResult, checkpoint.Phase)
 	}))
 }
 
@@ -181,11 +181,11 @@ func (w *Workflow) ExecuteDecision(decision string) error {
 			Decision:       decision,
 		}
 
-		workerPacket, err := w.runModel(checkpoint)
+		workerResult, err := w.runModel(checkpoint)
 		if err != nil {
 			return err
 		}
-		return w.handleWorkerResult(request, workerPacket, checkpoint.Phase)
+		return w.handleWorkerResult(request, workerResult, checkpoint.Phase)
 	}))
 }
 
@@ -223,11 +223,11 @@ func (w *Workflow) ExecuteExplicitFix(instruction string) error {
 			Decision:       decision,
 		}
 
-		workerPacket, err := w.runModel(checkpoint)
+		workerResult, err := w.runModel(checkpoint)
 		if err != nil {
 			return err
 		}
-		return w.handleWorkerResult(request, workerPacket, checkpoint.Phase)
+		return w.handleWorkerResult(request, workerResult, checkpoint.Phase)
 	}))
 }
 
@@ -341,7 +341,10 @@ func (w *Workflow) ExecuteResume() error {
 		case state.ResumeStageWorker:
 			return w.handleWorkerResult(checkpoint.Request, result, checkpoint.Phase)
 		case state.ResumeStageReview:
-			workerPacket := packet.FromLines(checkpoint.WorkerPacket)
+			if checkpoint.WorkerResult == nil {
+				return fmt.Errorf("STATUS: WORKER_ERROR\nPHASE: %s\nERROR: resume checkpoint has no worker result", checkpoint.Phase)
+			}
+			workerResult := *checkpoint.WorkerResult
 			decision := w.state.ReadOr("last-decision", "none")
 			if checkpoint.RiskFloorReemit {
 				if stopped, err := w.verifyReviewEndSnapshot(); err != nil {
@@ -349,14 +352,14 @@ func (w *Workflow) ExecuteResume() error {
 				} else if stopped {
 					return nil
 				}
-				reviewPacket := resolveRiskFloorReemit(result)
-				if err := w.state.Write("last-review", reviewPacket.String()); err != nil {
+				reviewResult := resolveRiskFloorReemit(result)
+				if err := w.state.Write("last-review", reviewResult.Display()); err != nil {
 					return err
 				}
 				return w.handleReviewResult(
 					checkpoint.Request,
-					workerPacket,
-					reviewPacket,
+					workerResult,
+					reviewResult,
 					checkpoint.ReviewNumber,
 					checkpoint.AutoFixes,
 				)
@@ -366,10 +369,10 @@ func (w *Workflow) ExecuteResume() error {
 			} else if stopped {
 				return nil
 			}
-			highRiskFloor := w.resolveReviewResumeRisk(workerPacket, checkpoint).high
-			reviewPacket, reemitStopped, err := w.enforceRiskFloor(
+			highRiskFloor := w.resolveReviewResumeRisk(workerResult, checkpoint).high
+			reviewResult, reemitStopped, err := w.enforceRiskFloor(
 				checkpoint.Request,
-				workerPacket,
+				workerResult,
 				checkpoint.ReviewNumber,
 				checkpoint.AutoFixes,
 				decision,
@@ -382,13 +385,13 @@ func (w *Workflow) ExecuteResume() error {
 			if reemitStopped {
 				return nil
 			}
-			if err := w.state.Write("last-review", reviewPacket.String()); err != nil {
+			if err := w.state.Write("last-review", reviewResult.Display()); err != nil {
 				return err
 			}
 			return w.handleReviewResult(
 				checkpoint.Request,
-				workerPacket,
-				reviewPacket,
+				workerResult,
+				reviewResult,
 				checkpoint.ReviewNumber,
 				checkpoint.AutoFixes,
 			)
@@ -437,16 +440,16 @@ func resumeSourceOf(checkpoint state.ResumeCheckpoint) string {
 	}
 }
 
-func (w *Workflow) handleWorkerResult(request string, workerPacket packet.Packet, workerPhase string) error {
-	switch workerPacket.Status() {
-	case "NEEDS_SOL_DECISION":
+func (w *Workflow) handleWorkerResult(request string, workerResult packet.Result, workerPhase string) error {
+	switch workerResult.Status {
+	case packet.StatusNeedsSolDecision:
 		if err := w.state.Touch("pending-decision"); err != nil {
 			return err
 		}
 		if err := w.state.SetTaskStatus(state.TaskStatusWaitingDecision); err != nil {
 			return err
 		}
-		return w.emitPacket(workerPacket)
+		return w.emitResult(workerResult)
 	case "IMPLEMENTED":
 		if err := w.state.Remove("pending-decision"); err != nil {
 			return err
@@ -454,7 +457,7 @@ func (w *Workflow) handleWorkerResult(request string, workerPacket packet.Packet
 		if err := w.state.SetTaskStatus(state.TaskStatusActive); err != nil {
 			return err
 		}
-		return w.reviewUntilStable(request, workerPacket, 1, 0, workerPhase)
+		return w.reviewUntilStable(request, workerResult, 1, 0, workerPhase)
 	default:
 		return fmt.Errorf("STATUS: WORKER_ERROR\nPHASE: worker-format\nERROR: worker did not return a valid STATUS")
 	}
@@ -462,7 +465,7 @@ func (w *Workflow) handleWorkerResult(request string, workerPacket packet.Packet
 
 func (w *Workflow) reviewUntilStable(
 	request string,
-	workerPacket packet.Packet,
+	workerResult packet.Result,
 	reviewNumber int,
 	autoFixes int,
 	workerPhase string,
@@ -478,11 +481,11 @@ func (w *Workflow) reviewUntilStable(
 
 	decision := w.state.ReadOr("last-decision", "none")
 	hasDecision := w.state.Exists("last-decision")
-	risk := w.computeEffectiveRisk(workerPacket, autoFixes, hasDecision, w.state.Exists("last-review"))
+	risk := w.computeEffectiveRisk(workerResult, autoFixes, hasDecision, w.state.Exists("last-review"))
 	prompt := reviewerPrompt(
 		request,
 		decision,
-		workerPacket,
+		workerResult,
 		reviewNumber,
 		w.state.BaselineDescription(),
 	)
@@ -497,7 +500,7 @@ func (w *Workflow) reviewUntilStable(
 		OriginalPrompt:      prompt,
 		Request:             request,
 		Decision:            decision,
-		WorkerPacket:        append([]string(nil), workerPacket.Lines...),
+		WorkerResult:        &workerResult,
 		ReviewNumber:        reviewNumber,
 		AutoFixes:           autoFixes,
 		EffectiveRisk:       riskLabel(risk.high),
@@ -510,7 +513,7 @@ func (w *Workflow) reviewUntilStable(
 		return nil
 	}
 
-	reviewPacket, err := w.runModel(checkpoint)
+	reviewResult, err := w.runModel(checkpoint)
 	if err != nil {
 		return err
 	}
@@ -519,14 +522,14 @@ func (w *Workflow) reviewUntilStable(
 	} else if stopped {
 		return nil
 	}
-	reviewPacket, reemitStopped, err := w.enforceRiskFloor(
+	reviewResult, reemitStopped, err := w.enforceRiskFloor(
 		request,
-		workerPacket,
+		workerResult,
 		reviewNumber,
 		autoFixes,
 		decision,
 		risk.high,
-		reviewPacket,
+		reviewResult,
 	)
 	if err != nil {
 		return err
@@ -534,14 +537,14 @@ func (w *Workflow) reviewUntilStable(
 	if reemitStopped {
 		return nil
 	}
-	if err := w.state.Write("last-review", reviewPacket.String()); err != nil {
+	if err := w.state.Write("last-review", reviewResult.Display()); err != nil {
 		return err
 	}
 
 	return w.handleReviewResult(
 		request,
-		workerPacket,
-		reviewPacket,
+		workerResult,
+		reviewResult,
 		reviewNumber,
 		autoFixes,
 	)
@@ -549,44 +552,44 @@ func (w *Workflow) reviewUntilStable(
 
 func (w *Workflow) handleReviewResult(
 	request string,
-	workerPacket packet.Packet,
-	reviewPacket packet.Packet,
+	workerResult packet.Result,
+	reviewResult packet.Result,
 	reviewNumber int,
 	autoFixes int,
 ) error {
-	switch reviewPacket.Status() {
-	case "PASS":
+	switch reviewResult.Status {
+	case packet.StatusPass:
 		if err := w.state.SetTaskStatus(state.TaskStatusComplete); err != nil {
 			return err
 		}
-		return w.emitPacket(reviewPacket)
+		return w.emitResult(reviewResult)
 
-	case "NEEDS_SOL_REVIEW":
+	case packet.StatusNeedsSolReview:
 		if err := w.state.SetTaskStatus(state.TaskStatusWaitingSolReview); err != nil {
 			return err
 		}
-		return w.emitPacket(reviewPacket)
+		return w.emitResult(reviewResult)
 
-	case "FIX_REQUIRED":
+	case packet.StatusFixRequired:
 		if autoFixes >= w.config.MaxAutoFixRounds {
 			if err := w.state.SetTaskStatus(state.TaskStatusWaitingSolReview); err != nil {
 				return err
 			}
-			return w.emitPacket(nonConvergedPacket(reviewPacket))
+			return w.emitResult(nonConvergedResult(reviewResult))
 		}
 
 		nextAutoFixes := autoFixes + 1
 		decision := w.state.ReadOr("last-decision", "none")
-		prompt := automaticFixPrompt(request, decision, reviewPacket)
+		prompt := automaticFixPrompt(request, decision, reviewResult)
 		phase := fmt.Sprintf("worker-auto-fix-%d", nextAutoFixes)
-		reportOnly := isReportOnlyFix(reviewPacket)
+		reportOnly := isReportOnlyFix(reviewResult)
 		// TARGETS: PACKETはreviewerがコード・diffを正しいと確認しPACKET/reportの意味情報だけを
 		// 不足と指摘した予約marker。実装修正へ流さず報告再出力専用promptへ分岐する。
 		// 収束上限・risk floor・session/model routingは通常auto-fixと同じ枠で数える。
 		// report-only workerはReadOnly capabilityで実行し、開始前3軸snapshotを基準とした
 		// 前後同一性をprompt遵守ではなくwrapper側で強制する。
 		if reportOnly {
-			prompt = reportOnlyFixPrompt(request, decision, reviewPacket)
+			prompt = reportOnlyFixPrompt(request, decision, reviewResult)
 			phase = fmt.Sprintf("worker-report-only-%d", nextAutoFixes)
 		}
 		checkpoint := state.ResumeCheckpoint{
@@ -614,7 +617,7 @@ func (w *Workflow) handleReviewResult(
 			}
 		}
 
-		fixPacket, err := w.runModel(checkpoint)
+		fixResult, err := w.runModel(checkpoint)
 		if err != nil {
 			return err
 		}
@@ -629,7 +632,7 @@ func (w *Workflow) handleReviewResult(
 
 		return w.handleAutoFixResult(
 			request,
-			fixPacket,
+			fixResult,
 			reviewNumber,
 			nextAutoFixes,
 			phase,
@@ -640,27 +643,29 @@ func (w *Workflow) handleReviewResult(
 	}
 }
 
-func reviewNeedsHighRiskFloor(workerPacket packet.Packet, autoFixes int, hasDecision bool, hasPriorReview bool) bool {
-	return workerPacket.Risk() == "HIGH" || autoFixes > 0 || hasDecision || hasPriorReview
+func reviewNeedsHighRiskFloor(workerResult packet.Result, autoFixes int, hasDecision bool, hasPriorReview bool) bool {
+	return workerResult.Risk == packet.RiskHigh || autoFixes > 0 || hasDecision || hasPriorReview
 }
 
-// reportOnlyFixTargetsはFIX_REQUIREDのTARGETS予約値。reviewerがコード・diffを正しいと確認し
-// workerのPACKET/reportの意味情報だけを不足と指摘するときに使い、productionは実装修正と
-// 報告再出力をこの値だけで機械識別する。自然言語の解釈は行わない。
-const reportOnlyFixTargets = "PACKET"
-
-func isReportOnlyFix(reviewPacket packet.Packet) bool {
-	return reviewPacket.Status() == "FIX_REQUIRED" && reviewPacket.Fields["TARGETS"] == reportOnlyFixTargets
+// isReportOnlyFixはreviewer結果が実装修正ではなく報告再出力専用のTARGETS予約値("PACKET")かを
+// packet共通判定へ委譲する。productionはこの機械識別だけで実装修正と報告再出力を分岐する。
+func isReportOnlyFix(reviewResult packet.Result) bool {
+	return packet.IsReportOnlyFix(reviewResult)
 }
 
-// packetCompactPhaseSuffixはpacket圧縮再実行時にrunModelがphase末尾へ付与する固定suffix。
-// reportOnlyFromPhaseが圧縮済み旧checkpointもreport-only推定へ含めるため、生成側と共有する。
-const packetCompactPhaseSuffix = "-packet-compact"
+// resultCorrectionPhaseSuffixは意味検証不合格の修正再依頼時にrunModelがphase末尾へ付与する
+// 固定suffix。reportOnlyFromPhaseが修正済みcheckpointもreport-only推定へ含めるため共有する。
+// legacyPacketCompactPhaseSuffixは旧テキストPACKET protocolの構造欠陥再圧縮suffixで、
+// 旧binaryが保存したcheckpointのresume推定のためだけ残す。
+const (
+	resultCorrectionPhaseSuffix    = "-result-correct"
+	legacyPacketCompactPhaseSuffix = "-packet-compact"
+)
 
 // isReportOnlyResumeはresume checkpointがreport-only PACKET再出力工程かを判定する。
 // 新checkpointはReportOnly fieldを第一判定とし、旧binaryが保存したcheckpointは
-// ReportOnly fieldを持たないため厳格なphase生成形式"worker-report-only-<十進数>"(packet
-// 圧縮suffix付きを含む)の全体一致から推定する。部分一致や類似phase(worker-auto-fix-N等)
+// ReportOnly fieldを持たないため厳格なphase生成形式"worker-report-only-<十進数>"(修正再依頼・
+// 旧圧縮suffix付きを含む)の全体一致から推定する。部分一致や類似phase(worker-auto-fix-N等)
 // へ誤適用しない。
 func isReportOnlyResume(checkpoint state.ResumeCheckpoint) bool {
 	return checkpoint.ReportOnly || reportOnlyFromPhase(checkpoint.Phase)
@@ -671,9 +676,10 @@ func reportOnlyFromPhase(phase string) bool {
 		return false
 	}
 	suffix := strings.TrimPrefix(phase, "worker-report-only-")
-	// 圧縮再実行は一度だけしか付与されない(PacketCompactedで再圧縮を禁止)ため、
+	// 修正再依頼・旧圧縮再実行は一度だけしか付与されない(ResultCorrectionで再依頼を禁止)ため、
 	// この固定suffix 1回だけを除去して残りが十進数かを見る。
-	suffix = strings.TrimSuffix(suffix, packetCompactPhaseSuffix)
+	suffix = strings.TrimSuffix(suffix, resultCorrectionPhaseSuffix)
+	suffix = strings.TrimSuffix(suffix, legacyPacketCompactPhaseSuffix)
 	if suffix == "" {
 		return false
 	}
@@ -699,13 +705,13 @@ func riskLabel(high bool) string {
 	return "LOW"
 }
 
-func (w *Workflow) computeEffectiveRisk(workerPacket packet.Packet, autoFixes int, hasDecision bool, hasPriorReview bool) effectiveRisk {
+func (w *Workflow) computeEffectiveRisk(workerResult packet.Result, autoFixes int, hasDecision bool, hasPriorReview bool) effectiveRisk {
 	sp := w.selfProtectionNow()
-	if !reviewNeedsHighRiskFloor(workerPacket, autoFixes, hasDecision, hasPriorReview) && !sp.High {
+	if !reviewNeedsHighRiskFloor(workerResult, autoFixes, hasDecision, hasPriorReview) && !sp.High {
 		return effectiveRisk{high: false}
 	}
 	var sources []string
-	if workerPacket.Risk() == "HIGH" {
+	if workerResult.Risk == packet.RiskHigh {
 		sources = append(sources, "worker-declared")
 	}
 	if autoFixes > 0 {
@@ -737,12 +743,12 @@ func (w *Workflow) selfProtectionNow() selfProtectionDecision {
 // 保存LOW・未計算(旧checkpoint)は現在の自己保護を再評価してHIGHへ昇格できる。これによりpolicy更新後に
 // 保存LOWがcritical変更をLOWへ固定するfail-openを防ぐ。永続policy versionは持たず、LOW再評価が常に
 // 現行policyへ照合するためversion陳腐化は起きない。
-func (w *Workflow) resolveReviewResumeRisk(workerPacket packet.Packet, checkpoint state.ResumeCheckpoint) effectiveRisk {
+func (w *Workflow) resolveReviewResumeRisk(workerResult packet.Result, checkpoint state.ResumeCheckpoint) effectiveRisk {
 	if checkpoint.EffectiveRisk == "HIGH" {
 		return effectiveRisk{high: true, source: checkpoint.EffectiveRiskSource}
 	}
 	hasDecision := w.state.Exists("last-decision")
-	return w.computeEffectiveRisk(workerPacket, checkpoint.AutoFixes, hasDecision, w.state.Exists("last-review"))
+	return w.computeEffectiveRisk(workerResult, checkpoint.AutoFixes, hasDecision, w.state.Exists("last-review"))
 }
 
 func (w *Workflow) reviewerModel(risk effectiveRisk) string {
@@ -754,22 +760,22 @@ func (w *Workflow) reviewerModel(risk effectiveRisk) string {
 
 func (w *Workflow) handleAutoFixResult(
 	request string,
-	fixPacket packet.Packet,
+	fixResult packet.Result,
 	reviewNumber int,
 	autoFixes int,
 	fixPhase string,
 ) error {
-	switch fixPacket.Status() {
-	case "NEEDS_SOL_DECISION":
+	switch fixResult.Status {
+	case packet.StatusNeedsSolDecision:
 		if err := w.state.Touch("pending-decision"); err != nil {
 			return err
 		}
 		if err := w.state.SetTaskStatus(state.TaskStatusWaitingDecision); err != nil {
 			return err
 		}
-		return w.emitPacket(fixPacket)
+		return w.emitResult(fixResult)
 
-	case "IMPLEMENTED":
+	case packet.StatusImplemented:
 		if err := w.state.Remove("pending-decision"); err != nil {
 			return err
 		}
@@ -778,7 +784,7 @@ func (w *Workflow) handleAutoFixResult(
 		}
 		return w.reviewUntilStable(
 			request,
-			fixPacket,
+			fixResult,
 			reviewNumber+1,
 			autoFixes,
 			fixPhase,
@@ -789,12 +795,12 @@ func (w *Workflow) handleAutoFixResult(
 	}
 }
 
-func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, error) {
+func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Result, error) {
 	outputPath := filepath.Join(w.temp, checkpoint.Phase+".log")
 	if checkpoint.Role == state.WorkerRole {
 		artifactDir, err := w.state.PrepareArtifactDir()
 		if err != nil {
-			return packet.Packet{}, err
+			return packet.Result{}, err
 		}
 		checkpoint.Prompt = withArtifactContext(checkpoint.Prompt, artifactDir)
 		if checkpoint.OriginalPrompt != "" {
@@ -806,7 +812,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 		checkpoint.OriginalPrompt = checkpoint.Prompt
 	}
 	if checkpoint.Model == "" {
-		return packet.Packet{}, fmt.Errorf("STATUS: WORKER_ERROR\nPHASE: %s\nERROR: checkpoint model is missing", checkpoint.Phase)
+		return packet.Result{}, fmt.Errorf("STATUS: WORKER_ERROR\nPHASE: %s\nERROR: checkpoint model is missing", checkpoint.Phase)
 	}
 	if checkpoint.Effort == "" {
 		checkpoint.Effort = w.config.RoutineEffort
@@ -816,10 +822,10 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	// 失敗したとき呼出を実行していない事実とstats/telemetryの加法整合を保つためである。
 	guardBefore, stopped, err := w.captureParentFileGuard(checkpoint.Role)
 	if stopped {
-		return packet.Packet{}, err
+		return packet.Result{}, err
 	}
 	if err := w.state.SaveResumeCheckpoint(checkpoint); err != nil {
-		return packet.Packet{}, err
+		return packet.Result{}, err
 	}
 	w.state.RecordModelCall(checkpoint.Role, checkpoint.Model)
 
@@ -836,7 +842,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 	completedAt := w.now().UTC()
 	w.state.RecordModelDuration(checkpoint.Model, completedAt.Sub(startedAt))
 	if stopped, err := w.verifyParentFileAfterCall(checkpoint, guardBefore, runResult, startedAt, completedAt, runErr, outputPath); stopped {
-		return packet.Packet{}, err
+		return packet.Result{}, err
 	}
 	failureClass := runner.ProviderFailureClass{}
 	if runErr != nil {
@@ -845,8 +851,30 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 			runResult.PlainFailure,
 		)
 		if failureClass.Kind == runner.ProviderFailureZaiFiveHour {
-			return packet.Packet{}, w.saveRateLimitedState(checkpoint, failureClass.FiveHourLimit, runResult, startedAt, completedAt, runErr, outputPath)
+			return packet.Result{}, w.saveRateLimitedState(checkpoint, failureClass.FiveHourLimit, runResult, startedAt, completedAt, runErr, outputPath)
 		}
+	}
+
+	// structured output契約不成立(schema適合retry枯渇・成功時のstructured_output欠落)は
+	// provider分類・transient recovery・修正再依頼の対象にせずfail closedで終える。
+	// 失敗内容を修復する情報が結果側に残らず、同じ呼出を重ねてもprovider消費だけが増えるためである。
+	var structuredErr *runner.StructuredOutputError
+	if runErr != nil && errors.As(runErr, &structuredErr) {
+		// structured_retry_exhaustedはCLI内部のschema適合retry枯渇回数だけを数える。
+		// 成功resultでのstructured_output欠落は別の契約欠損であり、
+		// PacketRejectReason=structured-outputのraw telemetryだけで観測する。
+		if structuredErr.RetryExhausted() {
+			w.state.RecordStructuredRetryExhausted()
+		}
+		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "invalid_packet", "", runErr, outputPath, callDiagnostics{})
+		_ = w.state.ClearResumeCheckpoint()
+		_ = w.state.RemoveUnreadySession(checkpoint.Role)
+		return packet.Result{}, fmt.Errorf(
+			"STATUS: WORKER_ERROR\nPHASE: %s-structured-output\nERROR: %v\nOUTPUT_TAIL_BEGIN\n%s\nOUTPUT_TAIL_END",
+			checkpoint.Phase,
+			runErr,
+			packet.Tail(outputPath, 20),
+		)
 	}
 
 	// Z.ai 5h上限以外の一時障害(502/503/504/529・明確な一時network障害)は同じsession/checkpointと
@@ -866,18 +894,18 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 			// recovery中の親Codex専有file不変性違反は既にfail closed停止へ遷移済みのため、
 			// 5h/provider停止やfatal扱いに上書きせずそのまま伝播させる。
 			if errors.Is(recErr, errParentFileGuardStopped) {
-				return packet.Packet{}, recErr
+				return packet.Result{}, recErr
 			}
 			var pErr *runner.ProviderUnavailableError
 			if errors.As(recErr, &pErr) {
 				_ = w.state.SecureArtifactDir()
 				w.state.RecordProviderUnavailable(checkpoint.Model)
-				return packet.Packet{}, recErr
+				return packet.Result{}, recErr
 			}
 			var limitErr runner.ZaiRateLimitError
 			if errors.As(recErr, &limitErr) {
 				// 5h上限checkpointは保存済みのため、WORKER_ERROR分岐でcheckpointを壊させない。
-				return packet.Packet{}, recErr
+				return packet.Result{}, recErr
 			}
 			runResult = resumeResult
 			startedAt = resumeStartedAt
@@ -894,7 +922,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 		if !recoveryFatal {
 			w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", err, outputPath, callDiagnostics{})
 		}
-		return packet.Packet{}, err
+		return packet.Result{}, err
 	}
 	if runErr != nil {
 		if !recoveryFatal {
@@ -902,7 +930,7 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 		}
 		_ = w.state.ClearResumeCheckpoint()
 		_ = w.state.RemoveUnreadySession(checkpoint.Role)
-		return packet.Packet{}, workerError(
+		return packet.Result{}, workerError(
 			checkpoint.Phase,
 			outputPath,
 			runErr,
@@ -911,38 +939,47 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Packet, e
 
 	if err := w.state.ClearResumeCheckpoint(); err != nil {
 		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", err, outputPath, callDiagnostics{})
-		return packet.Packet{}, err
+		return packet.Result{}, err
 	}
 
-	result, err := packet.Parse(outputPath)
+	result, err := packet.ParseStructured(runResult.StructuredOutput)
 	if err == nil {
-		taskID, taskErr := w.state.TaskID()
-		if taskErr != nil {
-			w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", taskErr, outputPath, callDiagnostics{})
-			return packet.Packet{}, taskErr
+		if checkpoint.Role == state.ReviewerRole {
+			err = packet.ValidateReviewerResult(result)
+		} else {
+			err = packet.ValidateWorkerResult(result)
 		}
-		err = packet.ValidateArtifacts(result, w.state.ArtifactDir(taskID))
+		if err == nil {
+			taskID, taskErr := w.state.TaskID()
+			if taskErr != nil {
+				w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "state_error", "", taskErr, outputPath, callDiagnostics{})
+				return packet.Result{}, taskErr
+			}
+			err = packet.ValidateArtifacts(result.Artifacts, w.state.ArtifactDir(taskID))
+		}
 	}
 	if err != nil {
 		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "invalid_packet", "", err, outputPath, callDiagnostics{})
-		if packet.IsConstraintError(err) && !checkpoint.PacketCompacted {
-			w.state.RecordPacketCompaction()
-			compactCheckpoint := checkpoint
-			compactCheckpoint.Phase += packetCompactPhaseSuffix
-			compactPrompt := packetCompressionPrompt(err.Error())
-			compactCheckpoint.Prompt = compactPrompt
-			compactCheckpoint.OriginalPrompt = compactPrompt
-			compactCheckpoint.PacketCompacted = true
-			return w.runModel(compactCheckpoint)
+		// 意味検証不合格だけが修正再依頼できる。schemaが強制する構造はもう保証済みのため、
+		// 旧構造欠陥再圧縮と違い、失敗理由を伝える1回の同一session再依頼に置き換える。
+		if packet.IsConstraintError(err) && !checkpoint.ResultCorrection {
+			w.state.RecordResultCorrection()
+			correctCheckpoint := checkpoint
+			correctCheckpoint.Phase += resultCorrectionPhaseSuffix
+			correctPrompt := resultCorrectionPrompt(err.Error())
+			correctCheckpoint.Prompt = correctPrompt
+			correctCheckpoint.OriginalPrompt = correctPrompt
+			correctCheckpoint.ResultCorrection = true
+			return w.runModel(correctCheckpoint)
 		}
-		return packet.Packet{}, fmt.Errorf(
+		return packet.Result{}, fmt.Errorf(
 			"STATUS: WORKER_ERROR\nPHASE: %s-format\nERROR: %v\nOUTPUT_TAIL_BEGIN\n%s\nOUTPUT_TAIL_END",
 			checkpoint.Phase,
 			err,
 			packet.Tail(outputPath, 20),
 		)
 	}
-	w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "success", result.Status(), nil, outputPath, callDiagnostics{reportedRisk: result.Risk()})
+	w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "success", string(result.Status), nil, outputPath, callDiagnostics{reportedRisk: string(result.Risk)})
 	return result, nil
 }
 
@@ -1438,6 +1475,9 @@ func (w *Workflow) applyCallDiagnostics(entry *state.ModelCallLog, checkpoint st
 	}
 	if outcome == "invalid_packet" && callErr != nil {
 		category := packet.RejectCategory(callErr)
+		if runner.IsStructuredOutputError(callErr) {
+			category = "structured-output"
+		}
 		entry.PacketRejectReason = category
 		w.state.RecordPacketReject(category)
 	}
@@ -1492,38 +1532,38 @@ func workerError(phase string, outputPath string, runErr error) error {
 	)
 }
 
-func (w *Workflow) emitPacket(value packet.Packet) error {
-	w.state.RecordSolPacket(value)
-	fmt.Fprintln(w.output, value.String())
+func (w *Workflow) emitResult(value packet.Result) error {
+	w.state.RecordSolResult(value)
+	fmt.Fprintln(w.output, value.Display())
 	return nil
 }
 
 func (w *Workflow) enforceRiskFloor(
 	request string,
-	workerPacket packet.Packet,
+	workerResult packet.Result,
 	reviewNumber int,
 	autoFixes int,
 	decision string,
 	effectiveHigh bool,
-	reviewPacket packet.Packet,
-) (packet.Packet, bool, error) {
-	if !effectiveHigh || reviewPacket.Status() != "PASS" {
-		return reviewPacket, false, nil
+	reviewResult packet.Result,
+) (packet.Result, bool, error) {
+	if !effectiveHigh || reviewResult.Status != packet.StatusPass {
+		return reviewResult, false, nil
 	}
-	reemitPacket, stopped, err := w.riskFloorReemit(request, workerPacket, reviewNumber, autoFixes, decision)
+	reemitResult, stopped, err := w.riskFloorReemit(request, workerResult, reviewNumber, autoFixes, decision)
 	if err != nil || stopped {
-		return packet.Packet{}, stopped, err
+		return packet.Result{}, stopped, err
 	}
-	return reemitPacket, false, nil
+	return reemitResult, false, nil
 }
 
 func (w *Workflow) riskFloorReemit(
 	request string,
-	workerPacket packet.Packet,
+	workerResult packet.Result,
 	reviewNumber int,
 	autoFixes int,
 	decision string,
-) (packet.Packet, bool, error) {
+) (packet.Result, bool, error) {
 	prompt := riskFloorReemitPrompt()
 	checkpoint := state.ResumeCheckpoint{
 		Stage:           state.ResumeStageReview,
@@ -1536,44 +1576,44 @@ func (w *Workflow) riskFloorReemit(
 		OriginalPrompt:  prompt,
 		Request:         request,
 		Decision:        decision,
-		WorkerPacket:    append([]string(nil), workerPacket.Lines...),
+		WorkerResult:    &workerResult,
 		ReviewNumber:    reviewNumber,
 		AutoFixes:       autoFixes,
 		RiskFloorReemit: true,
 	}
-	reemitPacket, err := w.runModel(checkpoint)
+	reemitResult, err := w.runModel(checkpoint)
 	if err != nil {
-		return packet.Packet{}, false, err
+		return packet.Result{}, false, err
 	}
 	if stopped, err := w.verifyReviewEndSnapshot(); err != nil {
-		return packet.Packet{}, false, err
+		return packet.Result{}, false, err
 	} else if stopped {
-		return packet.Packet{}, true, nil
+		return packet.Result{}, true, nil
 	}
-	return resolveRiskFloorReemit(reemitPacket), false, nil
+	return resolveRiskFloorReemit(reemitResult), false, nil
 }
 
-func resolveRiskFloorReemit(reemitPacket packet.Packet) packet.Packet {
-	if reemitPacket.Status() == "NEEDS_SOL_REVIEW" {
-		return reemitPacket
+func resolveRiskFloorReemit(reemitResult packet.Result) packet.Result {
+	if reemitResult.Status == packet.StatusNeedsSolReview {
+		return reemitResult
 	}
-	return riskFloorFailClosedPacket(reemitPacket)
+	return riskFloorFailClosedResult(reemitResult)
 }
 
-func riskFloorFailClosedPacket(reemitPacket packet.Packet) packet.Packet {
-	return packet.FromLines([]string{
-		"STATUS: NEEDS_SOL_REVIEW",
-		"RISK: HIGH",
-		fmt.Sprintf("SUMMARY: reviewerがrisk floor再出力要求へ従わず%sを返したためSol確認へ昇格", reemitPacket.Status()),
-		"REQUIREMENT_COVERAGE: reviewer再出力が非準拠のためSolが直接確認する必要あり",
-		"INVARIANTS: wrapper risk floorはHIGH RISK経路のreviewer PASSを許容しない",
-		"TEST_EVIDENCE: reviewer同一sessionへNEEDS_SOL_REVIEW/HIGH再出力を依頼済み",
-		fmt.Sprintf("ISSUES: reviewer再出力が非許容STATUS(%s)を返却", reemitPacket.Status()),
-		"RESIDUAL_RISK: reviewer判断だけでHIGH RISK経路を完了扱いできない",
-		"TARGETS: 直近reviewer出力と最終diff",
-		fmt.Sprintf("ARTIFACTS: %s", reemitPacket.Fields["ARTIFACTS"]),
-		"SOL_QUESTION: reviewer非準拠時の最終確認・修正方針をSolが判断する",
-	})
+func riskFloorFailClosedResult(reemitResult packet.Result) packet.Result {
+	return packet.Result{
+		Status:              packet.StatusNeedsSolReview,
+		Risk:                packet.RiskHigh,
+		Summary:             fmt.Sprintf("reviewerがrisk floor再出力要求へ従わず%sを返したためSol確認へ昇格", reemitResult.Status),
+		RequirementCoverage: "reviewer再出力が非準拠のためSolが直接確認する必要あり",
+		Invariants:          "wrapper risk floorはHIGH RISK経路のreviewer PASSを許容しない",
+		TestEvidence:        "reviewer同一sessionへNEEDS_SOL_REVIEW/HIGH再出力を依頼済み",
+		Issues:              fmt.Sprintf("reviewer再出力が非許容STATUS(%s)を返却", reemitResult.Status),
+		ResidualRisk:        "reviewer判断だけでHIGH RISK経路を完了扱いできない",
+		Targets:             []string{"直近reviewer出力と最終diff"},
+		Artifacts:           append([]string(nil), reemitResult.Artifacts...),
+		SolQuestion:         "reviewer非準拠時の最終確認・修正方針をSolが判断する",
+	}
 }
 
 func (w *Workflow) captureWorkerEndSnapshot() (state.GitSnapshot, bool, error) {
@@ -1760,7 +1800,7 @@ func (w *Workflow) verifyReviewEndSnapshot() (bool, error) {
 // 併せてsnapshot診断をtelemetry/statsへbest-effort記録する(本flowは止めない)。
 func (w *Workflow) failClosedSnapshot(stage state.SnapshotStage, workerEnd, reviewStart state.GitSnapshot, reason string, cause error) error {
 	w.recordSnapshotEvent(state.ReviewerRole, stage, workerEnd, reviewStart, reason, cause)
-	return w.failClosedStopped(stage, reason, cause, snapshotFailClosedPacket)
+	return w.failClosedStopped(stage, reason, cause, snapshotFailClosedResult)
 }
 
 // failClosedReportOnlySnapshotはreport-only worker前後の不変性確認失敗を同じ停止semantics
@@ -1768,10 +1808,10 @@ func (w *Workflow) failClosedSnapshot(stage state.SnapshotStage, workerEnd, revi
 // 前後invariantのため、event roleとpacket文言をreview-start/end検証と区別する。
 func (w *Workflow) failClosedReportOnlySnapshot(stage state.SnapshotStage, start, current state.GitSnapshot, reason string, cause error) error {
 	w.recordSnapshotEvent(state.WorkerRole, stage, start, current, reason, cause)
-	return w.failClosedStopped(stage, reason, cause, reportOnlySnapshotFailClosedPacket)
+	return w.failClosedStopped(stage, reason, cause, reportOnlySnapshotFailClosedResult)
 }
 
-func (w *Workflow) failClosedStopped(stage state.SnapshotStage, reason string, cause error, build func(state.SnapshotStage, string) packet.Packet) error {
+func (w *Workflow) failClosedStopped(stage state.SnapshotStage, reason string, cause error, build func(state.SnapshotStage, string) packet.Result) error {
 	if err := w.state.ClearResumeCheckpoint(); err != nil {
 		return err
 	}
@@ -1781,7 +1821,7 @@ func (w *Workflow) failClosedStopped(stage state.SnapshotStage, reason string, c
 	if cause != nil {
 		reason = fmt.Sprintf("%s: %v", reason, cause)
 	}
-	return w.emitPacket(build(stage, reason))
+	return w.emitResult(build(stage, reason))
 }
 
 // recordSnapshotEventはsnapshot同一性確認失敗をtelemetryへ記録する。比較結果に応じて
@@ -1820,53 +1860,51 @@ func snapshotDiagnosticPtr(diag state.SnapshotDiagnostic) *state.SnapshotDiagnos
 	return &diag
 }
 
-func snapshotFailClosedPacket(stage state.SnapshotStage, reason string) packet.Packet {
-	return packet.FromLines([]string{
-		"STATUS: NEEDS_SOL_REVIEW",
-		"RISK: HIGH",
-		fmt.Sprintf("SUMMARY: worker終了状態とreview開始状態の同一性確認に失敗しreviewerを呼ばずSol確認へ昇格(%s)", stage),
-		"REQUIREMENT_COVERAGE: reviewerへ状態を引き渡す前にSolが直接確認する必要あり",
-		"INVARIANTS: wrapperはworker-endとreview-start snapshotの3軸一致を確認するまでreviewerを呼ばない",
-		"TEST_EVIDENCE: HEAD/index/worktree snapshotの比較・取得結果で不一致または失敗を検出",
-		fmt.Sprintf("ISSUES: %s", reason),
-		"RESIDUAL_RISK: reviewerがworkerと別の状態をreviewする可能性を排除できなかった",
-		"TARGETS: repository HEAD/index/worktreeの現在状態と保存済みsnapshot state file",
-		"ARTIFACTS: none",
-		"SOL_QUESTION: worker終了状態とreview開始状態の差異・外部変更の有無をSolが判断する",
-	})
+func snapshotFailClosedResult(stage state.SnapshotStage, reason string) packet.Result {
+	return packet.Result{
+		Status:              packet.StatusNeedsSolReview,
+		Risk:                packet.RiskHigh,
+		Summary:             fmt.Sprintf("worker終了状態とreview開始状態の同一性確認に失敗しreviewerを呼ばずSol確認へ昇格(%s)", stage),
+		RequirementCoverage: "reviewerへ状態を引き渡す前にSolが直接確認する必要あり",
+		Invariants:          "wrapperはworker-endとreview-start snapshotの3軸一致を確認するまでreviewerを呼ばない",
+		TestEvidence:        "HEAD/index/worktree snapshotの比較・取得結果で不一致または失敗を検出",
+		Issues:              reason,
+		ResidualRisk:        "reviewerがworkerと別の状態をreviewする可能性を排除できなかった",
+		Targets:             []string{"repository HEAD/index/worktreeの現在状態と保存済みsnapshot state file"},
+		SolQuestion:         "worker終了状態とreview開始状態の差異・外部変更の有無をSolが判断する",
+	}
 }
 
-// reportOnlySnapshotFailClosedPacketはreport-only PACKET再出力workerの前後同一性確認失敗時の
-// Sol確認packet。reviewer自身のreview-start/end mutation検出とは主体が違い、report-only workerの
+// reportOnlySnapshotFailClosedResultはreport-only PACKET再出力workerの前後同一性確認失敗時の
+// Sol確認結果。reviewer自身のreview-start/end mutation検出とは主体が違い、report-only workerの
 // 開始前snapshot基準であることをSolへ区別可能にする。
-func reportOnlySnapshotFailClosedPacket(stage state.SnapshotStage, reason string) packet.Packet {
-	return packet.FromLines([]string{
-		"STATUS: NEEDS_SOL_REVIEW",
-		"RISK: HIGH",
-		fmt.Sprintf("SUMMARY: report-only PACKET再出力workerの開始前後でHEAD/index/worktree同一性を確認できず(%s)、通常reviewへ進めずSol確認へ昇格", stage),
-		"REQUIREMENT_COVERAGE: report-only workerのrepo不変postconditionを機械強制できなかったためSolが直接確認する必要あり",
-		"INVARIANTS: wrapperはreport-only worker開始前snapshotと終了後状態の3軸一致を確認するまで通常reviewへ進まない",
-		"TEST_EVIDENCE: 開始前保存snapshotと終了後snapshotの比較で不一致または取得失敗を検出",
-		fmt.Sprintf("ISSUES: %s", reason),
-		"RESIDUAL_RISK: report-only workerがrepositoryを変更した可能性とその意図を排除できなかった",
-		"TARGETS: repository HEAD/index/worktreeの現在状態とreport-only開始前snapshot・telemetry記録",
-		"ARTIFACTS: none",
-		"SOL_QUESTION: report-only workerによる変更の意図有無と追跡・修正方針をSolが判断する",
-	})
+func reportOnlySnapshotFailClosedResult(stage state.SnapshotStage, reason string) packet.Result {
+	return packet.Result{
+		Status:              packet.StatusNeedsSolReview,
+		Risk:                packet.RiskHigh,
+		Summary:             fmt.Sprintf("report-only PACKET再出力workerの開始前後でHEAD/index/worktree同一性を確認できず(%s)、通常reviewへ進めずSol確認へ昇格", stage),
+		RequirementCoverage: "report-only workerのrepo不変postconditionを機械強制できなかったためSolが直接確認する必要あり",
+		Invariants:          "wrapperはreport-only worker開始前snapshotと終了後状態の3軸一致を確認するまで通常reviewへ進まない",
+		TestEvidence:        "開始前保存snapshotと終了後snapshotの比較で不一致または取得失敗を検出",
+		Issues:              reason,
+		ResidualRisk:        "report-only workerがrepositoryを変更した可能性とその意図を排除できなかった",
+		Targets:             []string{"repository HEAD/index/worktreeの現在状態とreport-only開始前snapshot・telemetry記録"},
+		SolQuestion:         "report-only workerによる変更の意図有無と追跡・修正方針をSolが判断する",
+	}
 }
 
-func nonConvergedPacket(reviewPacket packet.Packet) packet.Packet {
-	return packet.FromLines([]string{
-		"STATUS: NEEDS_SOL_REVIEW",
-		"RISK: HIGH",
-		"SUMMARY: GLM workerと独立reviewerの自動修正が規定回数内に収束しなかった",
-		"REQUIREMENT_COVERAGE: 最終状態をSol Highで確認する必要あり",
-		"INVARIANTS: 未確定",
-		"TEST_EVIDENCE: 直近worker/reviewerで検証実施",
-		fmt.Sprintf("ISSUES: %s", reviewPacket.Fields["ISSUES"]),
-		"RESIDUAL_RISK: reviewer指摘が残っている可能性",
-		"TARGETS: 最終diffと直近reviewer指摘に限定",
-		fmt.Sprintf("ARTIFACTS: %s", reviewPacket.Fields["ARTIFACTS"]),
-		"SOL_QUESTION: 未解決問題の修正方針を判断する",
-	})
+func nonConvergedResult(reviewResult packet.Result) packet.Result {
+	return packet.Result{
+		Status:              packet.StatusNeedsSolReview,
+		Risk:                packet.RiskHigh,
+		Summary:             "GLM workerと独立reviewerの自動修正が規定回数内に収束しなかった",
+		RequirementCoverage: "最終状態をSol Highで確認する必要あり",
+		Invariants:          "未確定",
+		TestEvidence:        "直近worker/reviewerで検証実施",
+		Issues:              reviewResult.Issues,
+		ResidualRisk:        "reviewer指摘が残っている可能性",
+		Targets:             []string{"最終diffと直近reviewer指摘に限定"},
+		Artifacts:           append([]string(nil), reviewResult.Artifacts...),
+		SolQuestion:         "未解決問題の修正方針を判断する",
+	}
 }

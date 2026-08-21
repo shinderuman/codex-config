@@ -23,7 +23,7 @@
 - test・lint・buildの大量ログは必要なら一時ファイルへ保存し、成功時は要約、失敗時は原因特定に必要な箇所だけ確認する。
 - 変更していない大きな内容や、既に確認済みの同じ出力を理由なく再読しない。
 - コンテキスト節約のために根本原因調査、要求確認、必要テストを削ってはならない。
-- PACKETへ収まらない正確な一覧・長い監査報告・生成物が必要な場合だけ、実行時に示される`REPORT_ARTIFACT_DIR`へ保存する。リポジトリへ追加せず、PACKETには内容を再掲せず絶対パスだけを記載する。
+- 結果へ収まらない正確な一覧・長い監査報告・生成物が必要な場合だけ、実行時に示される`REPORT_ARTIFACT_DIR`へ保存する。リポジトリへ追加せず、結果のARTIFACTSには内容を再掲せず絶対パスだけを記載する。
 
 ## MODE: NEW_TASK
 まず必要な一次調査を行う。
@@ -82,28 +82,25 @@
 - `RISK: HIGH`を返す変更では、Solがdiff全体を読み直さず判断できるよう、該当する観点だけを既存fieldへ圧縮する。変更前後の契約(公開挙動・API・出力形式の意味の差)・失敗境界(どの入力・状態で失敗し何が起きるか)・主要状態遷移はSUMMARYへ、検証scenarioとtelemetry/集計metricの意味・加法整合性の確認結果はTESTSへ、互換性/rollback/recoveryの懸念はUNVERIFIEDへ入れる。低リスク変更や該当しない観点へ形式的な文面を入れない。
 
 ## 出力
-途中経過・読んだファイル一覧・grep結果・大量コードを最終出力へ含めない。次のいずれかのPACKETだけを出力する。`PACKET_BEGIN`を最初の物理行、`PACKET_END`を最後の物理行にし、前後の説明や空行を付けない。最大15行・全体6 KiB以内。各fieldは`KEY: value`形式のちょうど1物理行へ一度だけ記載し、箇条書きや継続行を使わない。複数事項は同じvalue内でセミコロン区切りにし、判断に必要な意味情報だけへ圧縮する。
+途中経過・読んだファイル一覧・grep結果・大量コードを最終出力へ含めない。作業の最後には、実行環境が指定する構造化出力(schema)へ従った結果を1つだけ返す。STATUS・RISKのenum、fieldの型、status・risk・artifactsの必須は実行環境のschemaが強制するため、ここでは各fieldの意味契約だけを守る。
 
-PACKET_BEGIN
-STATUS: NEEDS_SOL_DECISION
-RISK: HIGH
-DECISION: <Solが決めるべき一点>
-EVIDENCE: <判断に必要な確認済み事実だけ>
-OPTIONS: <合理的候補>
-RECOMMENDATION: <推奨案と短い理由>
-TEST_OBLIGATIONS: <重要保証事項>
-TARGETS: <現物確認が必要ならfile:symbol等。不要ならnone>
-ARTIFACTS: none | <REPORT_ARTIFACT_DIR配下に保存した実在通常ファイルの絶対パス。複数はセミコロン区切り。内容は再掲しない>
-PACKET_END
+STATUSは`IMPLEMENTED`(実装完了)または`NEEDS_SOL_DECISION`(Sol判断が必要)。`NEEDS_SOL_DECISION`のRISKは必ず`HIGH`。
 
-または:
+STATUSごとの必須field:
+- `IMPLEMENTED`: `SUMMARY`・`REQUIREMENT_COVERAGE`・`TESTS`・`UNVERIFIED`
+- `NEEDS_SOL_DECISION`: `DECISION`・`EVIDENCE`・`OPTIONS`・`RECOMMENDATION`・`TEST_OBLIGATIONS`
 
-PACKET_BEGIN
-STATUS: IMPLEMENTED
-RISK: LOW | HIGH
-SUMMARY: <実施内容を1物理行の2-4短文へ圧縮>
-REQUIREMENT_COVERAGE: <要求充足>
-TESTS: <テスト結果要約>
-UNVERIFIED: <未確認事項。なければnone>
-ARTIFACTS: none | <REPORT_ARTIFACT_DIR配下に保存した実在通常ファイルの絶対パス。複数はセミコロン区切り。内容は再掲しない>
-PACKET_END
+fieldの意味契約:
+- `SUMMARY`: 実施内容を2-4短文へ圧縮
+- `REQUIREMENT_COVERAGE`: 要求充足
+- `TESTS`: テスト結果要約
+- `UNVERIFIED`: 未確認事項。なければnone
+- `DECISION`: Solが決めるべき一点
+- `EVIDENCE`: 判断に必要な確認済み事実だけ
+- `OPTIONS`: 合理的候補
+- `RECOMMENDATION`: 推奨案と短い理由
+- `TEST_OBLIGATIONS`: 重要保証事項
+- `TARGETS`: 現物確認が必要な対象のfile:symbol/行範囲の配列。不要なら空
+- `ARTIFACTS`: `REPORT_ARTIFACT_DIR`配下に保存した実在通常ファイルの絶対パスの配列。大容量成果物の内容は結果へ再掲せずパスだけを指定する。不要なら空
+
+各fieldの値は改行を含まない1つの文字列とし、複数事項はセミコロン区切りで判断に必要な意味情報だけへ圧縮する。結果全体は6 KiB・1 field 1536 bytes以内。意味契約へ不合格の場合、同じsessionで作業をやり直さない結果の修正再出力を1回だけ求められる。

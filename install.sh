@@ -200,6 +200,24 @@ build_glm_worker() {
     trap - EXIT HUP INT TERM
 }
 
+# verify_claude_cliはglm-workerのstructured output契約(--json-schema flag)をCLI側が
+# 支援しているかをAI呼び出しなしで確認する。PATH上に見つかるbinaryだけが検証対象で、
+# 見つからない場合はruntime構成(GLM_WORKER_CLAUDE_BIN)へ委ねてinstallは続行する。
+# 見つかったbinaryが--json-schemaを案内しない場合は全model呼出がfail closedになるため
+# install時点で失敗させる。
+verify_claude_cli() {
+    claude_bin="${GLM_WORKER_CLAUDE_BIN:-claude}"
+    if ! command -v "$claude_bin" >/dev/null 2>&1; then
+        printf 'claude cli: %s not on PATH; skipping contract check (glm-worker requires it at runtime)\n' "$claude_bin"
+        return 0
+    fi
+    if ! "$claude_bin" --help 2>/dev/null | grep -q -- '--json-schema'; then
+        printf 'claude cli: %s does not support --json-schema; upgrade Claude Code before install\n' "$claude_bin" >&2
+        return 1
+    fi
+    printf 'claude cli: %s supports --json-schema\n' "$claude_bin"
+}
+
 preflight() {
     build_dir=$(mktemp -d "${TMPDIR:-/tmp}/codex-worker-orchestrator-preflight.XXXXXX")
 
@@ -273,6 +291,7 @@ require install
 
 printf '%s\n' 'preflight: validating source before applying managed files'
 preflight || exit $?
+verify_claude_cli || exit $?
 build_glm_worker
 install_codex_files
 merge_codex_config

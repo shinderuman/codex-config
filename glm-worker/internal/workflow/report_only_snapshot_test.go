@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/packet"
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
 )
 
@@ -29,8 +28,8 @@ func requireReportOnlyFailClosed(t *testing.T, w *Workflow, out *bytes.Buffer, w
 		t.Fatalf("status = %q want waiting-sol-review", w.state.TaskStatus())
 	}
 	pkt := lastPacketFromOutput(t, out.String())
-	if pkt.Status() != "NEEDS_SOL_REVIEW" || pkt.Risk() != "HIGH" {
-		t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH", pkt.Status(), pkt.Risk())
+	if pkt.Status != "NEEDS_SOL_REVIEW" || pkt.Risk != "HIGH" {
+		t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH", pkt.Status, pkt.Risk)
 	}
 	if !strings.Contains(out.String(), "report-only worker開始前から終了後までの間にrepository状態が変化") &&
 		!strings.Contains(out.String(), "report-only開始前snapshot") {
@@ -280,7 +279,7 @@ func TestReportOnlyNoMutationMaintainsReviewRestartAndRiskFloor(t *testing.T) {
 		t.Fatalf("reviewer-2へreport-only promptが使われています: %s", r.prompts[3])
 	}
 	pkt := lastPacketFromOutput(t, out.String())
-	if pkt.Status() != "NEEDS_SOL_REVIEW" || !strings.Contains(pkt.Fields["SUMMARY"], "review") {
+	if pkt.Status != "NEEDS_SOL_REVIEW" || !strings.Contains(pkt.Summary, "review") {
 		t.Fatalf("reviewer-2結果が採用されるべき: %q", out.String())
 	}
 	start, err := w.state.LoadReportOnlyStartSnapshot()
@@ -351,7 +350,7 @@ func TestReportOnlyStartSnapshotSaveFailureStopsBeforeWorkerRun(t *testing.T) {
 	w.output = out
 	w.config.RepoRoot = repoRoot
 	w.captureSnapshot = state.CaptureGitSnapshot
-	reviewPacket := packet.FromLines([]string{
+	reviewPacket := resultFromLines(
 		"STATUS: FIX_REQUIRED",
 		"RISK: HIGH",
 		"SUMMARY: fix",
@@ -362,9 +361,9 @@ func TestReportOnlyStartSnapshotSaveFailureStopsBeforeWorkerRun(t *testing.T) {
 		"RESIDUAL_RISK: r",
 		"TARGETS: PACKET",
 		"ARTIFACTS: none",
-	})
+	)
 
-	if err := w.handleReviewResult("request", packet.FromLines(workerPacketLines()), reviewPacket, 1, 0); err != nil {
+	if err := w.handleReviewResult("request", resultFromLines(workerPacketLines()...), reviewPacket, 1, 0); err != nil {
 		t.Fatal(err)
 	}
 	if w.state.TaskStatus() != state.TaskStatusWaitingSolReview {
@@ -399,7 +398,7 @@ func TestReportOnlyComparisonSaveFailureFailsClosed(t *testing.T) {
 	w.config.RepoRoot = repoRoot
 	w.temp = t.TempDir()
 	w.captureSnapshot = state.CaptureGitSnapshot
-	reviewPacket := packet.FromLines([]string{
+	reviewPacket := resultFromLines(
 		"STATUS: FIX_REQUIRED",
 		"RISK: HIGH",
 		"SUMMARY: fix",
@@ -410,9 +409,9 @@ func TestReportOnlyComparisonSaveFailureFailsClosed(t *testing.T) {
 		"RESIDUAL_RISK: r",
 		"TARGETS: PACKET",
 		"ARTIFACTS: none",
-	})
+	)
 
-	if err := w.handleReviewResult("request", packet.FromLines(workerPacketLines()), reviewPacket, 1, 0); err != nil {
+	if err := w.handleReviewResult("request", resultFromLines(workerPacketLines()...), reviewPacket, 1, 0); err != nil {
 		t.Fatal(err)
 	}
 	if st.TaskStatus() != state.TaskStatusWaitingSolReview {
@@ -454,7 +453,7 @@ func TestReportOnlyEndSnapshotCaptureFailureFailsClosedNotMismatch(t *testing.T)
 		}
 		return realCapture(root)
 	}
-	reviewPacket := packet.FromLines([]string{
+	reviewPacket := resultFromLines(
 		"STATUS: FIX_REQUIRED",
 		"RISK: HIGH",
 		"SUMMARY: fix",
@@ -465,9 +464,9 @@ func TestReportOnlyEndSnapshotCaptureFailureFailsClosedNotMismatch(t *testing.T)
 		"RESIDUAL_RISK: r",
 		"TARGETS: PACKET",
 		"ARTIFACTS: none",
-	})
+	)
 
-	if err := w.handleReviewResult("request", packet.FromLines(workerPacketLines()), reviewPacket, 1, 0); err != nil {
+	if err := w.handleReviewResult("request", resultFromLines(workerPacketLines()...), reviewPacket, 1, 0); err != nil {
 		t.Fatal(err)
 	}
 	if st.TaskStatus() != state.TaskStatusWaitingSolReview {
@@ -599,7 +598,7 @@ func TestReportOnlyRateLimitResumeWithoutDriftProceedsToReview(t *testing.T) {
 		t.Fatal("resumeしたreport-only呼出もReadOnly capabilityであるべき")
 	}
 	pkt := lastPacketFromOutput(t, out.String())
-	if pkt.Status() != "NEEDS_SOL_REVIEW" || !strings.Contains(pkt.Fields["SUMMARY"], "review") {
+	if pkt.Status != "NEEDS_SOL_REVIEW" || !strings.Contains(pkt.Summary, "review") {
 		t.Fatalf("reviewer-2結果が採用されるべき: %q", out.String())
 	}
 	for _, l := range taskLogs(t, rw.state) {

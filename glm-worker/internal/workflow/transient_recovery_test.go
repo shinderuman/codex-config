@@ -114,8 +114,8 @@ func TestRecoveryProbeSuccessThenResumeCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("回復成功を期待: %v", err)
 	}
-	if result.Status() != "IMPLEMENTED" {
-		t.Fatalf("status = %q", result.Status())
+	if result.Status != "IMPLEMENTED" {
+		t.Fatalf("status = %q", result.Status)
 	}
 	if len(r.probes) != 2 || len(r.prompts) != 2 {
 		t.Fatalf("probes=%d prompts=%d", len(r.probes), len(r.prompts))
@@ -150,8 +150,8 @@ func TestRecoveryFromPlainStdoutTransientSignal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("回復成功を期待: %v", err)
 	}
-	if result.Status() != "IMPLEMENTED" {
-		t.Fatalf("status = %q", result.Status())
+	if result.Status != "IMPLEMENTED" {
+		t.Fatalf("status = %q", result.Status)
 	}
 	if len(r.probes) != 2 || len(r.prompts) != 2 {
 		t.Fatalf("probes=%d prompts=%d", len(r.probes), len(r.prompts))
@@ -234,8 +234,8 @@ func TestRecoveryResumeTransientRetriesNextBackoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("回復成功を期待: %v", err)
 	}
-	if result.Status() != "IMPLEMENTED" {
-		t.Fatalf("status = %q", result.Status())
+	if result.Status != "IMPLEMENTED" {
+		t.Fatalf("status = %q", result.Status)
 	}
 	if len(r.probes) != 2 || len(r.prompts) != 3 {
 		t.Fatalf("probes=%d prompts=%d", len(r.probes), len(r.prompts))
@@ -843,8 +843,8 @@ func TestRecoveryProbeContractFailureThenSuccessResumes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("回復成功を期待: %v", err)
 	}
-	if result.Status() != "IMPLEMENTED" {
-		t.Fatalf("status = %q", result.Status())
+	if result.Status != "IMPLEMENTED" {
+		t.Fatalf("status = %q", result.Status)
 	}
 	if len(r.probes) != 2 || len(r.prompts) != 2 {
 		t.Fatalf("probes=%d prompts=%d", len(r.probes), len(r.prompts))
@@ -1180,8 +1180,8 @@ func TestRecoveryProbeMixedTransientAuthWordRetriesAsTransient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("混在信号はtransient retry後に回復する: %v", err)
 	}
-	if result.Status() != "IMPLEMENTED" {
-		t.Fatalf("status = %q", result.Status())
+	if result.Status != "IMPLEMENTED" {
+		t.Fatalf("status = %q", result.Status)
 	}
 	if len(r.probes) != 2 || len(r.prompts) != 2 {
 		t.Fatalf("probes=%d prompts=%d", len(r.probes), len(r.prompts))

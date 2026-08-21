@@ -134,19 +134,11 @@ func TestTaskStatsRecordCounters(t *testing.T) {
 	st.RecordResume()
 	st.RecordAutoFix()
 	st.RecordRateLimit("haiku")
-	st.RecordPacketCompaction()
-	st.RecordSolPacket(packet.FromLines([]string{
-		"STATUS: PASS",
-		"RISK: LOW",
-	}))
-	st.RecordSolPacket(packet.FromLines([]string{
-		"STATUS: NEEDS_SOL_DECISION",
-		"RISK: HIGH",
-	}))
-	st.RecordSolPacket(packet.FromLines([]string{
-		"STATUS: NEEDS_SOL_REVIEW",
-		"RISK: HIGH",
-	}))
+	st.RecordResultCorrection()
+	st.RecordStructuredRetryExhausted()
+	st.RecordSolResult(packet.Result{Status: packet.StatusPass, Risk: packet.RiskLow})
+	st.RecordSolResult(packet.Result{Status: packet.StatusNeedsSolDecision, Risk: packet.RiskHigh})
+	st.RecordSolResult(packet.Result{Status: packet.StatusNeedsSolReview, Risk: packet.RiskHigh})
 
 	stats, err := st.loadTaskStats()
 	if err != nil {
@@ -158,7 +150,7 @@ func TestTaskStatsRecordCounters(t *testing.T) {
 	if stats.ModelCallsByAlias["opus"] != 1 || stats.ModelCallsByAlias["haiku"] != 1 || stats.ModelDurationMSByAlias["opus"] != 1500 || stats.RateLimitsByAlias["haiku"] != 1 {
 		t.Fatalf("model alias counters = %#v", stats)
 	}
-	if stats.PacketCompactions != 1 || stats.PassPackets != 1 || stats.NeedsSolDecisionPackets != 1 || stats.NeedsSolReviewPackets != 1 || stats.SolPacketBytes == 0 {
+	if stats.ResultCorrections != 1 || stats.StructuredRetryExhausted != 1 || stats.PassPackets != 1 || stats.NeedsSolDecisionPackets != 1 || stats.NeedsSolReviewPackets != 1 || stats.SolPacketBytes == 0 {
 		t.Fatalf("packet counters = %#v", stats)
 	}
 	if stats.DecisionCommands != 1 || stats.FixCommands != 1 || stats.ResumeCommands != 1 || stats.AutoFixRounds != 1 || stats.RateLimits != 1 {

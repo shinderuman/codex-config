@@ -12,8 +12,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/config"
+	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/packet"
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
 )
 
@@ -22,6 +24,63 @@ import (
 // 変わったらbumpする。旧versionで採番されたsessionは暗黙入力が混入しているため
 // resumeせず新sessionへ切り替える。
 const isolationPolicyVersion = "claude-isolation-1"
+
+// subtypeStructuredOutputRetryExhaustedはCLIがschema適合出力を生成できず
+// 内部retryを使い切ったときにresult eventへ付ける失敗subtype。この失敗は
+// provider消費が進んだ末の契約不成立のため、呼出元はfail closedで扱う。
+const subtypeStructuredOutputRetryExhausted = "error_max_structured_output_retries"
+
+// StructuredOutputErrorは--json-schema呼出で結果objectが得られなかった失敗。
+// retry枯渇・result event欠落のどちらも結果本文側に修復可能な情報が残らないため、
+// 再送やresumeによる自動回復の対象にせずfail closedで扱う。
+type StructuredOutputError struct {
+	Subtype        string
+	TerminalReason string
+}
+
+func (e *StructuredOutputError) Error() string {
+	if e.Subtype != "" {
+		return fmt.Sprintf("structured outputが得られませんでした: subtype=%s", e.Subtype)
+	}
+	return "structured outputが得られませんでした: result eventにstructured_outputがありません"
+}
+
+// IsStructuredOutputErrorはfail closed対象のstructured output契約失敗を判定する。
+func IsStructuredOutputError(err error) bool {
+	var target *StructuredOutputError
+	return errors.As(err, &target)
+}
+
+// RetryExhaustedはCLI内部のschema適合retry枯渇による失敗かどうかを返す。
+// 成功resultでのstructured_output欠落(Subtype空)とは失敗境界が異なるため、
+// retry枯渇頻度を数える集計側でこの区別を使う。
+func (e *StructuredOutputError) RetryExhausted() bool {
+	return e.Subtype == subtypeStructuredOutputRetryExhausted
+}
+
+var (
+	workerSchemaOnce   sync.Once
+	reviewerSchemaOnce sync.Once
+	workerSchemaValue  string
+	workerSchemaErr    error
+	reviewerSchemaVal  string
+	reviewerSchemaFail error
+)
+
+// structuredSchemaはrole対応のtyped結果schemaを返す。schemaは自package固定値で
+// 構築時に検証済みのため、process内で1回だけ構築して再利用する。
+func structuredSchema(role state.SessionRole) (string, error) {
+	if role == state.ReviewerRole {
+		reviewerSchemaOnce.Do(func() {
+			reviewerSchemaVal, reviewerSchemaFail = packet.ReviewerSchemaJSON()
+		})
+		return reviewerSchemaVal, reviewerSchemaFail
+	}
+	workerSchemaOnce.Do(func() {
+		workerSchemaValue, workerSchemaErr = packet.WorkerSchemaJSON()
+	})
+	return workerSchemaValue, workerSchemaErr
+}
 
 type ClaudeRunner struct {
 	config config.AppConfig
@@ -63,19 +122,24 @@ type RunResult struct {
 	// plain stdout行にだけ既存provider classifierを適用した結果。5h上限・transientの
 	// ときだけKindへ値が入り、raw本文とfatal既定値は保持しない。
 	PlainFailure ProviderFailureClass
+	// StructuredOutputは--json-schemaで強制された結果objectの権威値。result文字列と
+	// 同一内容だが、契約上はこのobjectだけを結果解析へ使う。
+	StructuredOutput json.RawMessage
 }
 
 type claudeJSONResult struct {
-	Type          string                `json:"type"`
-	Subtype       string                `json:"subtype"`
-	IsError       bool                  `json:"is_error"`
-	Result        string                `json:"result"`
-	DurationMS    int64                 `json:"duration_ms"`
-	DurationAPIMS int64                 `json:"duration_api_ms"`
-	NumTurns      int                   `json:"num_turns"`
-	TotalCostUSD  float64               `json:"total_cost_usd"`
-	Usage         TokenUsage            `json:"usage"`
-	ModelUsage    map[string]ModelUsage `json:"modelUsage"`
+	Type           string                `json:"type"`
+	Subtype        string                `json:"subtype"`
+	IsError        bool                  `json:"is_error"`
+	Result         string                `json:"result"`
+	StructuredOut  json.RawMessage       `json:"structured_output"`
+	TerminalReason string                `json:"terminal_reason"`
+	DurationMS     int64                 `json:"duration_ms"`
+	DurationAPIMS  int64                 `json:"duration_api_ms"`
+	NumTurns       int                   `json:"num_turns"`
+	TotalCostUSD   float64               `json:"total_cost_usd"`
+	Usage          TokenUsage            `json:"usage"`
+	ModelUsage     map[string]ModelUsage `json:"modelUsage"`
 }
 
 func NewClaudeRunner(cfg config.AppConfig, st *state.StateStore) *ClaudeRunner {
@@ -98,8 +162,10 @@ func NewClaudeRunner(cfg config.AppConfig, st *state.StateStore) *ClaudeRunner {
 // eventはmetadataへ縮約してtask単位event logへbest-effort追記し、非result eventの
 // raw本文・thinking・tool入出力をdisk・task log・診断tail・telemetryへ保存しない。
 // 最終result eventだけをboundedに保持し、result eventは--output-format jsonの出力と
-// 同一schemaのためresult解析・PACKET/session/resume semanticsは変わらず、追加の
-// prompt/model callは発生しない。JSON eventとして解釈できないplain stdout行だけは
+// 同一schemaのためresult解析・session/resume semanticsは変わらず、追加の
+// prompt/model callは発生しない。結果protocolはrole対応の--json-schemaで強制される
+// typed structured output単一であり、成功時にstructured_outputが得られなければ
+// fail closedのStructuredOutputErrorを返す。JSON eventとして解釈できないplain stdout行だけは
 // 旧raw fallbackの分類 semanticsを保つため既存classifierへ読ませ、5h上限・transient
 // の構造値だけをRunResult.PlainFailureへ渡す。event追記失敗はtask成否へ影響させない。
 func (r *ClaudeRunner) Run(
@@ -148,6 +214,10 @@ func (r *ClaudeRunner) Run(
 	if err != nil {
 		return result, err
 	}
+	schema, err := structuredSchema(role)
+	if err != nil {
+		return result, fmt.Errorf("structured output schemaを構築できません: %w", err)
+	}
 
 	args := []string{"-p", "--safe-mode", "--setting-sources", ""}
 	if ready {
@@ -172,6 +242,7 @@ func (r *ClaudeRunner) Run(
 		"--mcp-config", `{"mcpServers":{}}`,
 		"--disable-slash-commands",
 		"--settings", isolationArgs,
+		"--json-schema", schema,
 	)
 
 	if readOnly {
@@ -217,6 +288,7 @@ func (r *ClaudeRunner) Run(
 	parsed, parseErr := parseCapturedStreamResult(ingester.result())
 	if parseErr == nil {
 		result.Response = parsed.Result
+		result.StructuredOutput = parsed.StructuredOut
 		result.TopLevelUsage = parsed.Usage
 		result.ModelUsage = parsed.ModelUsage
 		result.DurationMS = parsed.DurationMS
@@ -233,6 +305,12 @@ func (r *ClaudeRunner) Run(
 	if err := writeResultOutput(outputPath, result.Response, streamResultSummary(parsed, parseErr), stderrPath); err != nil {
 		return result, err
 	}
+	// retry枯渇はCLIがexit 1で終えるためrunErrより先に判定し、exit statusの一般errorへ
+	// 埋もれさせない。result/structured_outputはnullで、再送しても同じ契約不成立に
+	// 至る可能性が高いためfail closed扱いの型付きerrorを返す。
+	if parseErr == nil && parsed.Subtype == subtypeStructuredOutputRetryExhausted {
+		return result, &StructuredOutputError{Subtype: parsed.Subtype, TerminalReason: parsed.TerminalReason}
+	}
 	if runErr != nil {
 		return result, runErr
 	}
@@ -240,7 +318,12 @@ func (r *ClaudeRunner) Run(
 		return result, parseErr
 	}
 	if parsed.IsError {
-		return result, fmt.Errorf("Claude CLIがerror結果を返しました")
+		return result, fmt.Errorf("Claude CLIがerror結果を返しました: subtype=%s", parsed.Subtype)
+	}
+	// 成功経路でstructured_outputがなければ契約破綻。旧テキストprotocolへの
+	// 暗黙fallbackは存在しないため、ここでfail closedとする。
+	if !structuredOutputPresent(result.StructuredOutput) {
+		return result, &StructuredOutputError{}
 	}
 
 	if err := r.state.MarkReady(role); err != nil {
@@ -281,6 +364,12 @@ func parseCapturedStreamResult(line []byte, found bool) (claudeJSONResult, error
 		return claudeJSONResult{}, fmt.Errorf("Claude CLIのJSON出力を解析できません: %w", err)
 	}
 	return parsed, nil
+}
+
+// structuredOutputPresentはresult eventのstructured_outputがnull/欠落でないかを判定する。
+// json.RawMessageはJSON nullを"null" bytesとして保持するため、長さ検査だけでは不足する。
+func structuredOutputPresent(raw json.RawMessage) bool {
+	return len(raw) != 0 && string(raw) != "null"
 }
 
 // newTaskEventIngesterはこのcall分の受動event記録を用意する。call ID生成に失敗した

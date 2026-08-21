@@ -81,8 +81,12 @@ func (r *mutatingRunner) Run(
 	if result.SessionID == "" {
 		result.SessionID = "test-session"
 	}
+	if result.StructuredOutput == nil {
+		result.StructuredOutput = structuredFromScriptedOutput(step.output)
+	}
 	if result.Response == "" {
-		result.Response = step.output
+		// productionと同じくresult文字列はstructured outputのJSON表現とする。
+		result.Response = string(result.StructuredOutput)
 	}
 	mutateTarget := role == state.ReviewerRole
 	if r.mutatePhase != "" {
@@ -131,8 +135,8 @@ func requireReviewEndFailClosed(t *testing.T, w *Workflow, r *mutatingRunner, ou
 		t.Fatalf("status = %q want waiting-sol-review", w.state.TaskStatus())
 	}
 	pkt := lastPacketFromOutput(t, out.String())
-	if pkt.Status() != "NEEDS_SOL_REVIEW" || pkt.Risk() != "HIGH" {
-		t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH", pkt.Status(), pkt.Risk())
+	if pkt.Status != "NEEDS_SOL_REVIEW" || pkt.Risk != "HIGH" {
+		t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH", pkt.Status, pkt.Risk)
 	}
 	if !strings.Contains(out.String(), "reviewer実行中にrepository状態が変化") {
 		t.Fatalf("review-end mismatch原因が出力されていません: %q", out.String())
@@ -312,7 +316,7 @@ func TestReviewEndMatchProceedsToPass(t *testing.T) {
 	if w.state.TaskStatus() != state.TaskStatusComplete {
 		t.Fatalf("status = %q", w.state.TaskStatus())
 	}
-	if lastPacketFromOutput(t, out.String()).Status() != "PASS" {
+	if lastPacketFromOutput(t, out.String()).Status != "PASS" {
 		t.Fatalf("PASSが採用されていません: %q", out.String())
 	}
 	comparison, err := w.state.LoadSnapshotComparison()
@@ -344,7 +348,7 @@ func TestReviewEndMatchOnAutoFixLoop(t *testing.T) {
 		t.Fatalf("status = %q", w.state.TaskStatus())
 	}
 	pkt := lastPacketFromOutput(t, out.String())
-	if pkt.Status() != "NEEDS_SOL_REVIEW" || strings.Contains(out.String(), "reviewer実行中にrepository状態が変化") {
+	if pkt.Status != "NEEDS_SOL_REVIEW" || strings.Contains(out.String(), "reviewer実行中にrepository状態が変化") {
 		t.Fatalf("reemit結果が採用されるべき: %q", out.String())
 	}
 	for _, l := range taskLogs(t, w.state) {
@@ -379,7 +383,7 @@ func TestReviewEndMutationAfterRateLimitResumeRejectsPass(t *testing.T) {
 		Prompt:         "review",
 		OriginalPrompt: "review",
 		Request:        "request",
-		WorkerPacket:   workerPacketLines(),
+		WorkerResult:   workerResultFromLines(workerPacketLines()...),
 		ReviewNumber:   1,
 		RateLimited:    true,
 	}); err != nil {
@@ -404,7 +408,7 @@ func TestReviewEndMutationAfterRateLimitResumeRejectsPass(t *testing.T) {
 	if w.state.TaskStatus() != state.TaskStatusWaitingSolReview {
 		t.Fatalf("status = %q", w.state.TaskStatus())
 	}
-	if lastPacketFromOutput(t, out.String()).Status() != "NEEDS_SOL_REVIEW" {
+	if lastPacketFromOutput(t, out.String()).Status != "NEEDS_SOL_REVIEW" {
 		t.Fatalf("resume後PASSが採用されています: %q", out.String())
 	}
 	if event := mismatchEvent(t, st); event.Snapshot.Stage != string(state.SnapshotStageReviewEnd) {
@@ -449,7 +453,7 @@ func TestReviewEndMutationOnRiskFloorReemitRejects(t *testing.T) {
 		t.Fatalf("reemit呼出で停止すべき: calls=%d", len(r.prompts))
 	}
 	pkt := lastPacketFromOutput(t, out.String())
-	if pkt.Status() != "NEEDS_SOL_REVIEW" || !strings.Contains(out.String(), "reviewer実行中にrepository状態が変化") {
+	if pkt.Status != "NEEDS_SOL_REVIEW" || !strings.Contains(out.String(), "reviewer実行中にrepository状態が変化") {
 		t.Fatalf("reemit結果ではなくfail closed packetであるべき: %q", out.String())
 	}
 }

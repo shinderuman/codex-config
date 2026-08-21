@@ -251,7 +251,7 @@ func TestSnapshotReviewResumeDriftFailsClosed(t *testing.T) {
 		Prompt:         "review",
 		OriginalPrompt: "review",
 		Request:        "request",
-		WorkerPacket:   workerPacketLines(),
+		WorkerResult:   workerResultFromLines(workerPacketLines()...),
 		ReviewNumber:   1,
 		RateLimited:    true,
 	}); err != nil {
@@ -299,7 +299,7 @@ func TestSnapshotReviewResumeMatchResumesReviewer(t *testing.T) {
 		Prompt:         "review",
 		OriginalPrompt: "review",
 		Request:        "request",
-		WorkerPacket:   workerPacketLines(),
+		WorkerResult:   workerResultFromLines(workerPacketLines()...),
 		ReviewNumber:   1,
 		RateLimited:    true,
 	}); err != nil {

@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -21,6 +22,9 @@ type runnerStep struct {
 	output string
 	runErr error
 	result runner.RunResult
+	// structuredは明示的に指定するstructured_output JSON。空ならoutputの表示行textから
+	// 変換する(test前提: どのstepも表示行または生textのどちらかで意図を表現する)。
+	structured string
 }
 
 type scriptedRunner struct {
@@ -86,10 +90,37 @@ func (r *scriptedRunner) Run(
 	if result.SessionID == "" {
 		result.SessionID = "test-session"
 	}
+	if step.structured != "" {
+		result.StructuredOutput = json.RawMessage(step.structured)
+	} else {
+		result.StructuredOutput = structuredFromScriptedOutput(step.output)
+	}
 	if result.Response == "" {
-		result.Response = step.output
+		// productionと同じくresult文字列はstructured outputのJSON表現とする。
+		result.Response = string(result.StructuredOutput)
 	}
 	return result, step.runErr
+}
+
+// structuredFromScriptedOutputはscripted stepの表示行textをtyped結果JSONへ変換する。
+// 変換できない原文(構造破綻の再現用)はそのまま返し、ParseStructuredのschema-mismatch経路へ流す。
+func structuredFromScriptedOutput(output string) json.RawMessage {
+	if output == "" {
+		return nil
+	}
+	var body []string
+	for _, line := range strings.Split(strings.TrimRight(output, "\n"), "\n") {
+		if strings.TrimSpace(line) == "PACKET_BEGIN" || strings.TrimSpace(line) == "PACKET_END" {
+			continue
+		}
+		body = append(body, line)
+	}
+	if value, err := packet.FromDisplayLines(body); err == nil {
+		if data, err := json.Marshal(value); err == nil {
+			return data
+		}
+	}
+	return json.RawMessage(output)
 }
 
 func (r *scriptedRunner) Probe(model string) (runner.ProbeResult, error) {
@@ -280,7 +311,8 @@ func TestRunModelRecordsPromptResponseAndUsage(t *testing.T) {
 		t.Fatalf("telemetry logs = %#v", logs)
 	}
 	got := logs[0]
-	if !strings.HasPrefix(got.Prompt, "implementation instruction\n\nREPORT_ARTIFACT_DIR: ") || got.SystemPrompt != "worker system instruction" || got.Response != implementedPacket("done") {
+	wantResponse := string(structuredFromScriptedOutput(implementedPacket("done")))
+	if !strings.HasPrefix(got.Prompt, "implementation instruction\n\nREPORT_ARTIFACT_DIR: ") || got.SystemPrompt != "worker system instruction" || got.Response != wantResponse {
 		t.Fatalf("telemetry content = %#v", got)
 	}
 	if !strings.Contains(r.prompts[0], artifactPromptMarker) {
@@ -345,10 +377,35 @@ func currentStats(t *testing.T, st *state.StateStore) state.TaskStats {
 	return state.TaskStats{}
 }
 
-func TestRunModelRecompactsInvalidPacketInSameRunner(t *testing.T) {
+// resultFromLinesは表示行からtyped結果を組み立てるtest helper。
+func resultFromLines(lines ...string) packet.Result {
+	value, err := packet.FromDisplayLines(lines)
+	if err != nil {
+		panic(err)
+	}
+	return value
+}
+
+// workerResultFromLinesはresume checkpoint用のworker結果pointerを組み立てる。
+func workerResultFromLines(lines ...string) *packet.Result {
+	value := resultFromLines(lines...)
+	return &value
+}
+
+// constraintViolatingImplementedPacketはschema適合・意味検証不合格(必須field欠落)を再現する。
+func constraintViolatingImplementedPacket() string {
+	return "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: done\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\n"
+}
+
+// oversizeImplementedPacketはschema適合・意味検証不合格(size)を再現する。
+func oversizeImplementedPacket() string {
+	return "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: " + strings.Repeat("x", packet.MaxFieldBytes+1) + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\n"
+}
+
+func TestRunModelCorrectsInvalidResultInSameRunner(t *testing.T) {
 	st := newStateStoreT(t)
 	r := &scriptedRunner{steps: []runnerStep{
-		{output: "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: " + strings.Repeat("x", packet.MaxPacketLineBytes+1) + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\n"},
+		{output: oversizeImplementedPacket()},
 		{output: implementedPacket("implemented")},
 	}}
 	w := newWorkflowT(t, st, r)
@@ -366,15 +423,18 @@ func TestRunModelRecompactsInvalidPacketInSameRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status() != "IMPLEMENTED" {
-		t.Fatalf("status = %q", result.Status())
+	if result.Status != packet.StatusImplemented {
+		t.Fatalf("status = %q", result.Status)
 	}
-	if len(r.prompts) != 2 || !strings.Contains(r.prompts[1], "再圧縮") {
-		t.Fatalf("same runnerで再圧縮されていません: %#v", r.prompts)
+	if len(r.prompts) != 2 || !strings.Contains(r.prompts[1], "意味検証に不合格") {
+		t.Fatalf("same runnerで修正再依頼されていません: %#v", r.prompts)
+	}
+	if r.phases[1] != "worker-new"+resultCorrectionPhaseSuffix {
+		t.Fatalf("修正再依頼phase = %q", r.phases[1])
 	}
 
 	stats := currentStats(t, st)
-	if stats.ModelCalls != 2 || stats.PacketCompactions != 1 {
+	if stats.ModelCalls != 2 || stats.ResultCorrections != 1 {
 		t.Fatalf("stats = %#v", stats)
 	}
 	taskID, _ := st.TaskID()
@@ -382,35 +442,35 @@ func TestRunModelRecompactsInvalidPacketInSameRunner(t *testing.T) {
 	if logErr != nil {
 		t.Fatal(logErr)
 	}
-	if len(logs) != 2 || logs[0].Outcome != "invalid_packet" || logs[1].Outcome != "success" {
-		t.Fatalf("packet compaction telemetry = %#v", logs)
+	if len(logs) != 2 || logs[0].Outcome != "invalid_packet" || logs[0].PacketRejectReason != "size" || logs[1].Outcome != "success" {
+		t.Fatalf("result correction telemetry = %#v", logs)
 	}
 }
 
-func TestRunModelRecompactsMultipleCompletedPackets(t *testing.T) {
+// schemaが強制する構造は結果objectで保証済みのため、構造破綻textは変換不能=契約ミスマッチとして
+// 修正再依頼なしのfail closedへ落ちる。worker/reviewer両roleで同じsemanticsを保証する。
+func TestRunModelFailsClosedOnStructuredMismatch(t *testing.T) {
 	tests := []struct {
 		name     string
 		role     state.SessionRole
 		stage    state.ResumeStage
 		readOnly bool
 		phase    string
-		follow   string
-		status   string
 	}{
-		{name: "worker", role: state.WorkerRole, stage: state.ResumeStageWorker, phase: "worker-new", follow: implementedPacket("compacted"), status: "IMPLEMENTED"},
-		{name: "reviewer", role: state.ReviewerRole, stage: state.ResumeStageReview, readOnly: true, phase: "reviewer-1", follow: needsSolReviewPacket(), status: "NEEDS_SOL_REVIEW"},
+		{name: "worker", role: state.WorkerRole, stage: state.ResumeStageWorker, phase: "worker-new"},
+		{name: "reviewer", role: state.ReviewerRole, stage: state.ResumeStageReview, readOnly: true, phase: "reviewer-1"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			st := newStateStoreT(t)
 			r := &scriptedRunner{steps: []runnerStep{
 				{output: duplicatedImplementedPacket()},
-				{output: test.follow},
+				{output: implementedPacket("unreachable")},
 			}}
 			w := newWorkflowT(t, st, r)
 			w.temp = t.TempDir()
 
-			result, err := w.runModel(state.ResumeCheckpoint{
+			_, err := w.runModel(state.ResumeCheckpoint{
 				Stage:    test.stage,
 				Phase:    test.phase,
 				Role:     test.role,
@@ -420,38 +480,96 @@ func TestRunModelRecompactsMultipleCompletedPackets(t *testing.T) {
 				Prompt:   "original",
 				Request:  "request",
 			})
-			if err != nil {
-				t.Fatal(err)
+			if err == nil || !strings.Contains(err.Error(), "STATUS: WORKER_ERROR") {
+				t.Fatalf("mismatch fail closedを期待: %v", err)
 			}
-			if result.Status() != test.status {
-				t.Fatalf("status = %q want %q", result.Status(), test.status)
-			}
-			if len(r.prompts) != 2 || !strings.Contains(r.prompts[1], "再圧縮") {
-				t.Fatalf("same runnerで再圧縮されていません: %#v", r.prompts)
+			if len(r.prompts) != 1 {
+				t.Fatalf("mismatchで修正再依頼は実行しない: calls=%d", len(r.prompts))
 			}
 			taskID, _ := st.TaskID()
 			logs, logErr := st.ReadModelCallLogs(taskID)
 			if logErr != nil {
 				t.Fatal(logErr)
 			}
-			if len(logs) != 2 || logs[0].Outcome != "invalid_packet" || logs[0].PacketRejectReason != "multiple-packets" {
-				t.Fatalf("multiple packet reject telemetry = %#v", logs)
+			if len(logs) != 1 || logs[0].Outcome != "invalid_packet" || logs[0].PacketRejectReason != "schema-mismatch" {
+				t.Fatalf("structured mismatch telemetry = %#v", logs)
 			}
-			if !strings.Contains(logs[0].Error, "複数検出") {
+			if !strings.Contains(logs[0].Error, "structured_output") {
 				t.Fatalf("拒否理由がtelemetryへ記録されていません: %q", logs[0].Error)
 			}
 			stats := currentStats(t, st)
-			if stats.PacketCompactions != 1 || stats.PacketRejectByCategory["multiple-packets"] != 1 {
+			if stats.ResultCorrections != 0 || stats.PacketRejectByCategory["schema-mismatch"] != 1 {
 				t.Fatalf("stats = %#v", stats)
 			}
 		})
 	}
 }
 
-func TestExecuteEmitsAcceptedPacketExactlyOnce(t *testing.T) {
+// StructuredOutputError(retry exhaust・成功時structured_output欠損)はprovider障害ではなく
+// 契約破綻のため、transient recoveryへ入らず即座にfail closedする。checkpointを清除し、
+// resume前提を残さない。
+func TestRunModelFailsClosedOnStructuredOutputError(t *testing.T) {
+	cases := []struct {
+		name             string
+		runErr           error
+		want             string
+		wantRetryMetrics int
+	}{
+		{"retry exhausted", &runner.StructuredOutputError{Subtype: "error_max_structured_output_retries", TerminalReason: "gave up after 3 attempts"}, "error_max_structured_output_retries", 1},
+		{"missing on success", &runner.StructuredOutputError{}, "result eventにstructured_outputがありません", 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			st := newStateStoreT(t)
+			r := &scriptedRunner{steps: []runnerStep{
+				{output: "", runErr: c.runErr},
+				{output: implementedPacket("unreachable")},
+			}}
+			w := newWorkflowT(t, st, r)
+			w.temp = t.TempDir()
+			w.config.RepoRoot = "/repo"
+			w.config.RepoShort = "testrepo1234"
+
+			_, err := w.runModel(state.ResumeCheckpoint{
+				Stage:   state.ResumeStageWorker,
+				Phase:   "worker-new",
+				Role:    state.WorkerRole,
+				Model:   "opus",
+				Effort:  "high",
+				Prompt:  "p",
+				Request: "req",
+			})
+			if err == nil || !strings.Contains(err.Error(), "STATUS: WORKER_ERROR") || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("structured output fail closedを期待: %v", err)
+			}
+			if len(r.prompts) != 1 {
+				t.Fatalf("transient retryにも修正再依頼にも入らない: calls=%d", len(r.prompts))
+			}
+			taskID, _ := st.TaskID()
+			logs, logErr := st.ReadModelCallLogs(taskID)
+			if logErr != nil {
+				t.Fatal(logErr)
+			}
+			if len(logs) != 1 || logs[0].Outcome != "invalid_packet" || logs[0].PacketRejectReason != "structured-output" {
+				t.Fatalf("structured output telemetry = %#v", logs)
+			}
+			if _, cpErr := st.LoadResumeCheckpoint(); cpErr == nil {
+				t.Fatal("resume checkpointが残っています")
+			}
+			stats := currentStats(t, st)
+			// structured_retry_exhaustedはretry枯渇だけを数え、成功時structured_output欠損で
+			// 汚染しない。欠損側の観測はPacketRejectReason=structured-outputだけが担う。
+			if stats.StructuredRetryExhausted != c.wantRetryMetrics || stats.ResultCorrections != 0 {
+				t.Fatalf("stats = %#v", stats)
+			}
+		})
+	}
+}
+
+func TestExecuteEmitsAcceptedResultExactlyOnce(t *testing.T) {
 	st := newStateStoreT(t)
 	r := &scriptedRunner{steps: []runnerStep{
-		{output: duplicatedImplementedPacket()},
+		{output: constraintViolatingImplementedPacket()},
 		{output: implementedPacketWithRisk("done", "HIGH")},
 		{output: passPacket()},
 		{output: needsSolReviewPacket()},
@@ -464,27 +582,27 @@ func TestExecuteEmitsAcceptedPacketExactlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := strings.Count(buf.String(), "STATUS: "); got != 1 {
-		t.Fatalf("受理packetの出力回数 = %d\n%s", got, buf.String())
+		t.Fatalf("受理結果の出力回数 = %d\n%s", got, buf.String())
 	}
-	if strings.Contains(buf.String(), "STATUS: PASS") || strings.Contains(buf.String(), "SUMMARY: first") || strings.Contains(buf.String(), "SUMMARY: second") {
+	if strings.Contains(buf.String(), "STATUS: PASS") || strings.Contains(buf.String(), "SUMMARY: done") {
 		t.Fatalf("旧応答が最終stdoutへ混入しています: %s", buf.String())
 	}
 	if st.TaskStatus() != state.TaskStatusWaitingSolReview {
 		t.Fatalf("status = %q", st.TaskStatus())
 	}
 	if len(r.prompts) != 4 {
-		t.Fatalf("再圧縮・再出力は各1回だけ: calls=%d", len(r.prompts))
+		t.Fatalf("修正再依頼・再出力は各1回だけ: calls=%d", len(r.prompts))
 	}
 	if strings.Join(r.models, ",") != "opus,opus,sonnet,sonnet" {
 		t.Fatalf("models = %#v", r.models)
 	}
 }
 
-func TestRunModelStopsAfterRepeatedMultiplePackets(t *testing.T) {
+func TestRunModelStopsAfterRepeatedConstraintViolations(t *testing.T) {
 	st := newStateStoreT(t)
 	r := &scriptedRunner{steps: []runnerStep{
-		{output: duplicatedImplementedPacket()},
-		{output: duplicatedImplementedPacket()},
+		{output: constraintViolatingImplementedPacket()},
+		{output: constraintViolatingImplementedPacket()},
 	}}
 	w := newWorkflowT(t, st, r)
 	w.temp = t.TempDir()
@@ -498,18 +616,18 @@ func TestRunModelStopsAfterRepeatedMultiplePackets(t *testing.T) {
 		Prompt:  "original",
 		Request: "request",
 	})
-	if err == nil || !strings.Contains(err.Error(), "STATUS: WORKER_ERROR") || !strings.Contains(err.Error(), "複数検出") {
-		t.Fatalf("再圧縮後の複数packet停止を期待: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "STATUS: WORKER_ERROR") || !strings.Contains(err.Error(), "必須field REQUIREMENT_COVERAGE") {
+		t.Fatalf("修正再依頼後の不合格停止を期待: %v", err)
 	}
 	if len(r.prompts) != 2 {
-		t.Fatalf("再圧縮は1回だけ実施する: calls=%d", len(r.prompts))
+		t.Fatalf("修正再依頼は1回だけ実施する: calls=%d", len(r.prompts))
 	}
 }
 
-func TestRunModelPreservesMultiPacketRecompactAcrossRateLimit(t *testing.T) {
+func TestRunModelPreservesResultCorrectionAcrossRateLimit(t *testing.T) {
 	st := newStateStoreT(t)
 	r := &scriptedRunner{steps: []runnerStep{
-		{output: duplicatedImplementedPacket()},
+		{output: constraintViolatingImplementedPacket()},
 		{output: zaiFiveHourLog, runErr: errors.New("exit status 1")},
 	}}
 	w := newWorkflowT(t, st, r)
@@ -526,19 +644,19 @@ func TestRunModelPreservesMultiPacketRecompactAcrossRateLimit(t *testing.T) {
 		Request:        "request",
 	})
 	if err == nil || !strings.Contains(err.Error(), "STATUS: RATE_LIMITED") {
-		t.Fatalf("再圧縮中のrate limit errorを期待: %v", err)
+		t.Fatalf("修正再依頼中のrate limit errorを期待: %v", err)
 	}
 
 	checkpoint, loadErr := st.LoadResumeCheckpoint()
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
-	if !checkpoint.PacketCompacted || !strings.Contains(checkpoint.OriginalPrompt, "PACKETだけを再出力") {
-		t.Fatalf("再圧縮promptがcheckpointに保持されていません: %#v", checkpoint)
+	if !checkpoint.ResultCorrection || !strings.Contains(checkpoint.OriginalPrompt, "意味検証に不合格") {
+		t.Fatalf("修正再依頼promptがcheckpointに保持されていません: %#v", checkpoint)
 	}
 }
 
-func TestRunModelRecompactsArtifactOutsideTaskDir(t *testing.T) {
+func TestRunModelCorrectsArtifactOutsideTaskDir(t *testing.T) {
 	st := newStateStoreT(t)
 	outside := filepath.Join(t.TempDir(), "outside.md")
 	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
@@ -546,7 +664,7 @@ func TestRunModelRecompactsArtifactOutsideTaskDir(t *testing.T) {
 	}
 	r := &scriptedRunner{steps: []runnerStep{
 		{output: implementedPacketWithArtifacts("invalid artifact", outside)},
-		{output: implementedPacket("compacted")},
+		{output: implementedPacket("corrected")},
 	}}
 	w := newWorkflowT(t, st, r)
 	w.temp = t.TempDir()
@@ -563,23 +681,23 @@ func TestRunModelRecompactsArtifactOutsideTaskDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Fields["ARTIFACTS"] != "none" || len(r.prompts) != 2 {
-		t.Fatalf("artifact pathが再圧縮されていません: result=%#v prompts=%d", result, len(r.prompts))
+	if len(result.Artifacts) != 0 || len(r.prompts) != 2 {
+		t.Fatalf("artifact pathが修正されていません: result=%#v prompts=%d", result, len(r.prompts))
 	}
 	taskID, _ := st.TaskID()
 	logs, logErr := st.ReadModelCallLogs(taskID)
 	if logErr != nil {
 		t.Fatal(logErr)
 	}
-	if len(logs) != 2 || logs[0].Outcome != "invalid_packet" || !strings.Contains(logs[0].Error, "artifact dir配下") {
+	if len(logs) != 2 || logs[0].Outcome != "invalid_packet" || logs[0].PacketRejectReason != "artifacts" || !strings.Contains(logs[0].Error, "artifact dir配下") {
 		t.Fatalf("artifact validation telemetry = %#v", logs)
 	}
 }
 
-func TestRunModelPreservesPacketCompressionPromptAcrossRateLimit(t *testing.T) {
+func TestRunModelPreservesResultCorrectionPromptAcrossRateLimit(t *testing.T) {
 	st := newStateStoreT(t)
 	r := &scriptedRunner{steps: []runnerStep{
-		{output: "PACKET_BEGIN\nSTATUS: IMPLEMENTED\nRISK: LOW\nSUMMARY: " + strings.Repeat("x", packet.MaxPacketLineBytes+1) + "\nREQUIREMENT_COVERAGE: covered\nTESTS: pass\nUNVERIFIED: none\nARTIFACTS: none\nPACKET_END\n"},
+		{output: oversizeImplementedPacket()},
 		{output: zaiFiveHourLog, runErr: errors.New("exit status 1")},
 	}}
 	w := newWorkflowT(t, st, r)
@@ -596,19 +714,19 @@ func TestRunModelPreservesPacketCompressionPromptAcrossRateLimit(t *testing.T) {
 		Request:        "request",
 	})
 	if err == nil || !strings.Contains(err.Error(), "STATUS: RATE_LIMITED") {
-		t.Fatalf("packet再圧縮中のrate limit errorを期待: %v", err)
+		t.Fatalf("修正再依頼中のrate limit errorを期待: %v", err)
 	}
 
 	checkpoint, loadErr := st.LoadResumeCheckpoint()
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
-	if !checkpoint.PacketCompacted || !strings.Contains(checkpoint.OriginalPrompt, "PACKETだけを再出力") {
-		t.Fatalf("再圧縮promptがcheckpointに保持されていません: %#v", checkpoint)
+	if !checkpoint.ResultCorrection || !strings.Contains(checkpoint.OriginalPrompt, "意味検証に不合格") {
+		t.Fatalf("修正再依頼promptがcheckpointに保持されていません: %#v", checkpoint)
 	}
 	resumed := resumePrompt(checkpoint)
-	if !strings.Contains(resumed, "PACKETだけを再出力") || strings.Contains(resumed, "original implementation prompt") {
-		t.Fatalf("resumeが再圧縮工程を指していません: %s", resumed)
+	if !strings.Contains(resumed, "意味検証に不合格") || strings.Contains(resumed, "original implementation prompt") {
+		t.Fatalf("resumeが修正再依頼工程を指していません: %s", resumed)
 	}
 }
 
@@ -835,9 +953,14 @@ func TestAutoFixRejectsReviewerStatus(t *testing.T) {
 	}}
 	w := newWorkflowT(t, st, r)
 
+	// auto-fix workerがreviewer statusを返すのはrole別schema違反のため、修正再依頼なしの
+	// fail closed停止になる。
 	err := w.ExecuteNewTask("request")
-	if err == nil || !strings.Contains(err.Error(), "auto-fix-format") {
-		t.Fatalf("auto-fix format error = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "STATUS: WORKER_ERROR") || !strings.Contains(err.Error(), "worker結果のstatus") {
+		t.Fatalf("auto-fix role status error = %v", err)
+	}
+	if len(r.prompts) != 3 {
+		t.Fatalf("修正再依頼はしない: calls=%d", len(r.prompts))
 	}
 }
 
@@ -847,8 +970,11 @@ func TestWorkerRejectsReviewerStatus(t *testing.T) {
 	w := newWorkflowT(t, st, r)
 
 	err := w.ExecuteNewTask("request")
-	if err == nil || !strings.Contains(err.Error(), "worker-format") {
-		t.Fatalf("worker format error = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "worker結果のstatusとして許容されません") {
+		t.Fatalf("worker role status error = %v", err)
+	}
+	if len(r.prompts) != 1 {
+		t.Fatalf("schema保証範囲のため修正再依頼はしない: calls=%d", len(r.prompts))
 	}
 }
 
@@ -1104,7 +1230,7 @@ func TestExecuteResumeContinuesReviewerStage(t *testing.T) {
 		Prompt:         "review",
 		OriginalPrompt: "review",
 		Request:        "request",
-		WorkerPacket: []string{
+		WorkerResult: workerResultFromLines(
 			"STATUS: IMPLEMENTED",
 			"RISK: LOW",
 			"SUMMARY: done",
@@ -1112,7 +1238,7 @@ func TestExecuteResumeContinuesReviewerStage(t *testing.T) {
 			"TESTS: pass",
 			"UNVERIFIED: none",
 			"ARTIFACTS: none",
-		},
+		),
 		ReviewNumber: 1,
 		RateLimited:  true,
 	}); err != nil {
@@ -1282,33 +1408,38 @@ func TestReviewerFormatError(t *testing.T) {
 	w := newWorkflowT(t, st, r)
 
 	err := w.ExecuteNewTask("request")
-	if err == nil || !strings.Contains(err.Error(), "reviewer-format") {
-		t.Fatalf("reviewer format errorを期待: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "reviewer結果のstatusとして許容されません") {
+		t.Fatalf("reviewer role status error = %v", err)
+	}
+	if len(r.prompts) != 2 {
+		t.Fatalf("schema保証範囲のため修正再依頼はしない: calls=%d", len(r.prompts))
 	}
 }
 
-func TestReviewerUnknownStatusStopsAfterRecompact(t *testing.T) {
+func TestReviewerUnknownStatusFailsClosedWithoutCorrection(t *testing.T) {
 	st := newStateStoreT(t)
 	r := &scriptedRunner{steps: []runnerStep{
 		{output: implementedPacket("done")},
-		{output: unknownStatusPacket()},
 		{output: unknownStatusPacket()},
 	}}
 	w := newWorkflowT(t, st, r)
 
 	err := w.ExecuteNewTask("request")
-	if err == nil || !strings.Contains(err.Error(), "packet-compact-format") {
-		t.Fatalf("再圧縮後の未知STATUS停止を期待: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "STATUS: WORKER_ERROR") {
+		t.Fatalf("未知STATUSのfail closed停止を期待: %v", err)
+	}
+	if len(r.prompts) != 2 {
+		t.Fatalf("schema保証範囲のため修正再依頼はしない: calls=%d", len(r.prompts))
 	}
 }
 
 func TestReviewNeedsHighRiskFloor(t *testing.T) {
-	lowWorker := packet.FromLines([]string{"STATUS: IMPLEMENTED", "RISK: LOW"})
-	highWorker := packet.FromLines([]string{"STATUS: IMPLEMENTED", "RISK: HIGH"})
+	lowWorker := resultFromLines("STATUS: IMPLEMENTED", "RISK: LOW")
+	highWorker := resultFromLines("STATUS: IMPLEMENTED", "RISK: HIGH")
 
 	tests := []struct {
 		name           string
-		workerPacket   packet.Packet
+		workerResult   packet.Result
 		autoFixes      int
 		hasDecision    bool
 		hasPriorReview bool
@@ -1322,7 +1453,7 @@ func TestReviewNeedsHighRiskFloor(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := reviewNeedsHighRiskFloor(tt.workerPacket, tt.autoFixes, tt.hasDecision, tt.hasPriorReview); got != tt.want {
+			if got := reviewNeedsHighRiskFloor(tt.workerResult, tt.autoFixes, tt.hasDecision, tt.hasPriorReview); got != tt.want {
 				t.Fatalf("got %v want %v", got, tt.want)
 			}
 		})
@@ -1330,7 +1461,7 @@ func TestReviewNeedsHighRiskFloor(t *testing.T) {
 }
 
 func TestRiskFloorFailClosedPacketIsValid(t *testing.T) {
-	passPkt := packet.FromLines([]string{
+	passPkt := resultFromLines(
 		"STATUS: PASS",
 		"RISK: LOW",
 		"SUMMARY: reviewer pass",
@@ -1341,22 +1472,22 @@ func TestRiskFloorFailClosedPacketIsValid(t *testing.T) {
 		"RESIDUAL_RISK: none",
 		"TARGETS: none",
 		"ARTIFACTS: none",
-	})
+	)
 
-	enforced := riskFloorFailClosedPacket(passPkt)
-	if enforced.Status() != "NEEDS_SOL_REVIEW" || enforced.Risk() != "HIGH" {
-		t.Fatalf("status=%s risk=%s", enforced.Status(), enforced.Risk())
+	enforced := riskFloorFailClosedResult(passPkt)
+	if enforced.Status != packet.StatusNeedsSolReview || enforced.Risk != packet.RiskHigh {
+		t.Fatalf("status=%s risk=%s", enforced.Status, enforced.Risk)
 	}
-	if err := packet.Validate(enforced); err != nil {
-		t.Fatalf("fail closed packetがvalidate不合格: %v", err)
+	if err := validateTypedResult(enforced); err != nil {
+		t.Fatalf("fail closed結果がvalidate不合格: %v", err)
 	}
-	if enforced.Fields["REQUIREMENT_COVERAGE"] == "covered" {
-		t.Fatalf("reviewerのPASS内容をfail closed packetへ捏造している: %#v", enforced.Fields)
+	if enforced.RequirementCoverage == "covered" {
+		t.Fatalf("reviewerのPASS内容をfail closed結果へ捏造している: %#v", enforced)
 	}
 }
 
 func TestResolveRiskFloorReemitAcceptsCompliantAndFailsClosed(t *testing.T) {
-	compliant := packet.FromLines([]string{
+	compliant := resultFromLines(
 		"STATUS: NEEDS_SOL_REVIEW",
 		"RISK: HIGH",
 		"SUMMARY: reviewer reemit",
@@ -1368,12 +1499,12 @@ func TestResolveRiskFloorReemitAcceptsCompliantAndFailsClosed(t *testing.T) {
 		"TARGETS: t",
 		"ARTIFACTS: none",
 		"SOL_QUESTION: q",
-	})
-	if resolved := resolveRiskFloorReemit(compliant); resolved.Status() != "NEEDS_SOL_REVIEW" || resolved.Lines[0] != "STATUS: NEEDS_SOL_REVIEW" {
+	)
+	if resolved := resolveRiskFloorReemit(compliant); resolved.Status != packet.StatusNeedsSolReview {
 		t.Fatalf("準拠再出力はそのまま採用すべき: %#v", resolved)
 	}
 
-	passed := packet.FromLines([]string{
+	passed := resultFromLines(
 		"STATUS: PASS",
 		"RISK: LOW",
 		"SUMMARY: pass again",
@@ -1384,9 +1515,9 @@ func TestResolveRiskFloorReemitAcceptsCompliantAndFailsClosed(t *testing.T) {
 		"RESIDUAL_RISK: none",
 		"TARGETS: none",
 		"ARTIFACTS: none",
-	})
+	)
 	closed := resolveRiskFloorReemit(passed)
-	if closed.Status() != "NEEDS_SOL_REVIEW" || !strings.Contains(closed.Fields["SUMMARY"], "PASS") {
+	if closed.Status != packet.StatusNeedsSolReview || !strings.Contains(closed.Summary, "PASS") {
 		t.Fatalf("再違反はfail closedのNEEDS_SOL_REVIEWへ昇格すべき: %#v", closed)
 	}
 }
@@ -1396,7 +1527,7 @@ func TestRiskFloorReemitPromptConstraints(t *testing.T) {
 	for _, want := range []string{
 		"NEEDS_SOL_REVIEW (RISK: HIGH) だけ",
 		"実装・調査・テストをやり直さず",
-		"PACKETだけを再出力",
+		"結果だけを再出力",
 		"TARGETSにはnoneを指定できません",
 	} {
 		if !strings.Contains(prompt, want) {
@@ -1429,7 +1560,7 @@ func TestFixRequiredTargetsPacketDispatchesReportOnlyPrompt(t *testing.T) {
 	}
 	reportOnly := r.prompts[2]
 	for _, want := range []string{
-		"PACKET/reportだけを再出力",
+		"報告だけを再出力",
 		"実装・working tree変更・追加調査・test/lint/build/self-reviewをやり直さず",
 	} {
 		if !strings.Contains(reportOnly, want) {
@@ -1480,7 +1611,7 @@ func TestFixRequiredOtherTargetsKeepsImplementationAutoFix(t *testing.T) {
 			t.Fatalf("implementation auto-fix promptから%qが失われています: %s", want, implementation)
 		}
 	}
-	if strings.Contains(implementation, "PACKET/reportだけを再出力") {
+	if strings.Contains(implementation, "報告だけを再出力") {
 		t.Fatalf("通常FIX_REQUIREDへreport-only promptが使われています: %s", implementation)
 	}
 	var phases []string
@@ -1644,7 +1775,7 @@ func TestRiskFloorRejectsPassAfterResume(t *testing.T) {
 		Prompt:         "review",
 		OriginalPrompt: "review",
 		Request:        "request",
-		WorkerPacket: []string{
+		WorkerResult: workerResultFromLines(
 			"STATUS: IMPLEMENTED",
 			"RISK: HIGH",
 			"SUMMARY: done",
@@ -1652,7 +1783,7 @@ func TestRiskFloorRejectsPassAfterResume(t *testing.T) {
 			"TESTS: pass",
 			"UNVERIFIED: none",
 			"ARTIFACTS: none",
-		},
+		),
 		ReviewNumber: 1,
 		RateLimited:  true,
 	}); err != nil {
@@ -1757,7 +1888,7 @@ func TestRiskFloorReemitResumeCompliant(t *testing.T) {
 		Prompt:          "reemit",
 		OriginalPrompt:  "reemit",
 		Request:         "request",
-		WorkerPacket:    []string{"STATUS: IMPLEMENTED", "RISK: HIGH", "SUMMARY: done", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"},
+		WorkerResult:    workerResultFromLines("STATUS: IMPLEMENTED", "RISK: HIGH", "SUMMARY: done", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"),
 		ReviewNumber:    1,
 		RateLimited:     true,
 		RiskFloorReemit: true,
@@ -1804,7 +1935,7 @@ func TestRiskFloorReemitResumeFailClosed(t *testing.T) {
 		Prompt:          "reemit",
 		OriginalPrompt:  "reemit",
 		Request:         "request",
-		WorkerPacket:    []string{"STATUS: IMPLEMENTED", "RISK: HIGH", "SUMMARY: done", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"},
+		WorkerResult:    workerResultFromLines("STATUS: IMPLEMENTED", "RISK: HIGH", "SUMMARY: done", "REQUIREMENT_COVERAGE: covered", "TESTS: pass", "UNVERIFIED: none", "ARTIFACTS: none"),
 		ReviewNumber:    1,
 		RateLimited:     true,
 		RiskFloorReemit: true,

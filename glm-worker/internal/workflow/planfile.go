@@ -278,7 +278,7 @@ func (w *Workflow) failClosedParentFileGuard(phase string, surface guardSurface,
 	if cause != nil {
 		reason = fmt.Sprintf("%s: %v", reason, cause)
 	}
-	if err := w.emitPacket(parentFileFailClosedPacket(phase, surface, reason)); err != nil {
+	if err := w.emitResult(parentFileFailClosedResult(phase, surface, reason)); err != nil {
 		return err
 	}
 	return errParentFileGuardStopped
@@ -305,18 +305,17 @@ func (w *Workflow) recordParentFileEvent(phase string, surface guardSurface, out
 	})
 }
 
-func parentFileFailClosedPacket(phase string, surface guardSurface, reason string) packet.Packet {
-	return packet.FromLines([]string{
-		"STATUS: NEEDS_SOL_REVIEW",
-		"RISK: HIGH",
-		fmt.Sprintf("SUMMARY: worker呼出(%s)開始前後で%sの不変を確認できず、reviewerを呼ばずSol確認へ昇格", phase, surface.file),
-		fmt.Sprintf("REQUIREMENT_COVERAGE: %s読み取り専用契約を機械強制できなかったため親Codexが直接確認する必要あり", surface.file),
-		fmt.Sprintf("INVARIANTS: %s", surface.invariants),
-		fmt.Sprintf("TEST_EVIDENCE: worker呼出開始前後の%s存在・内容比較で欠損・不一致または読込失敗を検出", surface.file),
-		fmt.Sprintf("ISSUES: %s", reason),
-		fmt.Sprintf("RESIDUAL_RISK: %sの現在状態(変更・生成・削除・欠損)はorchestratorが復元せずそのまま残っている", surface.file),
-		fmt.Sprintf("TARGETS: %s", surface.targets),
-		"ARTIFACTS: none",
-		fmt.Sprintf("SOL_QUESTION: 変更された%s内容の取扱い(親Codexによる再編集・復元)をSolが判断する", surface.file),
-	})
+func parentFileFailClosedResult(phase string, surface guardSurface, reason string) packet.Result {
+	return packet.Result{
+		Status:              packet.StatusNeedsSolReview,
+		Risk:                packet.RiskHigh,
+		Summary:             fmt.Sprintf("worker呼出(%s)開始前後で%sの不変を確認できず、reviewerを呼ばずSol確認へ昇格", phase, surface.file),
+		RequirementCoverage: fmt.Sprintf("%s読み取り専用契約を機械強制できなかったため親Codexが直接確認する必要あり", surface.file),
+		Invariants:          surface.invariants,
+		TestEvidence:        fmt.Sprintf("worker呼出開始前後の%s存在・内容比較で欠損・不一致または読込失敗を検出", surface.file),
+		Issues:              reason,
+		ResidualRisk:        fmt.Sprintf("%sの現在状態(変更・生成・削除・欠損)はorchestratorが復元せずそのまま残っている", surface.file),
+		Targets:             []string{surface.targets},
+		SolQuestion:         fmt.Sprintf("変更された%s内容の取扱い(親Codexによる再編集・復元)をSolが判断する", surface.file),
+	}
 }

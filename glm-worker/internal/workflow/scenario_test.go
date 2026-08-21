@@ -23,7 +23,8 @@ type scenarioStep struct {
 	Error string   `json:"error"`
 	// Signalは出力fileへ書くprovider障害signal本文。packet行とは共存しない。
 	Signal string `json:"signal,omitempty"`
-	// Rawはpacket品質gate違反を再現する生の出力本文。packet.Validateを通らないmarker構造をscenarioへ入力する。
+	// Rawは結果検証違反を再現する生の出力本文。corpus検証を通らない構造(未変換本文による
+	// schema-mismatch再現)や意味違反(TARGETS: none等)をscenarioへ入力する。
 	Raw string `json:"raw,omitempty"`
 	// Usage/CostUSDはRunResult観測値(token/cost telemetry検証用)。実runnerはerror時も
 	// 取得できた観測値を返すため、fatal終了stepにも設定して記録欠落を検証できる。
@@ -395,8 +396,12 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 				return fmt.Errorf("scenario %s step %d has multiple terminal kinds", s.ID, i)
 			}
 			if hasLines {
-				if err := packet.Validate(packet.FromLines(step.Lines)); err != nil {
-					return fmt.Errorf("scenario %s step %d invalid packet: %w", s.ID, i, err)
+				result, convErr := packet.FromDisplayLines(step.Lines)
+				if convErr != nil {
+					return fmt.Errorf("scenario %s step %d invalid result: %w", s.ID, i, convErr)
+				}
+				if err := validateTypedResult(result); err != nil {
+					return fmt.Errorf("scenario %s step %d invalid result: %v", s.ID, i, err)
 				}
 				for _, ln := range step.Lines {
 					if err := validateScenarioArtifactToken(s.ID, ln, artifactNames); err != nil {
@@ -641,7 +646,7 @@ func TestScenarioCorpusContractRejectsInvalid(t *testing.T) {
 		}, "multiple terminal kinds"},
 		{"step invalid packet", func(sc *scenarioFile, _ *manifestFile) {
 			sc.Scenarios[0].RunnerSteps[0] = scenarioStep{Lines: []string{"STATUS: PASS", "RISK: LOW", "SUMMARY: s"}}
-		}, "invalid packet"},
+		}, "invalid result"},
 		{"duplicate manifest path", func(_ *scenarioFile, mf *manifestFile) {
 			mf.InstructionFiles = append(mf.InstructionFiles, manifestEntry{Path: "codex/glm-worker/prompts/WORKER.md", SHA256: "x", Scenarios: []string{"s1"}})
 		}, "duplicate manifest path"},
@@ -753,7 +758,17 @@ func stepsFromScenario(doc scenarioDoc) []runnerStep {
 	return steps
 }
 
-func lastPacketFromOutput(t *testing.T, out string) packet.Packet {
+// validateTypedResultは表示行から復元した結果がworker/reviewerどちらかの契約を満たすかを
+// 検証する。roleは実行時のrunModelで確定するため、corpus検証はどちらか一方の通過を要求する。
+func validateTypedResult(result packet.Result) error {
+	if err := packet.ValidateWorkerResult(result); err == nil {
+		return nil
+	}
+	return packet.ValidateReviewerResult(result)
+}
+
+// lastPacketFromOutputはwrapper stdoutの表示行(KEY: value)からtyped結果を復元する。
+func lastPacketFromOutput(t *testing.T, out string) packet.Result {
 	t.Helper()
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	emitted := make([]string, 0, len(lines))
@@ -763,9 +778,13 @@ func lastPacketFromOutput(t *testing.T, out string) packet.Packet {
 		}
 	}
 	if len(emitted) == 0 {
-		t.Fatalf("no emitted packet in output:\n%s", out)
+		t.Fatalf("no emitted result in output:\n%s", out)
 	}
-	return packet.FromLines(emitted)
+	value, err := packet.FromDisplayLines(emitted)
+	if err != nil {
+		t.Fatalf("emitted result is not display lines: %v:\n%s", err, out)
+	}
+	return value
 }
 
 func runScenario(t *testing.T, doc scenarioDoc) {
@@ -912,7 +931,8 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 		t.Fatal("production runner was not invoked")
 	}
 	for i, p := range r.prompts {
-		isReformat := strings.Contains(p, "PACKETだけを再出力")
+		// 再出力系prompt(risk floor再出力・意味検証不合格の修正再依頼)はMODEを持たない。
+		isReformat := strings.Contains(p, "PACKETだけを再出力") || strings.Contains(p, "結果を再出力") || strings.Contains(p, "結果だけを再出力")
 		hasRequest := strings.Contains(p, doc.Request)
 		hasMode := strings.Contains(p, "MODE:") || strings.Contains(p, "REVIEW_MODE:")
 		// resume promptは保存済み前回指示の再送であり、seed時のrequest文言は含まない。
@@ -978,21 +998,21 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 			t.Fatalf("scenario execution error: %v", scenarioErr)
 		}
 		pkt := lastPacketFromOutput(t, buf.String())
-		if err := packet.Validate(pkt); err != nil {
-			t.Fatalf("emitted packet fails production contract: %v", err)
+		if err := validateTypedResult(pkt); err != nil {
+			t.Fatalf("emitted result fails production contract: %v", err)
 		}
-		if pkt.Status() != doc.ExpectedPacketStatus {
-			t.Fatalf("packet status = %q want %q", pkt.Status(), doc.ExpectedPacketStatus)
+		if string(pkt.Status) != doc.ExpectedPacketStatus {
+			t.Fatalf("packet status = %q want %q", pkt.Status, doc.ExpectedPacketStatus)
 		}
-		if pkt.Risk() != doc.ExpectedPacketRisk {
-			t.Fatalf("packet risk = %q want %q", pkt.Risk(), doc.ExpectedPacketRisk)
+		if string(pkt.Risk) != doc.ExpectedPacketRisk {
+			t.Fatalf("packet risk = %q want %q", pkt.Risk, doc.ExpectedPacketRisk)
 		}
 		for _, want := range doc.ExpectedOutputContains {
 			if !strings.Contains(buf.String(), want) {
 				t.Fatalf("wrapper output does not contain %q:\n%s", want, buf.String())
 			}
 		}
-		if doc.MustNotPass && pkt.Status() == "PASS" {
+		if doc.MustNotPass && pkt.Status == packet.StatusPass {
 			t.Fatalf("must_not_pass scenario ended in PASS")
 		}
 	}

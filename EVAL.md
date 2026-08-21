@@ -52,10 +52,11 @@
 - reviewerはAgent/subagentを利用せず、reviewerモデルから上位モデルへの暗黙な再委譲を行わない。
 - rate limit後のresumeでもcheckpointへ保存したreviewer modelを維持する。
 - version 1のresume checkpointを受理せず、model欠落時にroleから補完しない。
-- packetは15行・6 KiB・1行1536 bytes以内で、各fieldを1物理行に限定し、STATUS別必須field、RISK整合性、field重複を検証する。完全なPACKET_BEGIN/PACKET_ENDの組は1回の応答にちょうど1組だけとし、複数完成packet・marker前後の非空本文・入れ子や対応しないmarkerを拒否する。
-- packet契約違反時は同一sessionへ再圧縮を1回だけ依頼し、作業を再実行しない。
-- packet構造の1組制限は`packet.Parse`の単一受理入口で全roleへ機械強制する。LLM instructionだけの保証を機械contract扱いしていた点がescaped reviewの原因のため、wrapper強制scenario(corpus `packet-*`)を欠落させない。
-- wrapperの最終stdoutは受理したpacketだけを1回出力する。再圧縮・risk floor再出力・resume前の旧応答を採用結果へ連結・再解析せず、model応答の受理は毎回新規の出力file経由でのみ行う。caller側echoの二重表示はrepo外のため検証対象外。
+- worker/reviewer呼出はrole別のtyped JSON schemaを`--json-schema`へ渡して実行し、結果はresult eventの`structured_output`を唯一の権威として受理する。schema語彙はobject root・properties・required・enum・array・items・boolean・string・numberだけに事前制限し、maxLength/additionalProperties/composition依存は構築時に拒否する。status/risk enumはrole別に固定され、status・risk・artifactsが必須、targets/artifactsは文字列配列、他は文字列とする。
+- 結果の表示は6 KiB・1 field 1536 bytes以内・各field改行なし。STATUS別必須field・RISK整合性・TARGETS予約値`PACKET`・artifact実在検証はwrapper側の意味検証(`packet.ValidateWorkerResult`/`ValidateReviewerResult`)が強制する。
+- 意味検証不合格時は同一sessionへ作業を再実行させない結果の修正再出力を1回だけ依頼する。schemaが保証する構造(status enum・必須field・型)への違反・`structured_output`欠損・retry枯渇(`error_max_structured_output_retries`)は修正再依頼なしのfail closedとし、transient recoveryへ入れない。
+- 構造保証がschemaへ移ったことで旧marker構造gate(複数packet・marker対応破綻の再圧縮)は廃止した。LLM instructionだけの保証を機械contract扱いしていた点がescaped reviewの原因のため、schema適合と意味検証のwrapper強制scenario(corpus `structured-schema-mismatch-fails-closed`・`high-sol-review-targets-none-corrects-to-concrete-targets`)を欠落させない。
+- wrapperの最終stdoutは受理した結果だけを1回出力する。修正再依頼・risk floor再出力・resume前の旧応答を採用結果へ連結・再解析せず、model応答の受理は毎回新規の出力file経由でのみ行う。caller側echoの二重表示はrepo外のため検証対象外。
 - packetへ収まらない正確な成果物はtask別artifactへ保存し、packetではtask専用dir配下に実在する通常ファイルの絶対パスだけを返す。artifact dir外・欠落・directory・symlinkを拒否し、所有者限定権限を検証する。
 - worker errorの診断tailは6 KiBを超えない。
 
@@ -74,7 +75,7 @@
 ## 統計
 
 - 新規タスク開始時とreset時に前タスク統計をarchiveする。
-- worker/reviewerとmodel alias別の呼び出し回数・実行時間、Sol判断、明示fix、resume、自動fix、Sol向けpacket、model alias別rate limit、packet再圧縮を記録する。
+- worker/reviewerとmodel alias別の呼び出し回数・実行時間、Sol判断、明示fix、resume、自動fix、Sol向けpacket、model alias別rate limit、結果の意味修正再依頼を記録する。
 - Claude JSON出力のtop-level usageと、subagentを含む`modelUsage`由来のtree usage・実モデル名を呼出単位で区別して記録する。
 - `--stats`のalias別・実モデル別tokenはtree usageから集計し、top-level turn数は明示的に区別する。
 - タスク別JSONLへphase、role、effort、session、system/dynamic prompt、最終response、両usage、結果を`0600`で保存する。本文保存は環境変数で無効化できる。

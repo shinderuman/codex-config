@@ -17,7 +17,7 @@ func withArtifactContext(prompt string, artifactDir string) string {
 	return fmt.Sprintf(`%s
 
 REPORT_ARTIFACT_DIR: %s
-PACKETへ収まらない正確な一覧・レポート・生成物だけをこのディレクトリへ保存してください。リポジトリへ追加せず、PACKETのARTIFACTSには絶対パスだけを記載してください。大容量成果物が不要ならARTIFACTS: noneとしてください。
+結果へ収まらない正確な一覧・レポート・生成物だけをこのディレクトリへ保存してください。リポジトリへ追加せず、結果のARTIFACTSには絶対パスだけを記載してください。大容量成果物が不要ならARTIFACTSは空にしてください。
 `, strings.TrimRight(prompt, "\n"), artifactDir)
 }
 
@@ -61,7 +61,7 @@ REVIEW_FEEDBACK:
 `, request, decision, previousReview, instruction)
 }
 
-func reviewerPrompt(request string, decision string, workerPacket packet.Packet, reviewNumber int, baseline string) string {
+func reviewerPrompt(request string, decision string, workerResult packet.Result, reviewNumber int, baseline string) string {
 	return fmt.Sprintf(`REVIEW_MODE: INDEPENDENT_REVIEW
 
 USER_REQUEST:
@@ -81,10 +81,10 @@ PRE_TASK_BASELINE:
 現在のworking treeを実際に独立確認して判定してください。
 過去sessionの記憶より現在のコードを優先してください。
 PRE_TASK_BASELINEのファイルはworker開始前の状態です。既存未コミット変更と今回変更を区別する必要がある場合に参照してください。
-`, request, decision, workerPacket.String(), reviewNumber, baseline)
+`, request, decision, workerResult.Display(), reviewNumber, baseline)
 }
 
-func automaticFixPrompt(request string, decision string, reviewPacket packet.Packet) string {
+func automaticFixPrompt(request string, decision string, reviewResult packet.Result) string {
 	return fmt.Sprintf(`MODE: APPLY_REVIEW_FIX
 
 ORIGINAL_USER_REQUEST:
@@ -99,13 +99,13 @@ INDEPENDENT_REVIEW:
 独立reviewerの指摘を修正してください。
 新しい要求を追加せず、元要求・既存Sol判断・レビュー指摘の範囲だけを変更してください。
 修正後に必要なテスト・lint・build・自己レビューまで行ってください。
-`, request, decision, reviewPacket.String())
+`, request, decision, reviewResult.Display())
 }
 
-// reportOnlyFixPromptはreviewerがコード・diffを正しいと確認しPACKET/reportの意味情報だけを
+// reportOnlyFixPromptはreviewerがコード・diffを正しいと確認し報告の意味情報だけを
 // 不足と指摘した場合の専用prompt。実装修正・調査・検証の再実行を禁止し、現在の結果とdiffに基づく
 // 報告の再出力だけを求める。通常のimplementation fix文言を含めない。
-func reportOnlyFixPrompt(request string, decision string, reviewPacket packet.Packet) string {
+func reportOnlyFixPrompt(request string, decision string, reviewResult packet.Result) string {
 	return fmt.Sprintf(`MODE: APPLY_REVIEW_FIX
 
 ORIGINAL_USER_REQUEST:
@@ -117,18 +117,19 @@ PREVIOUS_SOL_DECISION:
 INDEPENDENT_REVIEW:
 %s
 
-独立reviewerはコードとdiffを正しいと確認し、PACKET/reportへ圧縮された意味情報だけを不足と指摘しています。
-実装・working tree変更・追加調査・test/lint/build/self-reviewをやり直さず、現在の作業結果とdiffに基づいてPACKET/reportだけを再出力してください。
-`, request, decision, reviewPacket.String())
+独立reviewerはコードとdiffを正しいと確認し、報告へ圧縮された意味情報だけを不足と指摘しています。
+実装・working tree変更・追加調査・test/lint/build/self-reviewをやり直さず、現在の作業結果とdiffに基づいて報告だけを再出力してください。
+`, request, decision, reviewResult.Display())
 }
 
-func packetCompressionPrompt(reason string) string {
-	return fmt.Sprintf(`直前の作業結果は有効ですが、最終PACKETが出力契約を満たしていません。
-作業・調査・テストをやり直さず、直前の結果を意味を失わない範囲で再圧縮し、PACKETだけを再出力してください。
-最大15行・全体6 KiB・1行1536 bytes以内です。system promptで指定されたSTATUS別fieldを省略しないでください。
-PACKET_BEGINを最初の物理行、PACKET_ENDを最後の物理行にし、前後の説明・空行・箇条書き・継続行を出力しないでください。
-各fieldはちょうど1つの物理行へKEY: value形式で一度だけ記載し、複数事項は同じvalue内でセミコロン区切りにしてください。
-大容量成果物の内容は再掲せず、ARTIFACTSには既に保存済みの絶対パスだけを記載してください。
+// resultCorrectionPromptは意味検証不合格時の修正再依頼。schemaが構造を保証するため、
+// ここで伝えるのは意味違反の修正だけであり、出力形式の再説明は含めない。
+func resultCorrectionPrompt(reason string) string {
+	return fmt.Sprintf(`直前の作業結果の内容は有効ですが、結果の意味検証に不合格でした。
+作業・調査・テストをやり直さず、違反を修正した同じ内容の結果を再出力してください。
+各fieldのvalueは空にできず、改行を含められません。複数事項は同じvalue内でセミコロン区切りにしてください。
+結果全体は6 KiB・1 field 1536 bytes以内です。STATUSに応じた必須fieldを省略しないでください。
+大容量成果物の内容は再掲せず、ARTIFACTSには既に保存済みの絶対パスだけを指定してください。
 
 違反内容:
 %s
@@ -160,10 +161,9 @@ func resumePrompt(checkpoint state.ResumeCheckpoint) string {
 func riskFloorReemitPrompt() string {
 	return `直前の独立reviewはHIGH RISK最終確認が必要な経路です。reviewerがPASSを返しましたが、wrapper risk floorがこれを却下しました。
 reviewerの自然言語判断だけではこの経路のriskを降格できません。
-実装・調査・テストをやり直さず、直前のreview結果の内容を保ったまま、PACKETだけを再出力してください。
+実装・調査・テストをやり直さず、直前のreview結果の内容を保ったまま、結果だけを再出力してください。
 許容されるSTATUSは NEEDS_SOL_REVIEW (RISK: HIGH) だけです。PASS・FIX_REQUIRED・その他は許可されません。
 TARGETSにはnoneを指定できません。Solが読むべき最小対象をfile:symbol/行範囲で指定してください。
-PACKET_BEGINを最初の物理行、PACKET_ENDを最後の物理行にし、前後の説明・空行を出力しないでください。
 NEEDS_SOL_REVIEWの必須field(SUMMARY, REQUIREMENT_COVERAGE, INVARIANTS, TEST_EVIDENCE, ISSUES, RESIDUAL_RISK, TARGETS, ARTIFACTS, SOL_QUESTION)を省略しないでください。
 `
 }

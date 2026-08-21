@@ -16,10 +16,11 @@ GLM委譲率、PACKETサイズ、GLM token、Solへ戻した回数等は代理�
 
 ## 現在作業中
 
-- Task: PoCで成立したCodex↔GLM structured outputをproduction workflowへ単一protocolとして移行する
-- 前段完了: Claude Code 2.1.226・Z.ai Coding Plan・GLM-5.3・stream-json・`--json-schema`の実経路でschema適合output 2/2、同一session resume、deterministic extraction、metadata保持、invalid/unsupported fail closed、provider分類channel維持を確認し、現行PACKET比較後にGo判断を個別commit済み
-- 移行境界: `1 model call = 1 subprocess`とsession continuityを維持する。schema vocabularyをGo側で事前制限し、typed resultを唯一のworkflow protocolへ移す。field間semantic validation・disk/state invariantはGo側に残し、旧PACKET+JSONの恒久二重protocol、MCP/custom tool、persistent process、daemon/socketは導入しない
-- 次の操作: schema/typed result、Claude runner transport、worker/reviewer/report-only/recompression経路、semantic validator、telemetry、migration testのproduction責務境界をGLMへ設計・実装させ、独立reviewとHIGH時のSol品質ゲートへ進める
+- Task: structured output移行を本配置し、Codex desktop親tool orchestrationのterminal payload二面表示を同じproduction caller境界で解消する
+- 前段完了: role別typed schema・authoritative `structured_output`・意味検証1回修正・v2→v3 checkpoint変換・telemetry分離・installer preflightを独立reviewとSol品質ゲート後に個別commit済み
+- 現在境界: `glm-worker` processのaccepted terminal resultは1件だけとし、長時間background cellではraw stdoutを描画せず内部保存し、cell終端後の短い同期callで一度だけ親へ渡す。JSON object全体の二面表示を防ぐcaller contractであり、repo側blind dedupeは行わない
+- 進行状態: structured output production移行の初回commit完了。plan/historyを完了証跡と次taskへ同期して同一commitへamend中
+- 次の操作: amend後に`install.sh`本配置・binary/instruction一致を確認し、追加AI callなしのdelayed markerと、次の実`glm-worker` terminal resultでraw内部保存→同期1回取得のユーザー可視postconditionを検証する
 
 更新タイミング:
 
@@ -44,12 +45,17 @@ GLMにはcommitさせない。独立review・必要なSol確認・品質ゲー�
 
 ## 未完了（優先順）
 
-- [ ] Codex↔GLM structured outputをproduction workflowへ単一protocolとして移行
-  - [ ] status/risk/decision/targets/artifacts/test obligations/options/state transition/evidence/findings等をtyped schemaへ移し、未知の意味問題だけ短いfree-textへ残す。日本語を英語化すること自体を目的にしない
-  - [ ] Claude runnerへ`--json-schema`とauthoritative `structured_output`抽出を統合し、schema vocabularyをGo側でobject root・properties/required/enum/array/items/boolean/string/numberへ事前制限する。CLI/result contract欠落とstructured retry exhaustionはfail closedにする
-  - [ ] worker/reviewer/report-only/fix/recompressionのproduction dispatchをtyped resultへ統一し、field間workflow semantics・artifact存在・risk floor・snapshot/state invariantはGo validator/state machineへ保持する
-  - [ ] 独自`PACKET_BEGIN/END`・KEY parser・duplicate/stray/reemit・構造欠陥用recompressionの不要部分を削除し、旧PACKET+JSONの恒久二重protocolを作らない。provider error/rate-limitのplain/result signal分類は維持する
-  - [ ] unit/scenario/production integration、session resume、telemetry exact-once、report-only、provider recovery、installer preflightを固定し、自然発生した最初の429で分類channelを再確認する。retry-exhaustion頻度・costが旧recompressionを上回る場合は撤退する
+- [x] Codex↔GLM structured outputをproduction workflowへ単一protocolとして移行
+  - [x] status/risk/decision/targets/artifacts/test obligations/options/state transition/evidence/findings等をtyped schemaへ移し、未知の意味問題だけ短いfree-textへ残す。日本語を英語化すること自体を目的にしない
+  - [x] Claude runnerへ`--json-schema`とauthoritative `structured_output`抽出を統合し、schema vocabularyをGo側でobject root・properties/required/enum/array/items/boolean/string/numberへ事前制限する。CLI/result contract欠落とstructured retry exhaustionはfail closedにする
+  - [x] worker/reviewer/report-only/fix/recompressionのproduction dispatchをtyped resultへ統一し、field間workflow semantics・artifact存在・risk floor・snapshot/state invariantはGo validator/state machineへ保持する
+  - [x] 独自`PACKET_BEGIN/END`・KEY parser・duplicate/stray/reemit・構造欠陥用recompressionの不要部分を削除し、旧PACKET+JSONの恒久二重protocolを作らない。provider error/rate-limitのplain/result signal分類は維持する
+  - [x] unit/scenario/production integration、session resume、telemetry exact-once、report-only、provider recovery、installer preflightを固定。自然発生した最初の429で分類channelを再確認し、retry-exhaustion頻度・costが旧recompressionを上回る場合は撤退する
+- [ ] Codex desktopのbackground `functions.exec`完了outputと後続`functions.wait` result cardで同一terminal payloadが二面表示される親orchestration境界を回避する。単一postconditionを「1 accepted terminal resultにつき親tool orchestration全体でユーザー可視payloadは1回」とし、長時間cellではraw stdoutを描画せず内部保存、完了後の短い同期callで一度だけ親へ渡す。`EVAL.md`のcaller側echo除外を撤回し、追加AI callなしのdelayed markerと実`glm-worker` terminal resultで同じproduction caller境界を検証するまで完了扱いにしない。structured JSONの同一object全体が二度描画され得るため、JSON移行だけを解決根拠にしない
+- [ ] reviewer snapshotと親専有plan/history更新を両立させる。rate-limit待機中の親Codex必須更新だけでreview-resumeの全worktree同一性が失敗した実例を基準に、worker/reviewer実装surfaceの外部変更はfail closedのまま、親管理2fileの承認済み親変更を識別してreview再開できる単一contractへ修正する。親更新禁止・snapshot全面緩和・worker/reviewer checklist追加では代替しない
+- [ ] telemetry測定基盤を改善し、TaskStats model call数とraw JSONL record数のcoverageを`complete/incomplete`・欠損call数・usage unknownとして表示する。既知の`ccc205d1`はwrapper孤児化時の1 callがstatsだけに残るため、推測補完せずhistorical gapとして分離する
+- [ ] worker call長大化を品質を落とさず制御可能にする。v3 worker-new 41 callのturn中央値55・p95 137に対し現task resumeは320 turn／約20.08であり、まずoutlierをtask/phase/session別に可視化し、複数責務の事前分割または意味milestone checkpointへ返す。hard turn cap・session rotationは中断時の品質と追加call costを検証するまで導入しない
+- [ ] compaction閾値、worker model routing、test impact selectionを品質を落とさず評価可能にする。現event metadataはBash回数・durationだけでtest/search/build等を区別できないため、raw commandを保存せずallowlist分類したoperation categoryを追加する。reviewerはvalid終端66件中8件が`FIX_REQUIRED`、GLM-4.7は6 call treeのみのため、review縮小・4.7拡大・test省略はDirect/orchestrated品質証拠なしに実施しない
 - [ ] fixed Eval harnessとescaped bug/review corpusの残項目を統合
   - [x] workflow clock abstraction逸脱を固定（`946a49e`、install preflight・配置一致完了）
   - [ ] reviewer/SolがHIGH変更の意味上の欠陥を逃すbehavioral scenarioを固定（wrapper production gateは`e79e1ab`で固定。live reviewer/Sol positive/negative Evalは明示許可待ち）
@@ -60,7 +66,6 @@ GLMにはcommitさせない。独立review・必要なSol確認・品質ゲー�
 - [ ] exhaustive確認ではBM25だけで終了せず、workerのquery/resultをreviewerが独立検証するgateを追加
 - [ ] repo-search feature flag、CLI、install.sh配布連携、worker/reviewer利用、installer smokeを実装
 - [ ] repo-search telemetryとDirect/orchestratedを含むEval A/B比較を実装
-- [ ] compaction閾値、worker model routing、test impact selectionを品質を落とさず評価可能にする
 - [ ] Eval結果で必要性が確認できたconditional review/tool output改善だけを追加
 - [ ] 全test/race/vet/build/install smoke、fixed Eval、self-protection、provider accounting、packet contract、clean worktreeを確認
 - [ ] 実行基盤へ影響する個別commit後の適切な区切りで`install.sh`本配置と配置済み現物一致を確認

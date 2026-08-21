@@ -23,7 +23,7 @@ const streamFixtureLines = `{"type":"system","subtype":"init","session_id":"sess
 {"type":"system","subtype":"thinking_tokens"}
 {"type":"assistant","message":{"id":"msg_1","model":"glm-5.3","content":[{"type":"thinking","thinking":"secret plan ` + streamFixtureSecret + `"},{"type":"text","text":"visible text"},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"echo ` + streamFixtureSecret + `"}}],"usage":{"input_tokens":100,"cache_read_input_tokens":200,"output_tokens":7}}}
 {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"` + streamFixtureSecret + ` output","is_error":false}]}}
-{"type":"result","subtype":"success","is_error":false,"result":"runner output\n","duration_ms":1200,"duration_api_ms":900,"num_turns":2,"total_cost_usd":0.5,"usage":{"input_tokens":11,"cache_creation_input_tokens":12,"cache_read_input_tokens":13,"output_tokens":14},"modelUsage":{"glm-5.3":{"inputTokens":11,"cacheCreationInputTokens":12,"cacheReadInputTokens":13,"outputTokens":14}}}
+{"type":"result","subtype":"success","is_error":false,"result":"{\"status\":\"IMPLEMENTED\",\"risk\":\"LOW\",\"summary\":\"done\",\"requirement_coverage\":\"covered\",\"tests\":\"pass\",\"unverified\":\"none\"}","structured_output":{"status":"IMPLEMENTED","risk":"LOW","summary":"done","requirement_coverage":"covered","tests":"pass","unverified":"none"},"duration_ms":1200,"duration_api_ms":900,"num_turns":2,"total_cost_usd":0.5,"usage":{"input_tokens":11,"cache_creation_input_tokens":12,"cache_read_input_tokens":13,"output_tokens":14},"modelUsage":{"glm-5.3":{"inputTokens":11,"cacheCreationInputTokens":12,"cacheReadInputTokens":13,"outputTokens":14}}}
 `
 
 func writeStreamFixtureClaude(t *testing.T, output string) string {
@@ -106,8 +106,11 @@ func TestClaudeRunnerStreamEventsAppendSanitizedMetadata(t *testing.T) {
 	if first.Resumed || !second.Resumed {
 		t.Fatalf("resume観測 = %#v / %#v", first.Resumed, second.Resumed)
 	}
-	if first.Response != "runner output\n" || first.TopLevelUsage.InputTokens != 11 || first.DurationMS != 1200 || first.DurationAPIMS != 900 || first.TopLevelTurns != 2 || first.TotalCostUSD != 0.5 {
+	if first.Response != "{\"status\":\"IMPLEMENTED\",\"risk\":\"LOW\",\"summary\":\"done\",\"requirement_coverage\":\"covered\",\"tests\":\"pass\",\"unverified\":\"none\"}" || first.TopLevelUsage.InputTokens != 11 || first.DurationMS != 1200 || first.DurationAPIMS != 900 || first.TopLevelTurns != 2 || first.TotalCostUSD != 0.5 {
 		t.Fatalf("result event互換のRunResult = %#v", first)
+	}
+	if !strings.Contains(string(first.StructuredOutput), "\"status\":\"IMPLEMENTED\"") {
+		t.Fatalf("structured_outputがRunResultへ抽出されていません: %s", first.StructuredOutput)
 	}
 
 	records := readTaskEventLines(t, st, taskID)
@@ -206,7 +209,7 @@ func TestClaudeRunnerStreamNonResultContentNeverReachesDisk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(finalOutput), "runner output") {
+	if !strings.Contains(string(finalOutput), "\"status\":\"IMPLEMENTED\"") {
 		t.Fatalf("最終outputへresult本文がありません: %s", finalOutput)
 	}
 	if strings.Contains(string(finalOutput), streamFixtureSecret) || strings.Contains(string(finalOutput), "visible text") || strings.Contains(string(finalOutput), "secret plan") {
@@ -513,7 +516,7 @@ func TestClaudeRunnerStreamEventsBestEffortOnUnwritableLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("event log書込失敗で本taskが失敗しました: %v", err)
 	}
-	if result.Response != "runner output\n" {
+	if result.Response != "{\"status\":\"IMPLEMENTED\",\"risk\":\"LOW\",\"summary\":\"done\",\"requirement_coverage\":\"covered\",\"tests\":\"pass\",\"unverified\":\"none\"}" {
 		t.Fatalf("response = %q", result.Response)
 	}
 	if !st.Exists("worker.ready") {
