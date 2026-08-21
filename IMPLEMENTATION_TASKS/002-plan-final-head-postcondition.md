@@ -6,7 +6,37 @@ planned
 
 ## Original instruction
 
-commit-ready初回commit→親metadata同期→amendという手順を「守るはず」ではなくfinal HEADのpostconditionで保証する。final HEAD上でPlanのACTIVE/NEXTがHEAD実態と一致し、完了済みcommitを「amend直前」「install前」と誤記せず、削除済みtask fileをACTIVE参照せず、ACTIVE task fileが実在し、PlanのGit境界とHEADが矛盾しないことを機械確認する。新しい4層構造に合わせて作り直し、文書instructionだけを対策にしない。
+````text
+## Task 002: tracked canonical plan stale-by-oneを機械postconditionで解消
+
+現在PlanでACTIVEになっている既存未完了task。
+
+### Contract
+
+commit-ready初回commit
+→ 親metadata同期
+→ amend
+という手順を「守るはず」ではなく、final HEADのpostconditionで保証する。
+
+### Acceptance
+
+final HEAD上で少なくとも、
+
+- PlanのACTIVE/NEXTがHEAD実態と一致
+- 完了済みcommitを「amend直前」と書いていない
+- 完了済みcommitを「install前」と誤記していない
+- 削除済みtask fileをACTIVE参照していない
+- ACTIVE task fileが実在する
+- PlanのGit境界とHEADが矛盾しない
+
+ことを機械確認する。
+
+新しい4層構造に合わせてpostconditionを作り直す。
+
+文書instructionだけを対策にしない。
+
+---
+````
 
 ## Amendments
 

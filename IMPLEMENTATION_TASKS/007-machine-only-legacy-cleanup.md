@@ -6,9 +6,108 @@ planned
 
 ## Original instruction
 
-glm-worker/Codex/GLMだけが読むmachine dataを公開APIのように扱わず、old parser/legacy field/migration/fallback/deprecated suffix・phase inference/複数schema同時維持を「一応読める」だけで恒久保持しない。対象はstructured result、Codex-facing output、resume/checkpoint、telemetry/passive event JSONL、timeline/convergence/status、repo-search cache、report-only metadata、Result text parser、stats、protocol state。
+````text
+## Task 007: machine-only backward compatibility / legacy migrationを棚卸しして削減
 
-実在候補として`packet.FromDisplayLines()`、v2→v3 checkpoint、old report-only phase/suffix推定、old stats、old telemetry skip、`PacketCompactions`、`--decision`/`--fix` argv compatibility等をproduction用途から分類する。old versionはreject/skip/reset/rebuild/delete/resume不能へ単純化し、active checkpointはtask完了後変更・旧binary完了・Sol判断で保護する。cacheはdiscard/rebuild、logsはcurrent versionから蓄積し一回限り分析をproduction migrationにしない。
+### User requirement
+
+glm-worker自身・Codex/GLMだけが読むmachine dataについて、公開APIのような後方互換性を原則維持しない。
+
+人間が過去versionを読むための互換layerを積み増す意味はない。
+
+### 対象
+
+少なくとも:
+
+- GLM→glm-worker structured result
+- glm-worker→Codex machine output
+- resume/checkpoint JSON
+- telemetry JSONL
+- passive event JSONL
+- timeline/convergence/status観測schema
+- repo-search cache
+- report-only checkpoint metadata
+- Result display/text parser
+- protocol state
+- internal stats schema
+
+### 現在実在するlegacy候補を必ず確認
+
+例:
+
+- `packet.FromDisplayLines()`による旧text PACKET→Result変換
+- v2→v3 checkpoint upgrade
+- old report-only checkpointをphase/suffixから推定する処理
+- old stats archive compatibility
+- old telemetry version skip
+- `PacketCompactions`等の旧protocol専用field
+- `--decision` / `--fix` argv modeを「後方互換の短文用」として残す記述
+- legacy field / fallback parser / deprecated suffix inference
+
+上記は「削除しろ」と先に決めつけず、実際のproduction用途を分類する。
+
+ただし、
+
+「既に実装済みだから」
+「一応古いものも読めるから」
+
+は残す理由にならない。
+
+### 基本方針
+
+machine-only old versionは用途に応じて:
+
+- reject
+- skip
+- reset
+- rebuild
+- delete
+- resume不能として明示終了
+
+へ単純化。
+
+active checkpointだけは変更時点の進行taskを壊さないよう、
+
+- task完了後にschema変更
+- old binaryでそのtaskだけ完了
+- 必要ならSol判断
+
+で保護する。
+
+恒久migrationとは分離。
+
+### cache
+
+再生成可能cache:
+
+`version mismatch → discard → rebuild`
+
+旧cache migration禁止。
+
+### telemetry/event log
+
+新schemaへ変えたら新runからcurrent schemaを正にする。
+
+過去logが必要な一回限りの分析はofflineで行い、production migration frameworkへしない。
+
+version意味変更を同version番号内で行わない。
+
+### current validation
+
+後方互換を削ることとfail-open化を混同しない。
+
+current schemaについてはstrict validationを維持。
+
+### CLI argv compatibility
+
+`--decision` / `--fix`を残すかは、「人間向け公開CLIとして現在も有用か」で判断する。
+
+Codex transportがstdin modeへ統一され、実利用がなく、後方互換だけが理由なら削除候補。
+
+ただしユーザーがterminalから短いdecision/fixを手入力する実用途があるなら、machine schema互換とは別にhuman CLI featureとして評価する。
+
+---
+````
 
 ## Amendments
 

@@ -6,7 +6,33 @@ planned
 
 ## Original instruction
 
-同じsemantic payloadで旧PACKET風textとcompact structured outputを比較し、glm-worker→Codex stdout bytes、token proxy、free text bytes/ratio、structured field bytes/ratio、field重複、legacy/migration code量、protocol branch数、format correction call、semantic correction call、information loss、Codex判断に必要なsemantic保持を測る。JSON punctuation/key名で逆に増える場合はJSON形式を目的化しない。実Sol High Direct A/Bはユーザー明示許可なしで実行しない。
+````text
+## Task 008: machine protocol変更前後のmeasurement
+
+Task 006/007の効果を測定する。
+
+最低限:
+
+- glm-worker→Codex stdout bytes
+- token proxy
+- free text bytes/ratio
+- structured field bytes/ratio
+- field重複
+- legacy/migration code量
+- protocol branch数
+- format correction call
+- semantic correction call
+- information loss
+- Codexが判断に必要なsemantic情報の保持
+
+旧PACKET風textとcompact structured outputを同じsemantic payloadで比較。
+
+JSON punctuation/key名で逆にtokenが増える場合はJSON形式自体を目的化しない。
+
+本番Sol High Direct A/Bはユーザー明示許可なしで実行しない。
+
+---
+````
 
 ## Amendments
 

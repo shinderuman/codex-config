@@ -6,9 +6,84 @@ planned
 
 ## Original instruction
 
-異なるrepositoryのglm-worker同時利用を通常contractとしglobal serializationしない。canonical repo root hash単位state、repo別lock/session/checkpoint/cwd/cache/task IDを維持する。2つの独立temp Git repoを追加AI callなしで並列実行し、state dir/lock/task/worker/reviewer/checkpoint/telemetry/event/cache/reset/resume/status/PTY payload/modeが相互混入しないこと、repo A lock中にrepo Bが動き同一repo 2本目だけ拒否されることをprocess-levelに固定する。
+````text
+## Task 005: multi-repository process concurrency / shared resource isolationを固定
 
-`GLM_WORKER_HOME`、prompt dir、Claude config/settings、Codex automation TOML/SQLite、provider quota、temp dir、installed binaryをread-only shared、namespace済み、upstream管理、concrete collision candidateへ分類する。quota共有はstate isolation bugではなく、evidenceなしにglobal lockを追加しない。
+Task 004と別責務として扱う。
+
+### Contract
+
+異なるrepositoryで`glm-worker`を同時に利用できることを通常contractとする。
+
+例:
+
+repo A:
+`Codex A → PTY A → glm-worker A`
+
+repo B:
+`Codex B → PTY B → glm-worker B`
+
+これらをglobal serializationしない。
+
+### 現状維持すべき設計
+
+- canonical repo root hash単位state
+- repo別lock
+- repo別session/checkpoint
+- subprocess cwd repo別
+- repo-search cache repo別
+- task ID/session ID非混入
+
+### process-level test
+
+2つの独立temp Git repoで並列実行し、追加AI callなしで確認。
+
+- state dir別
+- lock path別
+- repo A lock中にrepo B起動可能
+- 同一repoの2本目だけlock拒否
+- task.id非混入
+- worker/reviewer session非混入
+- checkpoint非混入
+- telemetry非混入
+- event log非混入
+- repo-search cache非混入
+- reset非干渉
+- resume非干渉
+- status非干渉
+- PTY stdin payload非混入
+- PTY Aのmode変更がPTY Bへ影響しない
+
+### shared resource audit
+
+最低限:
+
+- `GLM_WORKER_HOME`
+- prompt dir
+- Claude config dir
+- Claude settings override
+- Codex automation TOML/SQLite
+- provider/Z.ai quota
+- temp dir
+- installed glm-worker binary
+
+を、
+
+- read-only shared
+- repo/task namespace済み
+- upstream管理
+- concrete collision candidate
+
+へ分類する。
+
+concrete evidenceなしにglobal lockを追加しない。
+
+provider quota共有はrepository state競合とは分離する。
+
+同一provider quotaを2 repoが消費すること自体をbug扱いしない。
+
+---
+````
 
 ## Amendments
 

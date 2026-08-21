@@ -6,9 +6,132 @@ planned
 
 ## Original instruction
 
-`glm-worker --fix-stdin <UTF-8 bytes> [--sha256 ...]`と`--decision-stdin`はcallerがstty/raw/echo/termios/canonical modeを知らず、command起動後payloadをstdinへ渡すだけで成立させる。pipe/fileはtermiosを触らずexact read、TTY/PTYだけglm-worker内部でraw/noecho相当へ設定し、変更前stateを正常、short read、SHA mismatch、validation error、command errorで復元する。外部`stty` execは禁止。byte count/SHAはstate変更/model call前fail closed、payloadをargv/shellへ載せずNUL/backtick/$/quote/newline/UTF-8を保持する。
+````text
+# 6. PTY / stdin transportを細分化して実装する
 
-process起動→terminal mode設定→caller feedの順を一次証拠で確認し、Codex PTY APIがfeed前に送らないならREADY handshakeを追加しない。実装後はmanaged instruction/EVALから`stty raw -echo &&` recipeを削除する。
+現在PlanにあるPTY/multi-repo方針を、以下2 taskへ分割する。
+
+---
+
+## Task 004: `--fix-stdin` / `--decision-stdin`をcaller-side stty不要の自己完結CLIへする
+
+### Original requirementの中心
+
+現在Codex側では、
+
+`stty raw -echo && glm-worker --fix-stdin 1260`
+
+のように、callerがPTYをraw/noechoへ設定してからpayloadをfeedしている。
+
+正式な`glm-worker --fix-stdin` / `--decision-stdin`機能を使うためにcallerが、
+
+- `stty`
+- raw mode
+- echo
+- termios
+- canonical mode
+- terminal設定順序
+
+を知る必要があるのはCLI責務として不自然。
+
+### Contract
+
+callerは、
+
+`glm-worker --fix-stdin <UTF-8 bytes> [--sha256 ...]`
+
+または
+
+`glm-worker --decision-stdin <UTF-8 bytes> [--sha256 ...]`
+
+を起動してpayloadをstdinへ渡すだけでよい。
+
+stdinがpipe/fileならtermios処理なしでexact read。
+
+stdinがTTY/PTYならglm-worker自身が必要なterminal modeを当該invocation内で設定する。
+
+### 実装要求
+
+- Goから外部`stty` commandをexecするだけの置換は禁止
+- stdinがterminalか判定
+- TTY/PTYだけraw/noecho相当を内部設定
+- 変更前termios stateを保存
+- 正常終了時に復元
+- short read時に復元
+- SHA mismatch時に復元
+- validation error時に復元
+- command error時に復元
+- pipe/fileではtermiosを触らない
+- byte count / SHA validationは既存どおりstate変更/model call前fail closed
+- payload本文をargv/shell commandへ載せない
+- NUL/backtick/`$`/quote/newline/UTF-8をbyte列として保持
+
+### process startとfeedのrace
+
+ここで言うraceは複数repository間ではない。
+
+1 invocation内の、
+
+process start
+→ terminal mode設定
+→ caller feed
+
+順序だけを確認する。
+
+Codex PTY APIが「command起動後、明示feedまでpayloadを送らない」ことを一次証拠で確認できるならREADY handshakeを追加しない。
+
+本当にfeed開始raceが成立する場合だけ最小handshakeを検討する。
+
+handshakeを先回りして追加しない。
+
+### managed instruction修正
+
+実装完了後、AGENTS / caller instruction / EVAL等から
+
+`stty raw -echo && ...`
+
+recipeを削除。
+
+caller contractは、
+
+- command
+- byte count
+- optional SHA
+- stdin feed
+
+だけにする。
+
+### test
+
+実PTY integrationを含める。
+
+- callerが事前sttyしなくても成功
+- pipe成功
+- exact bytes
+- multiline
+- backtick
+- `$`
+- quote
+- NULを含む場合の仕様
+- UTF-8
+- short read
+- SHA match/mismatch
+- payload echo漏洩なし
+- state/model call前validation
+- terminal state restoration
+
+fakeだけで完了にしない。
+
+### escaped原因
+
+Historyへ、
+
+「payload完全性という局所要件を満たしたが、caller-side recipe込みの成功をCLI自己完結contractと取り違えた」
+
+ことを既存原因記録と統合する。
+
+---
+````
 
 ## Amendments
 

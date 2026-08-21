@@ -20,9 +20,17 @@ conversation memoryやcompaction summaryをtask requirementの正にしない。
 - すべての新規ユーザー要求はconversation contextだけに保持したまま作業を続けず、compaction、GLM call、長時間調査、実装開始より前に親Codexがtrackedな正へ固定する。「後でPlanへまとめる」は禁止する
 - tracked化は独立task作成やACTIVE切替と同義ではない。要求内容をparent-managed surface自体へ完全に表現できるか、現ACTIVEの同一責務か、独立taskかを別々に判断する
 - 現ACTIVEそのものへの追加指示は、新task分離を判断する前にACTIVE taskの`Amendments`へ原文を時系列追記する。同一責務のacceptance追加は同じACTIVEで継続し、独立責務は新taskへ分割し、別問題を優先実装する場合だけPlan上のACTIVEを切り替える
-- 各taskの`Original instruction`はimmutableとし、契機となったユーザー指示・詳細指示を意味要約せず可能な限り原文で保存する。後から書き換えず、追加変更は`Amendments`へ時系列追記する
-- 「これ」「さっきの」「前のreview」等の会話依存参照はOriginal instructionを書き換えず、`Resolved references`へ具体化する
+- 各taskの`Original instruction`はimmutableなlossless requirement sourceとし、契機となったユーザー/親Codexのtask該当指示を可能な限り原文のまま保存する。要約、重複除去、理由の省略、実装TODOだけへの圧縮、「意味は同じ」という書換えを禁止する
+- 追加要求は旧本文を上書き・削除せず、日時または順序と原文を`Amendments`へappend-onlyで追記する。新旧要求が矛盾する場合も両方を保持し、最新Amendmentによるoverrideをderived `Contract`へ明示する
+- 「これ」「さっきの」「前のreview」等の会話依存参照はOriginal instructionを書き換えず、当時の解決結果を`Resolved references`へ分離して具体化する
 - task fileへ進捗日記を追加せず、requirement contractと最小の`Current boundary`だけを保持する。長い診断はartifact/telemetry、完了証跡はHistoryへ置く
+
+## lossless sourceとderived contract
+
+- `Original instruction` / `Amendments` / `Resolved references`を一次要求source、`Purpose` / `Contract` / `Must not` / `Acceptance criteria`を実装・review用のderived informationとして明確に分離する
+- derived sectionが十分詳細でもOriginal instructionを要約してよい理由にはしない。token削減はderived sectionと通常resume経路で行い、一次要求sourceを削らない
+- 長い指示を複数taskへ分割する場合、各taskの要求・理由・禁止事項・完了条件を理解するために必要な原文sectionをlosslessに保存する。共通前提を暗黙依存にせず、必要部分を含めるかtrackedな共通sourceを明示参照する
+- derived sectionへOriginal instruction全文を複製せず、compactな作業・review indexとして維持する
 
 ## parent maintenance
 
@@ -56,7 +64,7 @@ parent-managed metadataを扱うguard、self-protection、production wiring自�
 
 ## task file必須構造
 
-全task fileは最低限、`Status`、`Original instruction`、`Amendments`、必要時の`Resolved references`、`Purpose`、`Contract`、`Must not`、`Acceptance criteria`、`Historical invariants`、`Dependencies`、未解決時の`Review findings`、`Current boundary`を持つ。
+全task fileは最低限、`Status`、lossless sourceである`Original instruction`、append-onlyの`Amendments`、必要時の`Resolved references`、derived informationである`Purpose`、`Contract`、`Must not`、`Acceptance criteria`、および`Historical invariants`、`Dependencies`、未解決時の`Review findings`、`Current boundary`を持つ。
 
 ## task filename
 
@@ -76,11 +84,11 @@ parent-managed metadataを扱うguard、self-protection、production wiring自�
 
 ## 再読contract
 
-新session、compaction後、rate limit/provider-unavailable後、長時間停止後、user追加指示後、`--resume`、internal TODO不一致時、reviewer差戻し後は、コードへ触る前に次を読む。
+新session、compaction後、rate limit/provider-unavailable後、長時間停止後、user追加指示後、`--resume`、internal TODO不一致時、reviewer差戻し後、false-complete再open時、acceptance最終確認時、ユーザーから指示適合性を確認された時は、コードへ触る前に次を読む。
 
 - `IMPLEMENTATION_RULES.md`全文
 - `IMPLEMENTATION_PLAN.local.md`全文
-- ACTIVE task file全文（Original instructionとAmendmentsを省略しない）
+- ACTIVE task file全文（Original instruction、Amendments、Resolved referencesを省略しない）
 - taskが明示したHistory見出しだけ
 
 NEXT taskは開始時まで全文を読む必要はない。
@@ -88,7 +96,8 @@ NEXT taskは開始時まで全文を読む必要はない。
 ## worker / reviewer contract
 
 - workerとreviewerは同じACTIVE task fileを要求定義として独立に読む
-- reviewerはimplementer summaryだけでなくOriginal instruction、Amendments、Contract、Must not、Acceptance criteriaを評価する
+- reviewerは開始時にimplementer summaryだけでなくOriginal instruction、Amendments、Resolved references、Contract、Must not、Acceptance criteriaを確認する
+- reviewerは`実装 vs Contract`だけでなく`Contract vs Original instruction / Amendments`も比較し、derived contract作成時の要求欠落自体をreview対象にする
 - scripted runnerの期待packetだけでなくproduction prompt/dispatchとの因果をtestで固定する
 - review結果はdefect、user-visible/workflow impact、why Codex+GLM missed it、要求由来/実装由来複雑性、preventionを区別する。原因層はparent orchestration、requirement preservation、worker、reviewer、Sol gate、production wiring、test/scenario、cross-cutting invariant compositionから一次証拠で分類する
 
