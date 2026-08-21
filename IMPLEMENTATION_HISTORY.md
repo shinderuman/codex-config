@@ -1,0 +1,77 @@
+# codex-worker-orchestrator 実装履歴
+
+このファイルは、完了証跡とescaped bug/reviewの原因分析を保持するtracked archiveである。現在状態・優先順・次の操作の正は`IMPLEMENTATION_PLAN.local.md`とし、この履歴は通常の作業開始・再開時には全文を読まない。
+
+次の場合だけ、関連見出しまたは該当語を検索して必要範囲を読む。
+
+- 完了済み項目のfalse-complete棚卸しまたは再オープン
+- escaped bug/reviewの原因層分析
+- 過去commit・検証・本配置証跡の確認
+- 現在taskが過去対策と同じinvariantへ触れる場合
+
+本文を更新できるのは親Codexだけとする。GLM worker/reviewerは読み取り専用で参照し、必要な更新候補と根拠をPACKETへ記載する。
+
+## Escaped bug/review原因分析
+
+- Task: Kindle-automationでescapedした4問題について、Codex + GLM連携が事前検出できなかった原因を実ログ・raw telemetry・Git履歴・code・prompt・PACKET contractから分析
+- 状態: 分析完了。Kindle task会話、旧schemaを含むraw JSONL、両repositoryのGit履歴、現行worker/reviewer prompt、主要artifact、response保存code、review workflowを照合済み。進行中GLM taskとは独立し、checkpoint/sessionを変更していない
+- 確認済みの共通原因: task局所のdiff適合へ寄り親目的と残作業を保持しないtask lifecycle、弱い外部成立性仮説がSPEC化されると再検証されにくいauthority inversion、実行時failure evidenceとreview artifactの境界不一致、review phase遷移を意味変更の有無より優先するreview invocation
+- 原因層: 4件はworker/reviewer pipelineの個別チェック不足ではなく、親Codexを含むorchestration contract（critical assumption確定、親USER_REQUEST lifecycle、runtime evidence管理、semantic deltaに基づくreview invocation）の不足。今後のescaped case分析では最初に`glm-worker`内部pipelineの失敗か親Codex orchestrationの失敗かを分類する
+- 対策判断: 既存の4対策は各原因へ直接対応している。worker/reviewerへ個別チェックを積み増さず、新しい第5・第6対策も追加しない
+- `66b1431`: `glm-worker`内部pipelineの失敗。REVIEWER.md/scenarioは意味情報不足を「再出力」と定義したが、production `automaticFixPrompt()`は実装修正・test再実行を要求してcontractが不一致。scripted runnerが期待packetを直接返すscenarioはproduction promptに従った結果かを検証せず、4 callの状態遷移だけを自己充足的に確認した。今後はexpected終端だけでなく、production dispatch分岐と実際に渡すpromptの禁止・必須contractを直接検証する
+- `70533f0` telemetry欠落: `glm-worker`内部pipelineの失敗。provider recoveryの停止状態を表す`recoveryFatal`へ「probe段階fatalでTask Work Call未実行」と「probe成功後のresumed Task Work Call実行後fatal」を畳み、後者のraw telemetry保存まで抑止した。`d460cd7`で追加したTask/Probe加法整合invariantを後続fatal transitionへ横断適用せず、initial transient→probe success→resumed task→ordinary nontransient fatalを検証しなかったことが原因。個別scenario追加だけでなく、call実行事実とrecovery終端分類を独立stateとして扱う
+- `70533f0` fatal誤分類: `glm-worker`内部pipelineの失敗。契約はauth/config文脈を持つ限定信号だけをfatalとする一方、production matcherは裸の`unauthorized`/`forbidden`をsubstring一致させ、false positive時にcheckpoint/sessionを破棄する。代表的negative testの存在を対策済み証拠とみなし、production matcherの全列挙値を契約へ照合しなかったことが原因。matcher contractと列挙値の対応、裸の一般語negative case、checkpoint/session保持まで検証する
+- `c06f6b2` report-only invariant欠落: `glm-worker`内部pipelineの失敗。前回reviewは通常auto-fixからreport-only prompt/phaseへ分離するroutingを中心にし、worker capabilityと「開始前snapshotからworking tree不変」というproduction postconditionを要求・検証しなかった。prompt文面をcontract enforcementと同一視し、後続reviewが変更後worker-end snapshotを新基準として受理する境界を見落とした。対策は個別prompt追記ではなくreport-only前後の3軸snapshot同一性をorchestratorがfail closedで強制する
+- `977f94b` eval-ab read-only違反: `glm-worker`内部pipelineの失敗。A/B評価ロジックとAI call/repo lock禁止は検証したが、production `Execute()`のmode分岐前に`NewStateStore()`がdirectory作成・`repo-root`書込みを行う共通初期化副作用をentrypoint全体で追わなかった。feature本体のread-only宣言を統合後のpostconditionとして検証していない同一上位原因であり、`--eval-ab`をwrite前のattach経路へdispatchしstate非作成をproduction testで固定する
+- 実運用PACKET二重表示再現: 親Codex orchestration失敗。旧調査はrepo内二重emit 0件を確認した一方、ユーザー可視で二重表示されないという親USER_REQUEST完了条件をcaller/app描画層の残余リスク付きで完了扱いした。2026-08-20 BM25 taskの一次証拠ではalias/function/wrapperなしの本配置binary 1実体、raw telemetryの`NEEDS_SOL_DECISION` response/PACKET 1件、Codex canonical rolloutのdeferred `wait` function_call_output 1件を確認。永続contextへの二重流入はなく、同じ一意marker probeもtool result 1件だった。ユーザー可視二面表示はbackground exec cellのlive更新と後続wait result cardを同時描画するCodex desktop presentation境界で発生し、repo・process stdout capture・tool-result永続化より後、model context構築より前と確定。repo側blind dedupeは追加しない
+- `f521ab4` convergence doc taxonomy矛盾: `glm-worker`内部pipeline/review失敗。comment normalizationの個別言語caseへ寄り、taxonomy全体の意味整合を確認せず、同じ実装/test内の「doc全内容がsemantic digest対象」と「doc追記はnon-semantic」の矛盾を見逃した。doc追加・変更・削除をfile種別だけでnon-semanticにせず、`doc-change`独立分類または安全側semanticへ変更し、AGENTS/instructions/EVAL等behavior-critical文書がcomment/doc/format-onlyへ落ちないことを固定する。コードcomment/format-only分類は維持する
+- Sol decision伝達途中欠損: 完了。当初欠損は親Codexが`JSON.stringify`本文をshell二重引用符commandへ埋め込み、backtick command substitutionの出力混入と最初のNUL byteでのargv切断でdecision本文の過半が静かに喪失した親Codex orchestration/shell invocation境界の失敗。対策としてstdin専用mode（byte長・任意SHA-256照合・fail closed）と親caller contract・実PTY testを`1dbfda5`/`3c263a6`で固定した。review中に判明した1時間待機は一過性でなく、親Codexがtty:true PTYをcanonical modeのまま使い末尾改行なしpayloadがline bufferへ滞留し、glm-workerがstate初期化前のio.CopyNで待ったもの。04:20完了run後のstale PTYではなく、後続fix runがGLMへ未到達だった。production Go tool defectではないためGo codeは変更せず、instruction（tty:true・`stty raw -echo`・1回write）とcontract/PTY testで対処した
+- `--watch`終端後hang: 原因層調査中。task `85514f5b-ca43-4cd1-b736-621ada25d49c`はreviewer packet完了・`waiting-sol-review`へ遷移した後も、親Codexがcompletion waitへ使ったread-only `glm-worker --watch` processが終了せず、event出力停止後もblocking waitを継続した。task terminal statusとwatch process lifecycleのcontract不一致か、親Codexが継続monitorをterminal waitへ誤用したかをcode・test・実出力で分類し、固定pollingへ戻さず原因へ直接対応する
+- `ba2414b` BM25 fingerprint domain不整合: `glm-worker`内部pipeline/review失敗。repository境界を`enumerateFiles()` helperの局所contractとして確認し、production `Search()`のfingerprint→enumeration→rebuild全体で同じcorpus policy・size/binary/symlink/nested repo/submodule/exclude境界を共有するか確認しなかった。freshness精度を落とさず、検索/index対象として意味を持つworking tree状態とcache無効化対象の責務を整理し、production Search testで境界を固定する
+- `962fb20` plan guard telemetry欠落: `glm-worker`内部pipeline/review失敗。plan guardのfail-closed状態遷移だけをreviewし、過去の`70533f0`で確立した「実行済みTask Work Callは全terminal pathでraw telemetryへexactly once残す」というcross-cutting invariantを、model call後のafter-read error early returnへ適用しなかった。初回/resumed Task Work Call、call前停止、mismatch、after-read failure、success/error、provider recoveryを加法整合で横断固定する
+- tracked plan stale-by-one: 親Codex orchestration失敗。planをtask commitへ含める契約、`[x]`は個別commit後だけという契約、各commit直後にplanを更新する契約を同時に適用し、同一commit完了をcommit前planへ書けず、commit後HEADの現在作業が一世代古くなる自己参照を解消しなかった。大規模ledgerは追加せず、commit-ready状態の初回commit後に親Codexがplanだけを最終状態へ更新して同じcommitを即時amendし、最終HEADを実装+planの単一commitへ収束させる等、「commit前に虚偽の完了を書かない」「新sessionがobsolete HEADを読まない」を両立する単純contractを確定する
+- 複雑性の責任評価: escaped review起点で追加されたguard・scenario・parser複雑性はCodexだけの自発的拡張とみなさず、外部レビュー要求、親Codexの局所修正判断、GLM実装/reviewer検証の各寄与を一次証拠で分ける。対策は個別checklist増殖よりcross-cutting invariantと単一contractへの収束を優先する
+
+## 完了済み
+
+- [x] reviewer risk floorをwrapperで強制し、HIGHからPASS/LOWへの降格を拒否
+- [x] provider一時障害のcheckpoint、内部backoff、probe、resume可能停止
+- [x] worker終了・reviewer開始・reviewer終了のHEAD/index/worktree snapshot固定
+- [x] orchestrator自己変更を意味上HIGH化する基礎policy
+- [x] prompt/instruction変更の行動scenario基盤
+- [x] packet拒否理由、risk floor、Git状態等の診断telemetry
+- [x] 自動再開の実体検証、二段階作成、固定Eval
+- [x] 特例直接作業許可の非推移化とrepository単位生存判定
+- [x] Z.ai managed mappingをGLM-5.3へ更新
+- [x] 複数完成PACKETをwrapper拒否し同一session再圧縮へ接続
+- [x] provider probeのexit 0 + is_error、固定sentinel、false positiveを厳密検証
+- [x] provider recoveryのTask Work / Probe / Resume call accountingを分離し、token・cost・resolved model・durationを修正
+- [x] root `AGENTS.md`から実装計画をbootstrapする基礎policyをscenario固定（旧Git管理外運用は後続のtracked canonical source移行で置換）
+- [x] provider probe validation失敗後のbackoff、deadline、5h、fatal/auth/config状態遷移をscenario固定
+- [x] provider recoveryのtransient→probe→resume→5h limitをcall accounting・checkpoint・final status込みで固定
+- [x] provider probeとTask Work/Resume call accounting不整合を固定
+- [x] `70533f0`時点のglm-worker・managed AGENTS/instructions/settingsを本配置し、趣味PCのZ.ai default一致を確認
+- [x] self-protectionのautoresume、installer、managed settings、config、entrypoint等critical/非対象surfaceを単一policyへmanifest化
+- [x] self-protection critical surface漏れを意味ベースscenario/manifestへ固定
+- [x] `8c85a62`時点のself-protection判定を本配置し、managed files・趣味PC Z.ai default一致を確認
+- [x] 永続状態系escaped case（override解除残留、managed値再流入、invalid null、identifier rename、baseline/state欠損、危険なrecovery説明）をinstaller test・状態遷移scenarioへ固定
+- [x] reviewer working tree mutationとmultiple complete PACKETをwrapper scenarioへ固定
+- [x] HIGH意味情報不足を`TARGETS: PACKET`で通常implementation auto-fixと分離し、report-only専用production prompt/pathとprompt dispatch因果testを追加（`c06f6b2`、本配置・install smoke完了）
+- [x] provider recoveryのprobe成功後resumed Task Work Callがordinary fatalでもraw telemetryへexactly once記録し、stats・Task/Probe加法整合とphantom防止を固定（`b72173e`、本配置・binary一致完了）
+- [x] provider probe fatal matcherから裸の`unauthorized`/`forbidden`を除外し、明示文脈だけをfatalとしてcheckpoint/session保持まで固定（`1875e87`、本配置・binary一致・install smoke完了）
+- [x] 外部成立性の条件付きfeasibility gateを親Codex contractへ追加し、対象固有観測期間・配線test・wrapper終端例・未実行親behavioral Evalを分離（`5bbcdaf`、本配置・install smoke完了）
+- [x] automation/monitor安全停止・GLM child完了・親USER_REQUEST完了を3分類し、明示継続範囲と停止条件を親lifecycle contractへ固定（`e500982`、本配置・install smoke完了）
+- [x] 原因不明の外部取得・parser・integration failureで、原因判定に必要なsanitize済み最小evidence artifactだけを条件付き保存し、親routing・判定不能終端・artifact scenarioを固定（`29366bc`、本配置・現物一致・install smoke完了）
+- [x] workflow package内のinitial/recovery/probe/resumeとper-call telemetry timestamp/durationを注入clockへ統一し、production source guardとfake-clock経路testを固定（`d9ca442`、本配置・binary一致・install smoke完了）
+- [x] escaped bug/review原因分析時だけ、一次証拠から`glm-worker`内部pipeline失敗か親Codex orchestration失敗かを先に分類し、原因層に沿う対策と親behavioral Evalを固定（`104a131`、本配置・現物一致・install smoke完了）
+- [x] Codex Direct対orchestratedの同一条件run記録をstrict schemaで検証し、actual usage unknown保持、Codex Reduction、Quality Delta、時間、GLM usageをread-only `--eval-ab`で比較するfixed Eval基盤を追加（`977f94b`、本配置・binary一致・install smoke完了。実Sol High baseline・本番A/Bは未実行）
+- [x] 追加AI callなしでClaude stream-jsonを秘密を含まないtask event metadataへbest-effort縮約し、task/role/call/phase識別、read-only `--watch`、result/session/resume semantics維持、plain stdoutのsanitize済みprovider分類継承を実装（`3c47593`、本配置・binary一致・install smoke完了。実provider stream schemaは後続taskの自然な実行で観測）
+- [x] 既存event log/checkpoint/telemetryだけから詳細`--status`、ID対応できたtool timing、session agingを算出し、thinking_tokens抑止・call上限・旧task event log retentionを追加（`2852e37`、本配置・binary一致・install smoke完了。task `34a23ab2-ab8a-46f2-babd-e9c76ef823ce`で実stream schemaと肥大化要因を確認）
+- [x] 保存済みevent logとtelemetryだけからtask/call/role/phase/tool/timestamp/duration/token/session aging・相対graphを表示するread-only `--timeline [task-id]`を追加し、外部task IDをcanonical UUID v4で検証（`1813636`、本配置・binary一致・install smoke完了）
+- [x] `TARGETS: PACKET` report-only workerをReadOnly capabilityでdispatchし、開始前後のHEAD/index/worktree同一性をfail closed強制。rate-limit/provider resumeと旧checkpoint移行時も同一baselineまたはcall前停止を保証（`6ec9f8f`、本配置・binary一致完了）
+- [x] `--eval-ab`をwrite-capable state初期化前の`AttachStateStore()`経路へ移し、state directory非作成・既存`repo-root`内容/mtime/file構成不変・runner未構築をproduction entrypoint testで固定（`a032e75`、本配置・binary一致完了）
+- [x] BM25実運用PACKET二重表示を本配置binary・raw telemetry・task response・Codex rollout・deferred caller markerで追跡し、process/tool-result/contextは1回、Codex desktopのbackground exec live更新＋wait result card二面描画だけが複製境界と確定。context token二重流入なし、repo変更・blind dedupeなし
+- [x] 完了済み`[x]`を当時のcode・Git履歴・後続escaped bug・実運用結果・全testへ照合し、PACKET二重表示と`f521ab4` doc taxonomyを再オープン（後に修正完了）。後続外部レビューで`ba2414b` fingerprint domainと`962fb20` plan guard telemetryの新たなfalse-completeが実証されたため、該当項目は再度未完了へ移動
+- [x] Sol decision本文が途中で欠損した親→worker伝達境界を一次証拠で特定し、長文payload完全性を機械保証（`1dbfda5` stdin専用mode・byte長/任意SHA-256照合・state前fail closed・argv mode後方互換、`3c263a6` 親caller tty:true+`stty raw -echo`+1 write contract・実PTY輸送test。独立review・Sol fresh `go test -count=1 ./...`/vet/build/gofmt・`install.sh`本配置・本配置instruction hash一致・installer条件でのbinary byte一致・live末尾改行なし9-byte payload 1回writeでechoなし全byte到達・意図的SHA不一致のstate/model call前fail closed確認完了）
+- [x] `f521ab4` convergence分類のfalse-completeを修正し、doc追加・変更・削除を独立`doc-change`として観測、behavior-critical文書をcomment/format-onlyへ落とさず、code comment/format-only分類を維持（`7105377`、独立review・Sol fresh test/vet/build/gofmt完了。convergenceは観測専用・review省略gate未接続）
+- [x] `IMPLEMENTATION_PLAN.local.md`をGit管理するtracked canonical sourceへ移し、親Codexだけが本文・`[x]`・優先順・現在状態を更新する基礎contractを`962fb20`へ収録し、本配置・binary一致完了（worker guardのafter-read telemetry欠落とplan自身のstale-by-one運用は未完了へ分離）

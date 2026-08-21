@@ -146,7 +146,7 @@
     },
     {
       "path": "codex/instructions/glm-execution.md",
-      "sha256": "e278e02a5de248dffb9e69dfcf2a49a1f953f7477e87be2e31ac537182044fac",
+      "sha256": "50f4fff289a5d10424e6a6d3c34868492f8443f32ab12adaa5f3b5192876760b",
       "scenarios": [
         "feasibility-gate-production-beyond-unverified-viability-returns-to-sol",
         "feasibility-gate-premise-collapse-stops-further-implementation",

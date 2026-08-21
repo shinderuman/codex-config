@@ -39,6 +39,9 @@
 
 ## 待機
 
+- 完了待機の対象は当該taskを起動した主`glm-worker`呼出process(session)だけとする。主呼出はterminal・Sol/user attention状態でpacketを出力して終了するため、観測用の別commandを完了待機へ使わない。
+- 主呼出のexec cell・session IDを失ったattach recovery時だけ`glm-worker --watch`で既存taskへ追加AI callなしでattachできる。`--watch`はfollow対象taskのauthoritative `task.status`が`active`を離れた時点(`waiting-decision`・`waiting-sol-review`・`complete`・`rate-limited`・`provider-unavailable`)・別taskへの切替時に残eventを表示して`WATCH_EXIT: task=<task ID> status=<status>`行を出力しexit 0する。event log消失時は`EVENT_LOG_STATUS: removed`表示のみで終了する。resident monitorとして付けっぱなしにしない。
+- `--watch`が終了しても、`--status`等を固定間隔で繰り返すpollingへ追跡をfallbackさせない。
 - 最初の`functions.exec`等の呼び出しからbackground terminalで利用可能な最大待機時間を指定し、可能な限り同一tool orchestration内で完了までblocking waitする。
 - tool内部上限でcell ID（session ID）が返る場合も、1回のwaitに最大待機時間を使い、短時間・固定間隔でwaitを掛け直さない。同じtool orchestration内で最大待機を再開し、Sol Highへ制御を戻して`write_stdin`等を呼ぶ方式へ変換しない。
 - tool orchestrationやexec cellに対する短時間・固定間隔の反復wait、固定間隔の`write_stdin`、status・端末出力・生存確認を行わない。一定時間無出力であることだけを理由に失敗・再実行しない。

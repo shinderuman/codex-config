@@ -17,8 +17,10 @@ const defaultWatchFollowInterval = 500 * time.Millisecond
 
 // printWatchは現在taskの受動event logを読み取り専用で表示する。state書換・repo lock・
 // AI call・provider/workerへの問い合わせを行わない。event logがまだ無いtaskはその旨を
-// 表示して即座に終了し、存在すれば既存行を表示した後追記をfollowする。stopはtest用の
-// 打ち切り信号で、nilなら中断されるまでfollowし続ける。
+// 表示して即座に終了し、存在すれば既存行を表示した後追記をfollowする。followはfollow対象
+// taskのauthoritative task.statusがactiveを離れた時点・別taskへの切替時に残eventを表示して
+// WATCH_EXIT行を出力し終了する。event log消失時は従来どおりremoved表示のみで終了する。
+// stopはtest用の打ち切り信号で、nilでも上記終端で必ず終了する。
 func printWatch(st *state.StateStore, stdout io.Writer, followInterval time.Duration, stop <-chan struct{}) error {
 	taskID := st.ReadOr("task.id", "none")
 	fmt.Fprintf(stdout, "TASK_ID: %s\n", taskID)
@@ -35,13 +37,35 @@ func printWatch(st *state.StateStore, stdout io.Writer, followInterval time.Dura
 	}
 	defer file.Close()
 	fmt.Fprintln(stdout, "EVENT_LOG_STATUS: following")
-	return watchTaskEvents(file, path, stdout, followInterval, stop)
+	return watchTaskEvents(st, taskID, file, path, stdout, followInterval, stop)
 }
 
-func watchTaskEvents(file *os.File, path string, stdout io.Writer, followInterval time.Duration, stop <-chan struct{}) error {
+// watchTerminalはfollow対象taskの終端をauthoritative stateから判定する。task.idが別taskへ
+// 切替わった場合は切替を、task.statusがactiveを離れた場合はそのstatusを終了理由へ出す。
+// task.id読取り失敗・空は切替と判断しない(StartNewTaskの書換途中windowで誤終了させない)。
+func watchTerminal(st *state.StateStore, taskID string) (string, bool) {
+	current := st.ReadOr("task.id", "")
+	if current != "" && current != taskID {
+		return fmt.Sprintf("WATCH_EXIT: task=%s status=task-switched new-task=%s", taskID, current), true
+	}
+	if status := st.TaskStatus(); status != state.TaskStatusActive {
+		return fmt.Sprintf("WATCH_EXIT: task=%s status=%s", taskID, status), true
+	}
+	return "", false
+}
+
+// watchTaskEventsはevent logの追記を表示し、follow対象taskの終端で復帰する。event logへの
+// 書込みは必ずtask.statusがactiveの間に行われ、non-activeへの遷移は当該呼出の最終event
+// 追記より後かつ以後の追記より前に行われるため、stateを読んだ後にdrainすれば終端eventを
+// 取りこぼさない。この順序をsleep・retry・出力停止観測で代替しない。
+func watchTaskEvents(st *state.StateStore, taskID string, file *os.File, path string, stdout io.Writer, followInterval time.Duration, stop <-chan struct{}) error {
 	pending, err := drainTaskEvents(file, stdout, nil)
 	if err != nil {
 		return err
+	}
+	if exitLine, terminal := watchTerminal(st, taskID); terminal {
+		fmt.Fprintln(stdout, exitLine)
+		return nil
 	}
 	for {
 		select {
@@ -53,9 +77,14 @@ func watchTaskEvents(file *os.File, path string, stdout io.Writer, followInterva
 			fmt.Fprintln(stdout, "EVENT_LOG_STATUS: removed")
 			return nil
 		}
+		exitLine, terminal := watchTerminal(st, taskID)
 		pending, err = drainTaskEvents(file, stdout, pending)
 		if err != nil {
 			return err
+		}
+		if terminal {
+			fmt.Fprintln(stdout, exitLine)
+			return nil
 		}
 	}
 }
