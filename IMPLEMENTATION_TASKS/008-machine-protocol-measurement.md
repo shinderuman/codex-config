@@ -58,7 +58,7 @@ protocol簡素化が見た目ではなくCodex Reductionとmaintenance costへ�
 - 列挙metricのbefore/afterと再現可能artifact
 - semantic保持判定と採用/撤退基準
 - Direct/orchestrated本番A/Bをpermission待ちのまま分離
-- test、独立reviewer、必要なSol gate、commit
+- test、独立reviewer、risk/contractに応じて必要なSol品質gate、commit
 
 ## Historical invariants
 

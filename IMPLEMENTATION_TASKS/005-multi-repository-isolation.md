@@ -87,7 +87,15 @@ provider quota共有はrepository state競合とは分離する。
 
 ## Amendments
 
-none
+- 2026-08-22 parent maintenance:
+
+````text
+#### multi-repository isolation
+
+Task 005がPTY A/Bの実integrationをacceptanceに含むため、Task 004へのdependencyは合理的です。
+
+これは維持して構いません。
+````
 
 ## Purpose
 
@@ -111,7 +119,7 @@ none
 - PTY A/B modeとpayload非干渉
 - shared resource auditをartifactまたはtracked contractへ記録
 - rate-limit/provider recoveryが他repo stateを変更しない
-- test/race/vet/build/gofmt、独立reviewer、Sol gate、commit
+- test/race/vet/build/gofmt、独立reviewer、risk/contractに応じて必要なSol品質gate、commit
 
 ## Historical invariants
 
@@ -119,8 +127,8 @@ none
 
 ## Dependencies
 
-- 001-requirement-task-lifecycle.md
-- 004-self-contained-stdin-pty.md
+- `IMPLEMENTATION_TASKS/001-requirement-task-lifecycle.md`
+- `IMPLEMENTATION_TASKS/004-self-contained-stdin-pty.md`
 
 ## Review findings
 

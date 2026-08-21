@@ -62,7 +62,7 @@ canonical Planが次sessionの誤った制御情報になる再発を親orchestr
 - 4cedc91型stale、削除済みACTIVE、欠損ACTIVE file、HEAD境界不一致を実Git scenarioで拒否
 - 同期済みfinal HEADと正当なworking tree作業状態を許容
 - failure後の同一commit復旧経路を固定
-- test/shell syntax/vet/build/gofmt、独立reviewer、Sol gate、commit
+- test/shell syntax/vet/build/gofmt、独立reviewer、risk/contractに応じて必要なSol品質gate、commit
 
 ## Historical invariants
 

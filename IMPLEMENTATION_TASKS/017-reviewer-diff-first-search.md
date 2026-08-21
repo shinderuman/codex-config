@@ -28,7 +28,7 @@ review tokenを抑えつつ影響範囲漏れと自己充足reviewを防ぐ。
 ## Acceptance criteria
 
 - diff充分/不足、independent query、impact漏れscenario
-- test、独立reviewer、Sol gate、commit
+- test、独立reviewer、risk/contractに応じて必要なSol品質gate、commit
 
 ## Historical invariants
 

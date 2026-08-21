@@ -10,7 +10,17 @@ v3 worker-new 41 callのturn中央値55・p95 137に対しstructured移行task r
 
 ## Amendments
 
-none
+- 2026-08-22 parent maintenance:
+
+````text
+#### worker call outlier
+
+Task 009は保存済みtelemetryから分析可能であり、machine protocol measurement Task 008が完了しないと成立しないtaskではありません。
+
+Task 008をhard dependencyから外してください。
+
+Task 008を先にやるpriorityを維持すること自体は構いません。
+````
 
 ## Purpose
 
@@ -29,7 +39,7 @@ none
 
 - median/p95/outlierと対象taskを再現可能に表示
 - current/resumeを区別し既知例と整合
-- test/race/vet/build/gofmt、独立reviewer、必要なSol gate、commit
+- test/race/vet/build/gofmt、独立reviewer、risk/contractに応じて必要なSol品質gate、commit
 
 ## Historical invariants
 
@@ -37,8 +47,7 @@ none
 
 ## Dependencies
 
-- 001-requirement-task-lifecycle.md
-- 008-machine-protocol-measurement.md
+- `IMPLEMENTATION_TASKS/001-requirement-task-lifecycle.md`
 
 ## Review findings
 

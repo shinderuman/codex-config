@@ -135,7 +135,7 @@ parser/state分岐とescaped surfaceを削減しcurrent contractへ収束する�
 - 不要parser/migration/fallback/推定削除
 - mismatch方針とactive task保護をproduction/testで固定
 - code/branch量変化を測定可能にする
-- test/race/vet/build/gofmt、独立reviewer、Sol gate、commit
+- test/race/vet/build/gofmt、独立reviewer、risk/contractに応じて必要なSol品質gate、commit
 
 ## Historical invariants
 

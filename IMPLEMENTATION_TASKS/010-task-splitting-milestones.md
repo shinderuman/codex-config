@@ -29,7 +29,7 @@ worker call長大化を機械的切断ではなく責務境界で抑える。
 
 - 分割/milestone/resumeの比較と採否条件
 - session rotationとは別論点で結論
-- review、必要なSol gate、commit
+- 独立reviewer、risk/contractに応じて必要なSol品質gate、commit
 
 ## Historical invariants
 

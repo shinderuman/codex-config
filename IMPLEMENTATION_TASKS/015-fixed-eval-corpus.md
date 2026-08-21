@@ -29,7 +29,7 @@ none
 
 - 4 caseのoffline contractとwiring現物照合
 - false-completeなら該当taskをreopen
-- test/race/vet/build/gofmt、独立reviewer、Sol gate、commit
+- test/race/vet/build/gofmt、独立reviewer、risk/contractに応じて必要なSol品質gate、commit
 
 ## Historical invariants
 

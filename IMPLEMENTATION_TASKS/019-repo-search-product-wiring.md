@@ -28,7 +28,7 @@ repo-searchを管理可能なproduction featureとして配布する。
 ## Acceptance criteria
 
 - feature on/off、CLI、installer preflight/smoke、managed現物一致
-- test/race/vet/build/gofmt、独立reviewer、Sol gate、commit
+- test/race/vet/build/gofmt、独立reviewer、risk/contractに応じて必要なSol品質gate、commit
 
 ## Historical invariants
 

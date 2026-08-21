@@ -33,7 +33,6 @@ Sol High相当の品質をできるだけ維持しながらCodex / Sol側の実�
 - `IMPLEMENTATION_TASKS/020-repo-search-telemetry-eval.md`
 - `IMPLEMENTATION_TASKS/021-conditional-improvements.md`
 - `IMPLEMENTATION_TASKS/022-final-verification.md`
-- `IMPLEMENTATION_TASKS/023-installed-state-verification.md`
 
 ## BLOCKED / USER_PERMISSION_WAIT
 
@@ -48,7 +47,7 @@ Sol High相当の品質をできるだけ維持しながらCodex / Sol側の実�
 
 - branch: `main`
 - implementation baseline: `ce86313`
-- metadata boundary: semantic filenameとstable ordered-list source規則を追加し、既存番号付きtaskは維持。Task 001 checkpointへのproduction code変更なし
+- metadata boundary: priority/hard dependency、cross-cutting install、dynamic final gate、evaluation evidenceを整理。Task 001 checkpointへのproduction code変更なし
 - push: 禁止
 
 ## 現在の停止理由

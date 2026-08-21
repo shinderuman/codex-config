@@ -123,7 +123,17 @@ old protocolからの意味対応では「field存在」だけでなくelement�
 
 ## Amendments
 
-none
+- 2026-08-22 parent maintenance:
+
+````text
+#### TARGETS semantic
+
+`003-targets-element-semantics.md`
+
+はTask 001の新task lifecycleには依存してよいですが、stale-by-oneのTask 002を実装上必要とはしていません。
+
+Task 002はpriority上先でも構いませんが、hard dependencyからは外してください。
+````
 
 ## Resolved references
 
@@ -149,7 +159,7 @@ typed arrayへの移行で「非空field」を配列長だけへ誤写像したa
 - empty array、empty element、whitespace、none、NONE、mixed none、concrete single/multiple、PACKET、duplicateを固定
 - worker NEEDS_SOL_DECISION、reviewer PASS/FIX_REQUIRED/NEEDS_SOL_REVIEWをtable-drivenに比較
 - auto-fix/親dispatch前にinvalidを止めるproduction-path test
-- test/race/vet/build/gofmt、独立reviewer、Sol gate、commit
+- test/race/vet/build/gofmt、独立reviewer、risk/contractに応じて必要なSol品質gate、commit
 
 ## Historical invariants
 
@@ -157,8 +167,7 @@ typed arrayへの移行で「非空field」を配列長だけへ誤写像したa
 
 ## Dependencies
 
-- 001-requirement-task-lifecycle.md
-- 002-plan-final-head-postcondition.md
+- `IMPLEMENTATION_TASKS/001-requirement-task-lifecycle.md`
 
 ## Review findings
 

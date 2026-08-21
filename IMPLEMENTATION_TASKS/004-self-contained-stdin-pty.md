@@ -135,7 +135,19 @@ Historyへ、
 
 ## Amendments
 
-none
+- 2026-08-22 parent maintenance:
+
+````text
+#### PTY
+
+`004-self-contained-stdin-pty.md`
+
+はTARGETS semanticとは独立しています。
+
+Task 003をdependencyにしないでください。
+
+Task 001後の新task lifecycleだけで十分です。
+````
 
 ## Purpose
 
@@ -157,7 +169,7 @@ caller recipe込みの輸送成功ではなく、CLI単体でpayload transport c
 - caller事前sttyなしPTY、pipe、exact bytes、multiline、backtick、$、quote、NUL仕様、UTF-8
 - short read、SHA match/mismatch、echo漏洩なし、state/model call前validation、全error path state復元
 - fakeだけでなく実PTY integration
-- managed recipe削除、test/race/vet/build/gofmt、独立reviewer、Sol gate、commit
+- managed recipe削除、test/race/vet/build/gofmt、独立reviewer、risk/contractに応じて必要なSol品質gate、commit
 
 ## Historical invariants
 
@@ -166,8 +178,7 @@ caller recipe込みの輸送成功ではなく、CLI単体でpayload transport c
 
 ## Dependencies
 
-- 001-requirement-task-lifecycle.md
-- 003-targets-element-semantics.md
+- `IMPLEMENTATION_TASKS/001-requirement-task-lifecycle.md`
 
 ## Review findings
 

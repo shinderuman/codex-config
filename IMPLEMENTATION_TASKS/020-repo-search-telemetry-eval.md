@@ -28,7 +28,7 @@ search導入のCodex ReductionとQuality Deltaを測定可能にする。
 ## Acceptance criteria
 
 - telemetry加法整合とfixed Eval hook
-- test/race/vet/build/gofmt、独立reviewer、Sol gate、commit
+- test/race/vet/build/gofmt、独立reviewer、risk/contractに応じて必要なSol品質gate、commit
 
 ## Historical invariants
 

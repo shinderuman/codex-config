@@ -119,7 +119,17 @@ Task 003のTARGETS正規形を含め、status別contractをtableとして固定�
 
 ## Amendments
 
-none
+- 2026-08-22 parent maintenance:
+
+````text
+#### Codex-facing structured result
+
+Task 006はTARGETS semanticをstatus contractとして利用するためTask 003へのdependencyは合理性があります。
+
+ただしmulti-repository isolation Task 005はstructured output実装のhard prerequisiteではありません。
+
+Task 005をdependencyから外し、Plan上のpriorityだけで先行させてください。
+````
 
 ## Purpose
 
@@ -143,7 +153,7 @@ Codexの再解釈tokenとprotocol correctionを削減し、最上位Codex Reduct
 - compact machine output実装、人間向けprojection分離、全consumer配線
 - 重複削減、semantic保持、schema/validator acceptance一致
 - output bytes/token proxyの基礎比較
-- test/race/vet/build/gofmt、独立reviewer、Sol gate、commit
+- test/race/vet/build/gofmt、独立reviewer、risk/contractに応じて必要なSol品質gate、commit
 
 ## Historical invariants
 
@@ -151,8 +161,7 @@ Codexの再解釈tokenとprotocol correctionを削減し、最上位Codex Reduct
 
 ## Dependencies
 
-- 003-targets-element-semantics.md
-- 005-multi-repository-isolation.md
+- `IMPLEMENTATION_TASKS/003-targets-element-semantics.md`
 
 ## Review findings
 

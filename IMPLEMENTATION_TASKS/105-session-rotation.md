@@ -10,7 +10,35 @@ session aging実測後まで保留し、compactionとは別論点として扱う
 
 ## Amendments
 
-none
+- 2026-08-22 parent maintenance:
+
+````text
+## 11. blocked taskはplaceholder contractのままACTIVE化しない
+
+blocked taskには、
+
+> 許可後の個別contract
+
+だけが書かれているものがあります。
+
+現在blockedである間はそれで構いません。
+
+ただしユーザー許可が出た時に、そのままACTIVEへ昇格して実装開始しないでください。
+
+まず、
+
+1. ユーザー許可をAmendmentへlossless保存
+2. prerequisite evaluation artifactを読む
+3. concrete Contract
+4. Must not
+5. Acceptance criteria
+
+をtask fileへ確定する。
+
+その後でACTIVE候補にしてください。
+
+「permission received」だけで設計未確定taskをGLMへ投げないでください。
+````
 
 ## Purpose
 
@@ -26,7 +54,7 @@ Task 009/010のevidenceに基づく。
 
 ## Acceptance criteria
 
-許可後のrotation条件とquality comparison。
+許可原文をAmendmentsへ保存し、Task 009 / 010 artifactを読んでconcrete rotation Contract / Must not / Acceptance criteria / quality comparisonを確定してからACTIVE候補にする。
 
 ## Historical invariants
 

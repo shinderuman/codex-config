@@ -10,7 +10,48 @@ exhaustive確認が要求されたcaseではBM25 top-Nだけで完了扱いせ�
 
 ## Amendments
 
-none
+- 2026-08-22 parent maintenance:
+
+````text
+## 8. Exhaustive searchは「独立BM25をもう一度やる」では成立しない
+
+Task 018の重要contractをさらに明確化してください。
+
+`exhaustive`を要求されたcaseでは、
+
+workerとreviewerが独立してBM25 top-Nを実行してもexhaustive proofにはなりません。
+
+BM25はrankingです。
+
+### Contract
+
+exhaustive確認では、
+
+* full corpus enumeration
+* deterministic exact/semantic predicate
+* 全候補走査
+* または網羅性を説明できる別のdeterministic mechanism
+
+を使ってください。
+
+BM25は、
+
+* query seed
+* candidate ordering
+* initial navigation
+
+には使用して構いませんが、top-N hitだけをexhaustive evidenceにしないでください。
+
+reviewerの独立性も、
+
+> workerとは別のtop-Nを見た
+
+だけではなく、
+
+> exhaustive criterionを満たすfull corpus確認を独立検証した
+
+ことを要求してください。
+````
 
 ## Purpose
 
@@ -19,16 +60,17 @@ ranking上位だけで網羅性を誤認するfalse-completeを防ぐ。
 ## Contract
 
 - exhaustive requirementを通常searchから区別
-- corpus policyと独立検証証跡を固定
+- full corpus enumerationとdeterministic exact/semantic predicateによる全候補走査、または網羅性を説明できる別のdeterministic mechanismを使う
+- reviewerはworkerと別のtop-Nを見るだけでなく、exhaustive criterionを満たすfull corpus確認を独立検証する
 
 ## Must not
 
-- top-N取得だけでexhaustive表示しない
+- BM25 top-N取得や独立rankingの反復だけでexhaustive表示しない
 
 ## Acceptance criteria
 
-- positive/negative exhaustive scenarioとproduction wiring
-- test、独立reviewer、Sol gate、commit
+- positive/negative exhaustive scenario、full-corpus criterion、production wiring
+- test、独立reviewer、risk/contractに応じて必要なSol品質gate、commit
 
 ## Historical invariants
 
