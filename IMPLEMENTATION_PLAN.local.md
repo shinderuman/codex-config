@@ -16,11 +16,11 @@ GLM委譲率、PACKETサイズ、GLM token、Solへ戻した回数等は代理�
 
 ## 現在作業中
 
-- Task: telemetry測定基盤のcoverage明示
-- 前段完了: reviewer snapshotと親専有plan/history更新を両立するcontractを実装し、必要test・lint・vet・build・独立reviewer・HIGH変更のSol品質gate・個別commitを完了
-- 現在境界: TaskStats model call数とraw JSONL record数の差を推測補完せず、coverage状態・欠損call数・usage unknownとして表示する。既知の`ccc205d1`はhistorical gapとして分離する
+- Task: external reviewで判明したstructured output protocol regression修正
+- 前段完了: telemetry coverage表示を実装し、必要test・race・lint・vet・build・独立reviewer・HIGH変更のSol品質gate・指摘後再review・個別commitを完了
+- 現在境界: `FIX_REQUIRED`と`PASS`の`TARGETS`必須契約をtyped validatorへ復元し、producer JSON SchemaとGo parserの未知field受理集合を一致させる。旧status別required fieldsとの対応と修正retry分類を機械testで固定する
 - 進行状態: 前taskのplan/historyを同一commitへamendする直前
-- 次の操作: amend後に`install.sh`で本配置と一致を確認し、telemetry coverage改善を新規GLM taskとして開始する
+- 次の操作: amend後に`install.sh`で本配置と一致を確認し、escaped review原因層規則を読んで新規GLM taskを開始する
 
 更新タイミング:
 
@@ -45,7 +45,8 @@ GLMにはcommitさせない。独立review・必要なSol確認・品質ゲー�
 
 ## 未完了（優先順）
 
-- [ ] telemetry測定基盤を改善し、TaskStats model call数とraw JSONL record数のcoverageを`complete/incomplete`・欠損call数・usage unknownとして表示する。既知の`ccc205d1`はwrapper孤児化時の1 callがstatsだけに残るため、推測補完せずhistorical gapとして分離する
+- [ ] external reviewで判明したstructured output protocol regressionを修正する。`FIX_REQUIRED`と`PASS`の`TARGETS`必須契約を旧protocolからtyped validatorへ復元し、producer JSON Schemaが許容する未知fieldとGo parserの受理集合不一致を解消する。status別旧required fieldsから新schema/validatorへの対応表とproducer/consumer acceptance集合を機械testで固定する
+- [ ] tracked canonical planのstale-by-one再発を修正する。final HEAD上のplanが完了済みcommitを「amend直前」「install前」と記述していないことを機械postconditionで保証し、運用instructionだけで解消扱いしない
 - [ ] worker call長大化を品質を落とさず制御可能にする。v3 worker-new 41 callのturn中央値55・p95 137に対し現task resumeは320 turn／約20.08であり、まずoutlierをtask/phase/session別に可視化し、複数責務の事前分割または意味milestone checkpointへ返す。hard turn cap・session rotationは中断時の品質と追加call costを検証するまで導入しない
 - [ ] compaction閾値、worker model routing、test impact selectionを品質を落とさず評価可能にする。現event metadataはBash回数・durationだけでtest/search/build等を区別できないため、raw commandを保存せずallowlist分類したoperation categoryを追加する。reviewerはvalid終端66件中8件が`FIX_REQUIRED`、GLM-4.7は6 call treeのみのため、review縮小・4.7拡大・test省略はDirect/orchestrated品質証拠なしに実施しない
 - [ ] fixed Eval harnessとescaped bug/review corpusの残項目を統合

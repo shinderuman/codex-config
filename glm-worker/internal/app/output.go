@@ -311,6 +311,7 @@ func printStats(st *state.StateStore, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "MODEL_CALLS_BY_ALIAS: %s\n", formatIntMap(aggregate.ModelCallsByAlias))
 	fmt.Fprintf(stdout, "PROBE_CALLS: %d\n", probeCalls)
 	fmt.Fprintf(stdout, "TOTAL_AI_CALLS: %d\n", aggregate.ModelCalls+probeCalls)
+	printTelemetryCoverage(st, all, stdout)
 	fmt.Fprintf(stdout, "MODEL_DURATION_MS_BY_ALIAS: %s\n", formatInt64Map(aggregate.ModelDurationMSByAlias))
 	fmt.Fprintf(stdout, "INPUT_TOKENS_BY_ALIAS: %s\n", formatInt64Map(aggregate.InputTokensByAlias))
 	fmt.Fprintf(stdout, "CACHE_CREATION_INPUT_TOKENS_BY_ALIAS: %s\n", formatInt64Map(aggregate.CacheCreationInputTokensByAlias))
@@ -358,6 +359,46 @@ func printStats(st *state.StateStore, stdout io.Writer) error {
 		fmt.Fprintln(stdout, "CURRENT_ARTIFACT_DIR: none")
 	}
 	return nil
+}
+
+// printTelemetryCoverageはTaskStats model_callsとraw JSONL task record数の対応を表示する。
+// 欠損callのusageは既知historical gapを含め推測せず、token集計が捕まえたrecordだけの
+// 部分合計であることをUSAGE_TOTALS_COVERAGEで明示する。
+func printTelemetryCoverage(st *state.StateStore, all []state.TaskStats, stdout io.Writer) {
+	coverage := st.ComputeTelemetryCoverage(all)
+	fmt.Fprintf(stdout, "TELEMETRY_COVERAGE: %s\n", coverage.Status)
+	fmt.Fprintf(stdout, "TELEMETRY_COVERAGE_MODEL_CALLS: %d\n", coverage.StatsCalls)
+	fmt.Fprintf(stdout, "TELEMETRY_COVERAGE_RAW_RECORDS: %d\n", coverage.RawRecords)
+	fmt.Fprintf(stdout, "TELEMETRY_COVERAGE_MISSING_CALLS: %d\n", coverage.MissingCalls)
+	fmt.Fprintf(stdout, "TELEMETRY_COVERAGE_EXCESS_RECORDS: %d\n", coverage.ExcessRecords)
+	fmt.Fprintf(stdout, "TELEMETRY_COVERAGE_ORPHAN_FILES: %d\n", coverage.OrphanFiles)
+	if coverage.UsageKnown {
+		fmt.Fprintln(stdout, "USAGE_TOTALS_COVERAGE: complete")
+	} else {
+		fmt.Fprintln(stdout, "USAGE_TOTALS_COVERAGE: unknown")
+	}
+	for _, entry := range coverage.Tasks {
+		switch entry.Classification() {
+		case state.CoverageHistoricalGap:
+			fmt.Fprintf(
+				stdout,
+				"TELEMETRY_COVERAGE_HISTORICAL_GAP: task=%s stats_calls=%d raw_records=%d missing=%d usage=unknown\n",
+				entry.TaskID, entry.StatsCalls, entry.RawRecords, entry.MissingCalls(),
+			)
+		case state.CoverageIncomplete:
+			fmt.Fprintf(
+				stdout,
+				"TELEMETRY_COVERAGE_INCOMPLETE_TASK: task=%s stats_calls=%d raw_records=%d missing=%d excess=%d usage=unknown\n",
+				entry.TaskID, entry.StatsCalls, entry.RawRecords, entry.MissingCalls(), entry.ExcessRecords(),
+			)
+		case state.CoverageUnreadable:
+			fmt.Fprintf(
+				stdout,
+				"TELEMETRY_COVERAGE_UNREADABLE_TASK: task=%s stats_calls=%d\n",
+				entry.TaskID, entry.StatsCalls,
+			)
+		}
+	}
 }
 
 func mergeIntMap(target *map[string]int, source map[string]int) {
