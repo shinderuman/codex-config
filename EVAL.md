@@ -108,6 +108,18 @@
 - `IMPLEMENTATION_HISTORY.md`は完了証跡とescaped bug/review原因分析を置く親Codex専有のtracked archiveとし、GLM worker/reviewerは編集・生成・削除を行わず通常の作業開始・再開時に全文を読まない。wrapperはplanが存在するrepositoryだけでhistoryの内容・存在・追跡状態の不変をplan file guardと同じ責務で機械強制し、planの無い旧repositoryとhistory未作成状態の通常作業は許可する。`IMPLEMENTATION_HISTORY.md`自身はcritical分類(`implementation-history`)へ分類し、実行済みTask Work Callはguard検出の全terminal pathでraw telemetryへexactly once記録されることをproduction testが固定する。
 
 
+## tracked canonical planのcommit同期contract
+
+- `codex/instructions/git.md`のcommit同期節は、repository rootにtracked canonical plan(`IMPLEMENTATION_PLAN.local.md`)が存在するrepositoryのcommitだけに適用する親Codex orchestration contractである。stale-by-oneの原因をworker/reviewer pipelineの個別checklist不足ではなく、planをtask commitへ含める契約・`[x]`は個別commit後だけという契約・各commit直後にplanを更新する契約の同時適用がcommit前の完了記載とcommit後更新の別commit待ちを同時に生んだ親Codexの自己参照と分類しており、worker/reviewer promptへの個別checklist追加で解決しない。
+- 二段階契約: 実装・test・独立review・必要なSol品質gate完了後も未完了項目を`[x]`にせずplanを作業実態と次task内容へ同期したcommit-ready状態へ更新し、実装とcommit-ready planを初回commitへ含める。親Codexが直ちにplanと`IMPLEMENTATION_HISTORY.md`を完了証跡(`[x]`)・次task・実working tree状態へ同期し、同期済みplan/historyだけを同じcommitへamendし、final HEADとclean working treeを確認してからinstall・次task・handoffへ進む。初回commitとamendの間に停止・ユーザー報告でのturn終了・別task開始・GLM起動・install・handoffを行わない。amend失敗時はobsolete HEADのままinstall・次task・handoffへ進まず、同じcommitへのplan/history同期を復旧する。大規模ledger・別status DB・追加commitの連鎖・worker/reviewer個別checklistは追加しない。
+- plan本文・`[x]`・優先順・現在状態の更新権限が親Codex専有であること、commit実行の承認条件、Gitリモートへの書込禁止、wrapperのplan file不変guardとroot `AGENTS.md`のparent-only plan/history規則は本contractで変更しない。
+- 親側production wiringの決定論検証は`internal/workflow`の`TestPlanCommitSyncContractWiring`が担う。`codex/AGENTS.md`のcommit時読込routing、`codex/instructions/git.md`本文の必須契約文、root `AGENTS.md`のparent-only plan規則と`codex/instructions/git.md`の既存commit承認・push禁止規則の存続のいずれかが欠けるとtestが失敗する。install後の配置確認は`tests/install_smoke.sh`の配置grepが検証する。
+- 本contractのcommit・amendは親Codexが実行するためscripted packetで表現できるwrapper終端を持たず、scenario corpusへ`plan-commit-sync-*`scenarioを追加しない。親behavioral Evalの代替として重複scenarioをcorpusへ追加しない方針も本testが固定する。
+- 親Codex behavioral Evalは未実行の固定Eval caseとする。入力: tracked canonical planが存在するrepositoryでの実装項目完了報告と、commit前plan状態・commit log・HEADのplan/history内容・working tree状態。positive case: commit前のplanへ未完了項目を`[x]`として書き込まずcommit-ready状態で初回commitへ含め、完了証跡(`[x]`)・次task・実working tree状態へ同期したplan/historyを同じcommitへamendし、final HEADとclean working treeを確認してからinstall・次task・handoffへ進む。amend失敗時はobsolete HEADのまま後続操作へ進まず同じcommitへの同期を復旧する。negative case: planが存在しないrepositoryの通常commitへ本契約の手順を適用せず、plan更新を要しないcommitへ形式的な同期amendを要求しない。一次証拠: commit前後のplan本文・`git show`によるHEAD収録内容・`git status`によるworking tree状態を一次証拠で照合する。完了条件: その検証形態が整備されること。live model呼出しを要するためユーザーの明示指示後だけ実行し、完了条件を満たすまでは本項を完了扱いにしない。
+- 未実行境界: corpus scenarioもscripted packetも親Codexのcommit・amend・同期復旧行動の証明にならないため、本contractではwrapper側検証scenarioを構成しない。
+- 本contractの親behavioral Eval入力・期待判断とproduction guidanceの因果は、文面の並記だけに依存させない。`TestPlanCommitSyncContractWiring`がEVAL.md本節のpositive/negative caseと期待判断を`git.md`の二段階契約・初回commitとamendの間の停止禁止・amend失敗復旧の契約文へ直接突き合わせて検証する。
+
+
 ## 自己保護critical surface
 
 - orchestrator自己変更のHIGH判定は`internal/workflow/selfprotection.go`を単一契約とし、拡張子や「永続file・scriptであること」ではなく意味で分類する。対象はCodex/GLMの委譲・model routing・prompt/instruction・PACKET・session/resume・provider recovery/autoresume・権限/隔離・managed settings/installer適用意味を変更できるproduction surface。

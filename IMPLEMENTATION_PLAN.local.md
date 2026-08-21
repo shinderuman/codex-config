@@ -16,10 +16,10 @@ GLM委譲率、PACKETサイズ、GLM token、Solへ戻した回数等は代理�
 
 ## 現在作業中
 
-- Task: tracked canonical planのstale-by-oneを解消し、commit前の虚偽完了とcommit後HEADのobsolete状態を両方防ぐ単純な運用contractを固定する
-- 前段完了: BM25 fingerprintをproduction Searchのtracked/untracked列挙と`readSearchableFile`の同一corpus投影へ収束し、HEAD metadata軸を削除。nested repo・submodule・default/追加exclude・large/binary/symlink境界をproduction Search testで固定して独立review・Sol品質ゲート後にcommit済み
-- 原因分類: 親Codex orchestration失敗。planをtask commitへ含める、`[x]`はcommit後だけ、各commit直後に更新する、という3契約の自己参照を解消せず最初のtracked plan HEADを一世代古くした
-- 次の操作: 大規模ledgerを追加せず、commit-ready planを含む初回commit→親Codexが完了/次taskへ同期→同一commitへ即時amend、の実運用済み二段階を正式contractとtestへ固定する。初回commitとamendの間に停止・handoff・別task着手しない
+- Task: Codex↔GLM structured output PoCとして、現行Claude Code・Z.ai Coding Plan・GLM-5.3・`-p`・stream-json・session resumeで公式`--json-schema`の成立性を検証する
+- 前段完了: tracked planのcommit-ready初回commit→親Codex plan/history最終同期→同一commit amend→final HEAD/clean確認、というstale-by-one防止contractを`git.md`・EVAL・wiring test・install smokeへ固定して独立review・Sol品質ゲート後にcommit済み
+- PoC境界: production PACKET/parserは変更しない。schema適合最終output、stream-json抽出、resume、invalid/unsupported fail closed、provider error/rate-limit分類、token/cost/session metadataを最小実経路で確認する。MCP/Tool Use、persistent process、daemon/socket、実Sol Direct A/Bはscope外
+- 次の操作: feasibility gateを適用し、追加の大規模benchmark frameworkを作らず現行PACKETとのbyte/token proxy・format/recompression call・意味情報・parser複雑性・GLM call数・Sol判断情報を比較する。成立しなければproductionへ進まず`NEEDS_SOL_DECISION`へ戻す
 
 更新タイミング:
 
@@ -44,7 +44,6 @@ GLMにはcommitさせない。独立review・必要なSol確認・品質ゲー�
 
 ## 未完了（優先順）
 
-- [ ] tracked canonical planのstale-by-oneを解消する。commit-ready→commit→親Codex plan最終同期→同一commit amend等の単純contractを確定し、commit前の虚偽完了とcommit後のobsolete HEADを両方防ぐ。大規模ledgerは追加しない
 - [ ] Codex↔GLM structured output PoCを実施する
   - [ ] 現行Claude Code・Z.ai Coding Plan・GLM-5.3 mapping・`-p`・`--output-format stream-json`・session resumeの実経路で公式`--json-schema`成立性を最小PoC確認する。schema適合最終output、stream-json抽出、resume維持、invalid/unsupported fail closed、provider classification、token/cost/session metadataを検証し、不成立ならproductionへ進まず`NEEDS_SOL_DECISION`へ戻す
   - [ ] 現行PACKETとstructured outputについてbyte/token proxy、format/recompression call、意味情報欠落、parser/validator複雑性、GLM call数、Sol判断情報保持を比較する。実Sol High Direct baseline・本番A/Bはユーザー明示許可なしに実行しない
