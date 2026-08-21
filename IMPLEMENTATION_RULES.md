@@ -13,7 +13,7 @@
 - ACTIVE taskが明示参照する`IMPLEMENTATION_HISTORY.md`の必要箇所
 - conversation context、compaction summary、internal TODO
 
-conversation memoryやcompaction summaryをtask requirementの正にしない。Git現物とPlan/Taskが矛盾する場合、親Codexが現物確認後にPlan/Taskを修正してから続行する。
+conversation context、compaction summary、internal TODOはsource of truthではなくcacheとして扱う。Git現物とPlan/Taskが矛盾する場合、親Codexが現物確認後にPlan/Taskを修正してから続行する。
 
 ## 要求受領とtracked化
 
@@ -31,8 +31,7 @@ conversation memoryやcompaction summaryをtask requirementの正にしない。
 - derived sectionが十分詳細でもOriginal instructionを要約してよい理由にはしない。token削減はderived sectionと通常resume経路で行い、一次要求sourceを削らない
 - 長い指示を複数taskへ分割する場合、各taskの要求・理由・禁止事項・完了条件を理解するために必要な原文sectionをlosslessに保存する。共通前提を暗黙依存にせず、必要部分を含めるかtrackedな共通sourceを明示参照する
 - derived sectionへOriginal instruction全文を複製せず、compactな作業・review indexとして維持する
-- RULES変更が既存の未完了taskへretroactiveに影響する場合、親Codexはrule変更だけで完了扱いせず、既存task corpusのmigration要否を明示判定する。migrationが必要なら、全未完了taskについて一次要求source、Dependencies、workflow順序、quality gate、blocked activation、acceptanceとの矛盾を確認し、新RULESと同じcontractで実行できることをpostconditionとしてから完了する
-- source-of-truthをRULESへ分離しても、RULESと既存taskの一時的不整合を許容したまま作業を再開しない。新RULESがtaskの旧contractを暗黙上書きしたとは扱わず、矛盾するtask metadataを実際にmigrationする
+- RULES変更が既存taskへretroactiveに影響する場合はmigration要否を判定し、矛盾するtask metadataを更新して同じcontractで実行可能なことを確認してから完了する
 
 ## parent maintenance
 
@@ -89,13 +88,6 @@ parent-managed metadataを扱うguard、self-protection、production wiring自�
 - PlanのACTIVE / NEXTにおけるsource上の順序は変更可能な実行priorityだけを表す
 - task fileの`Dependencies`は、そのtaskを正しく実装・検証するために先行taskの成果物が実際に必要なcorrectness prerequisiteだけを、`IMPLEMENTATION_TASKS/<semantic-or-existing-name>.md`形式のpathで明示する
 - Planで先行予定、作成順、番号大小、隣接taskという理由だけでdependencyを追加しない。priority変更はPlanだけを変更し、hard dependencyと同一視しない
-- final verificationの開始条件は固定番号rangeやtask filename列挙ではなく、開始時点のPlan上で自身以外の実行可能なunblocked implementation / evaluation taskが残っていないこととする。BLOCKED / USER_PERMISSION_WAITは除外し、decision gateから生成された採用taskも完了対象に含める
-
-## parent decision gate
-
-- 測定artifactを採用・棄却・data不足へ分類するumbrella taskはparent decision gateとし、通常のGLM implementation taskとしてdispatchしない
-- 親Codexが根拠artifactを読み、採用する実装はsemantic filenameの独立taskへ固定し、棄却はHistoryへ記録する。大規模analysisが必要な場合だけread-only workerへ委譲できる
-- parent decision gate自体へ通常implementationと同じ独立reviewerやSol callを機械適用しない。変更のrisk / contractに基づく既存品質gateを正とする
 
 ## 再読contract
 
@@ -115,14 +107,6 @@ NEXT taskは開始時まで全文を読む必要はない。
 - reviewerは`実装 vs Contract`だけでなく`Contract vs Original instruction / Amendments`も比較し、derived contract作成時の要求欠落自体をreview対象にする
 - scripted runnerの期待packetだけでなくproduction prompt/dispatchとの因果をtestで固定する
 - review結果はdefect、user-visible/workflow impact、why Codex+GLM missed it、要求由来/実装由来複雑性、preventionを区別する。原因層はparent orchestration、requirement preservation、worker、reviewer、Sol gate、production wiring、test/scenario、cross-cutting invariant compositionから一次証拠で分類する
-- task acceptanceにSol gateの文言があっても全task一律の固定儀式とは解釈しない。HIGH risk、cross-cutting invariant、外部成立性、parent lifecycle、machine protocol等は必要なSol品質gateを通し、低risk metadata集計等は既存risk floor / gate判定に従う。消費削減だけを理由に必要なgateを省略しない
-
-## evaluation evidence
-
-- deterministic workflow evidence、semantic regression evidence、real operation observationを分離し、file read等の観測事実から理解・品質保持を推定する単一scoreを発明しない
-- telemetryに存在しない、またはdeterministic sourceと定義を説明できないmetric/categoryを名前から新設しない。取得不能な粒度は`unknown` / `insufficient data`とし、不十分な証拠から省略・品質保持を結論しない
-- exhaustive確認はfull corpus enumerationとdeterministic predicateによる全候補走査、または網羅性を説明できる別のdeterministic mechanismを必要とする。BM25 top-Nはnavigation / orderingには使えるがexhaustive evidenceにはしない
-- observabilityは目的taskが読み取れる最小の保存・集計surfaceへ留め、status / timeline / watch等のpresentation追加は具体的な必要性が確認できた場合だけ行う
 
 ## blocked taskのactivation
 
@@ -148,9 +132,9 @@ task完了時は、必要証跡とescaped原因をHistoryへ追加し、task fil
 ## commit / install
 
 - GLMにcommitさせない。独立review、必要なSol gate、指摘後再review、acceptance確認後だけ親Codexが単一taskをcommitする。pushは禁止
-- task metadata同期はstale-by-one taskの機械postconditionを正とし、文書手順だけで保証したことにしない
+- task metadata同期はfinal HEADの機械postconditionを正とし、文書手順だけで保証したことにしない
 - runtimeへ影響するtaskはimplementation、test/review、commit後、適切な区切りで`install.sh`本配置、installed/source一致、そのinstalled状態で必要なproduction smokeまでをtask completion flowとして行う。複数task分を未配置のまま後続実運用へ進めず、最終taskまでinstall義務を延期しない
-- source-only metadata変更はruntime install対象から除外する。最終verificationではinstalled binary / managed instructions / source HEADの一致をfreshに再監査する
+- source-only metadata変更はruntime install対象から除外する
 
 ## machine-only data原則
 

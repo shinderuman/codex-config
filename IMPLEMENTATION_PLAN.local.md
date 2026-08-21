@@ -47,7 +47,7 @@ Sol High相当の品質をできるだけ維持しながらCodex / Sol側の実�
 
 - branch: `main`
 - implementation baseline: `ce86313`
-- metadata boundary: 新RULESへ全未完了task corpusをmigrationし、lossless Original、dependency path、dynamic gate、conditional quality gate、blocked activationの整合を確認。Task 001 checkpointへのproduction code変更なし
+- metadata boundary: 全未完了taskの新RULES migration後、task固有の補正・evaluation detailをRULESから除去して恒久invariantへ収束。Task 001 checkpointへのproduction code変更なし
 - push: 禁止
 
 ## 現在の停止理由
