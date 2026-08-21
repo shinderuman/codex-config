@@ -106,7 +106,7 @@
     },
     {
       "path": "AGENTS.md",
-      "sha256": "b6f1df68aae5a4a66c7afdf9f8931039c49664fc828862666538227995fa7cbe",
+      "sha256": "e0baebcd8072cbe6952c3b6d4af26e4fb07e0ff32b8c8c1a0e549903c842d426",
       "scenarios": [
         "implementation-plan-present-ignored-returns-fix-required",
         "implementation-plan-absent-fabrication-fails-closed-before-review",

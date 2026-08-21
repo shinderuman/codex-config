@@ -63,6 +63,7 @@ func TestIsCriticalPath(t *testing.T) {
 		{"managed AGENTS quality gate", "codex/AGENTS.md", true, "managed-agents"},
 		{"repository root AGENTS bootstrap contract", "AGENTS.md", true, "repo-agents"},
 		{"tracked implementation plan is parent-owned canonical source", "IMPLEMENTATION_PLAN.local.md", true, "implementation-plan"},
+		{"tracked implementation history is parent-owned archive", "IMPLEMENTATION_HISTORY.md", true, "implementation-history"},
 
 		{"test files excluded keeps test-only 4.7", "glm-worker/internal/workflow/workflow_test.go", false, "test"},
 		{"packet test excluded", "glm-worker/internal/packet/packet_test.go", false, "test"},
@@ -144,6 +145,23 @@ func TestImplementationPlanFileIsTrackedCanonical(t *testing.T) {
 	}
 	if strings.TrimSpace(string(out)) != implementationPlanFile {
 		t.Fatalf("%sはGit追跡のcanonical sourceであるべきです: git ls-files出力 %q", implementationPlanFile, string(out))
+	}
+}
+
+// TestImplementationHistoryFileIsTrackedArchiveはhistory fileがGit追跡の親Codex専有archive
+// であることをgit ls-filesで固定する。guardのtracked欠損検出は追跡状態を前提とするため、
+// 追跡解除は本検証とguard両方で検知される。
+func TestImplementationHistoryFileIsTrackedArchive(t *testing.T) {
+	root := scenarioRepoRoot(t)
+	if _, err := exec.Command("git", "-C", root, "rev-parse", "--git-dir").Output(); err != nil {
+		t.Skipf("git metadata absent under %s: tracked-file pin unverifiable", root)
+	}
+	out, err := exec.Command("git", "-C", root, "ls-files", "--", implementationHistoryFile).Output()
+	if err != nil {
+		t.Fatalf("git ls-files %s: %v", implementationHistoryFile, err)
+	}
+	if strings.TrimSpace(string(out)) != implementationHistoryFile {
+		t.Fatalf("%sはGit追跡の親Codex専有archiveであるべきです: git ls-files出力 %q", implementationHistoryFile, string(out))
 	}
 }
 

@@ -17,40 +17,88 @@ import (
 )
 
 // implementationPlanFileはrepository rootへ置くtracked canonical sourceの実施計画file。
-// 本文・checkbox・優先順・現在状態を更新できるのは親Codexだけであり、GLM worker/reviewerは
-// 読み取り専用、欠損時も生成しない。wrapperはworker呼出前後の内容不変を機械強制する。
+// implementationHistoryFileは完了証跡とescaped bug/review原因分析を分離した親Codex専有の
+// tracked archiveであり、通常の作業開始・再開時には全文を読まず必要な見出しだけを検索して読む。
+// 両fileとも本文を更新できるのは親Codexだけであり、GLM worker/reviewerは読み取り専用で、
+// 欠損時も生成しない。wrapperはworker呼出前後の内容不変を機械強制する。
 // glm-workerはplanを置かない他repositoryでも使うため、欠損の意味はGit indexの追跡有無で
-// 区別する。追跡中planのworking tree欠損は親Codexが置いた正が失われた状態のため呼出前に
+// 区別する。追跡中fileのworking tree欠損は親Codexが置いた正が失われた状態のため呼出前に
 // fail closedする。未追跡欠損の通常作業を許可するのはGit管理外directoryと確認できた場合と
 // Git repository内で未追跡と正常判定できた場合だけで、repo内で判定不能なGit異常は
-// baseline取得不能として同じく呼出前にfail closedする。
-const implementationPlanFile = "IMPLEMENTATION_PLAN.local.md"
+// baseline取得不能として同じく呼出前にfail closedする。history契約の強制はplanが置かれた
+// repositoryだけとし、planの無い旧repositoryおよびhistory未作成状態の通常作業を許可する。
+const (
+	implementationPlanFile    = "IMPLEMENTATION_PLAN.local.md"
+	implementationHistoryFile = "IMPLEMENTATION_HISTORY.md"
+)
 
-// errPlanFileGuardStoppedはplan file不変性確認によるfail closed停止が完了したことを
+// errParentFileGuardStoppedは親Codex専有file不変性確認によるfail closed停止が完了したことを
 // 呼出元へ伝えるsentinel。packet出力・checkpoint清除・task status更新は既に終わっているため、
 // 呼出元は追加のerror出力をしない。
-var errPlanFileGuardStopped = errors.New("implementation plan file guard stopped workflow")
+var errParentFileGuardStopped = errors.New("parent-owned file guard stopped workflow")
 
-// planFileStateはplan fileの存在と内容hash。欠損はexists=falseで表現し、呼出中の新規作成も
-// 不変性違反として検出する。
-type planFileState struct {
+// parentFileStateは親Codex専有fileの存在と内容hash。欠損はexists=falseで表現し、呼出中の
+// 新規作成も不変性違反として検出する。
+type parentFileState struct {
 	exists bool
 	sha256 string
 }
 
-func readPlanFileState(repoRoot string) (planFileState, error) {
-	b, err := os.ReadFile(filepath.Join(repoRoot, implementationPlanFile))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return planFileState{}, nil
-		}
-		return planFileState{}, fmt.Errorf("read %s: %w", implementationPlanFile, err)
-	}
-	sum := sha256.Sum256(b)
-	return planFileState{exists: true, sha256: hex.EncodeToString(sum[:])}, nil
+// parentFileGuardはworker task呼出直前に固定した親Codex専有file群のbaseline。
+// historyGuardedはplan baselineが存在しhistory契約がこの呼出で有効かを表す。
+type parentFileGuard struct {
+	plan           parentFileState
+	history        parentFileState
+	historyGuarded bool
 }
 
-func planFileChangeReason(before, after planFileState) string {
+// guardSurfaceは親Codex専有file1件のguard設定。event logのphase suffix・telemetry outcome
+// 接頭辞・fail closed packetの契約文をfileごとに切り替える。
+type guardSurface struct {
+	file          string
+	label         string
+	eventSuffix   string
+	outcomePrefix string
+	invariants    string
+	targets       string
+}
+
+var planGuardSurface = guardSurface{
+	file:          implementationPlanFile,
+	label:         "plan file",
+	eventSuffix:   "plan-file-check",
+	outcomePrefix: "plan_file",
+	invariants:    "IMPLEMENTATION_PLAN.local.mdはtracked canonical sourceであり本文・checkbox・優先順・現在状態を更新できるのは親Codexだけ。GLM worker/reviewerは読み取り専用で、更新候補と根拠をPACKETへ報告する",
+	targets:       "IMPLEMENTATION_PLAN.local.mdの現在内容とgit index/working tree状態",
+}
+
+var historyGuardSurface = guardSurface{
+	file:          implementationHistoryFile,
+	label:         "history file",
+	eventSuffix:   "history-file-check",
+	outcomePrefix: "history_file",
+	invariants:    "IMPLEMENTATION_HISTORY.mdは完了証跡とescaped bug/review原因分析を置く親Codex専有のtracked archiveであり、編集・生成・削除できるのは親Codexだけ。GLM worker/reviewerは通常の作業開始・再開時に全文を読まず必要な見出しだけ検索して読む",
+	targets:       "IMPLEMENTATION_HISTORY.mdの現在内容とgit index/working tree状態",
+}
+
+func (s guardSurface) unavailableOutcome() string { return s.outcomePrefix + "_unavailable" }
+func (s guardSurface) missingOutcome() string     { return s.outcomePrefix + "_missing" }
+func (s guardSurface) mismatchOutcome() string    { return s.outcomePrefix + "_mismatch" }
+func (s guardSurface) violationOutcome() string   { return s.outcomePrefix + "_violation" }
+
+func readParentFileState(repoRoot string, name string) (parentFileState, error) {
+	b, err := os.ReadFile(filepath.Join(repoRoot, name))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return parentFileState{}, nil
+		}
+		return parentFileState{}, fmt.Errorf("read %s: %w", name, err)
+	}
+	sum := sha256.Sum256(b)
+	return parentFileState{exists: true, sha256: hex.EncodeToString(sum[:])}, nil
+}
+
+func parentFileChangeReason(before, after parentFileState) string {
 	switch {
 	case before.exists && after.exists:
 		return "内容が変化しました"
@@ -61,23 +109,23 @@ func planFileChangeReason(before, after planFileState) string {
 	}
 }
 
-// quietWhenPlanFileGuardStoppedはplan file guardのfail closed終端が既にpacket出力・状態遷移を
-// 完了している場合、追加のerror出力をせず正常終了として扱う。
-func quietWhenPlanFileGuardStopped(err error) error {
-	if errors.Is(err, errPlanFileGuardStopped) {
+// quietWhenParentFileGuardStoppedは親Codex専有file guardのfail closed終端が既にpacket出力・
+// 状態遷移を完了している場合、追加のerror出力をせず正常終了として扱う。
+func quietWhenParentFileGuardStopped(err error) error {
+	if errors.Is(err, errParentFileGuardStopped) {
 		return nil
 	}
 	return err
 }
 
-// planFileTrackingはplan fileのGit追跡判定の確定結果。判定errorは値で表現せずerrorへ
+// parentFileTrackingは親Codex専有fileのGit追跡判定の確定結果。判定errorは値で表現せずerrorへ
 // 分離し、未追跡へ畳まない。
-type planFileTracking int
+type parentFileTracking int
 
 const (
-	planFileTrackingTracked planFileTracking = iota + 1
-	planFileTrackingUntracked
-	planFileTrackingOutsideGit
+	parentFileTrackingTracked parentFileTracking = iota + 1
+	parentFileTrackingUntracked
+	parentFileTrackingOutsideGit
 )
 
 // gitWorktreePresentはrepoRootから上位へ.git markerを探索し、Git管理下にあるかを
@@ -99,59 +147,74 @@ func gitWorktreePresent(repoRoot string) (bool, error) {
 	}
 }
 
-// classifyPlanFileTrackingはplan fileの追跡状態をrepository/index現物から判定する。
+// classifyParentFileTrackingは対象fileの追跡状態をrepository/index現物から判定する。
 // 追跡判定を特定repository pathの前提へhardcodeせず対象repositoryへ問い合わせる。
 // Git管理外directoryは未追跡欠損の通常作業を許可できる唯一の無条件許可枠であり、
 // Git repository内ではls-filesの失敗を判定不能errorとして呼出元へ返す。
-func classifyPlanFileTracking(repoRoot string) (planFileTracking, error) {
+func classifyParentFileTracking(repoRoot string, name string) (parentFileTracking, error) {
 	insideGit, err := gitWorktreePresent(repoRoot)
 	if err != nil {
 		return 0, err
 	}
 	if !insideGit {
-		return planFileTrackingOutsideGit, nil
+		return parentFileTrackingOutsideGit, nil
 	}
-	output, err := exec.Command("git", "-C", repoRoot, "ls-files", "--", implementationPlanFile).Output()
+	output, err := exec.Command("git", "-C", repoRoot, "ls-files", "--", name).Output()
 	if err != nil {
 		return 0, fmt.Errorf("git ls-files: %w", err)
 	}
 	if strings.TrimSpace(string(output)) != "" {
-		return planFileTrackingTracked, nil
+		return parentFileTrackingTracked, nil
 	}
-	return planFileTrackingUntracked, nil
+	return parentFileTrackingUntracked, nil
 }
 
-// capturePlanFileGuardはworker task呼出直前のplan file状態をbaselineとして固定する。
+// captureParentFileGuardはworker task呼出直前の親Codex専有file状態をbaselineとして固定する。
 // 親Codexがcall前に更新したworking tree内容をそのまま基準にし、wrapperは復元・編集を行わない。
-// Git indexで追跡中のplanがworking treeへ欠損している場合は未追跡repoの初期欠損と区別して
-// model呼出前にfail closedする。plan読込失敗・repo内での追跡判定不能も不変性の基準自体が
-// 確認できないため同じく呼出前にfail closedする。reviewer呼出とprobeは既存read-only
-// invariant(review-start/end snapshot)の対象のため外す。
-func (w *Workflow) capturePlanFileGuard(role state.SessionRole) (planFileState, bool, error) {
+// Git indexで追跡中のfileがworking treeへ欠損している場合は未追跡repoの初期欠損と区別して
+// model呼出前にfail closedする。読込失敗・repo内での追跡判定不能も不変性の基準自体が
+// 確認できないため同じく呼出前にfail closedする。historyはplanが存在するrepositoryだけで
+// guard対象とし、planの無い旧repositoryでは契約自体を適用しない。reviewer呼出とprobeは
+// 既存read-only invariant(review-start/end snapshot)の対象のため外す。
+func (w *Workflow) captureParentFileGuard(role state.SessionRole) (parentFileGuard, bool, error) {
 	if role != state.WorkerRole {
-		return planFileState{}, false, nil
+		return parentFileGuard{}, false, nil
 	}
-	before, err := readPlanFileState(w.config.RepoRoot)
+	plan, err := readParentFileState(w.config.RepoRoot, implementationPlanFile)
 	if err != nil {
-		return planFileState{}, true, w.failClosedPlanFileGuard("plan-file-capture", "plan_file_unavailable", "plan file baseline取得失敗のため不変性を確認できません", err)
+		return parentFileGuard{}, true, w.failClosedParentFileGuard("plan-file-capture", planGuardSurface, planGuardSurface.unavailableOutcome(), "plan file baseline取得失敗のため不変性を確認できません", err)
 	}
-	if !before.exists {
-		tracking, trackErr := classifyPlanFileTracking(w.config.RepoRoot)
+	if !plan.exists {
+		tracking, trackErr := classifyParentFileTracking(w.config.RepoRoot, implementationPlanFile)
 		switch {
 		case trackErr != nil:
-			return planFileState{}, true, w.failClosedPlanFileGuard("plan-file-capture", "plan_file_unavailable", "plan fileのGit追跡判定に失敗したため欠損を安全に扱えません", trackErr)
-		case tracking == planFileTrackingTracked:
-			return planFileState{}, true, w.failClosedPlanFileGuard("plan-file-capture", "plan_file_missing", "Git indexで追跡されている"+implementationPlanFile+"がworking treeへ存在しません", nil)
+			return parentFileGuard{}, true, w.failClosedParentFileGuard("plan-file-capture", planGuardSurface, planGuardSurface.unavailableOutcome(), "plan fileのGit追跡判定に失敗したため欠損を安全に扱えません", trackErr)
+		case tracking == parentFileTrackingTracked:
+			return parentFileGuard{}, true, w.failClosedParentFileGuard("plan-file-capture", planGuardSurface, planGuardSurface.missingOutcome(), "Git indexで追跡されている"+implementationPlanFile+"がworking treeへ存在しません", nil)
+		}
+		return parentFileGuard{plan: plan}, false, nil
+	}
+	history, err := readParentFileState(w.config.RepoRoot, implementationHistoryFile)
+	if err != nil {
+		return parentFileGuard{plan: plan}, true, w.failClosedParentFileGuard("plan-file-capture", historyGuardSurface, historyGuardSurface.unavailableOutcome(), "history file baseline取得失敗のため不変性を確認できません", err)
+	}
+	if !history.exists {
+		tracking, trackErr := classifyParentFileTracking(w.config.RepoRoot, implementationHistoryFile)
+		switch {
+		case trackErr != nil:
+			return parentFileGuard{plan: plan}, true, w.failClosedParentFileGuard("plan-file-capture", historyGuardSurface, historyGuardSurface.unavailableOutcome(), "history fileのGit追跡判定に失敗したため欠損を安全に扱えません", trackErr)
+		case tracking == parentFileTrackingTracked:
+			return parentFileGuard{plan: plan}, true, w.failClosedParentFileGuard("plan-file-capture", historyGuardSurface, historyGuardSurface.missingOutcome(), "Git indexで追跡されている"+implementationHistoryFile+"がworking treeへ存在しません", nil)
 		}
 	}
-	return before, false, nil
+	return parentFileGuard{plan: plan, history: history, historyGuarded: true}, false, nil
 }
 
-// verifyPlanFileAfterCallはworker task呼出直後にbaselineへ再照合する。GLM workerによる
-// plan変更・生成・削除をreviewer開始前にfail closed検出し、resume前提の停止状態へ保存しない。
-func (w *Workflow) verifyPlanFileAfterCall(
+// verifyParentFileAfterCallはworker task呼出直後にbaselineへ再照合する。GLM workerによる
+// 変更・生成・削除をreviewer開始前にfail closed検出し、resume前提の停止状態へ保存しない。
+func (w *Workflow) verifyParentFileAfterCall(
 	checkpoint state.ResumeCheckpoint,
-	before planFileState,
+	before parentFileGuard,
 	runResult runner.RunResult,
 	startedAt time.Time,
 	completedAt time.Time,
@@ -161,27 +224,51 @@ func (w *Workflow) verifyPlanFileAfterCall(
 	if checkpoint.Role != state.WorkerRole {
 		return false, nil
 	}
-	after, err := readPlanFileState(w.config.RepoRoot)
+	if stopped, err := w.verifyGuardedFileAfterCall(checkpoint, planGuardSurface, before.plan, runResult, startedAt, completedAt, runErr, outputPath); stopped {
+		return true, err
+	}
+	if !before.historyGuarded {
+		return false, nil
+	}
+	return w.verifyGuardedFileAfterCall(checkpoint, historyGuardSurface, before.history, runResult, startedAt, completedAt, runErr, outputPath)
+}
+
+// verifyGuardedFileAfterCallは対象file1件の終了状態をbaselineへ再照合する。runnerを実際に
+// 呼んだtask呼出は終了状態読込失敗を含む全terminal pathでraw telemetryへexactly once記録する。
+// この記録を飛ばすとstatsのTask Work Call計上だけが残り加法整合が崩れるため、読込失敗経路でも
+// recordModelCallを必ず1回実行してからfail closedへ遷移する。
+func (w *Workflow) verifyGuardedFileAfterCall(
+	checkpoint state.ResumeCheckpoint,
+	surface guardSurface,
+	before parentFileState,
+	runResult runner.RunResult,
+	startedAt time.Time,
+	completedAt time.Time,
+	runErr error,
+	outputPath string,
+) (bool, error) {
+	after, err := readParentFileState(w.config.RepoRoot, surface.file)
 	if err != nil {
-		return true, w.failClosedPlanFileGuard(checkpoint.Phase, "plan_file_unavailable", "plan file終了状態取得失敗のため不変性を確認できません", err)
+		w.recordModelCall(checkpoint, runResult, startedAt, completedAt, surface.unavailableOutcome(), "", err, outputPath, callDiagnostics{})
+		return true, w.failClosedParentFileGuard(checkpoint.Phase, surface, surface.unavailableOutcome(), surface.label+"終了状態取得失敗のため不変性を確認できません", err)
 	}
 	if after == before {
 		return false, nil
 	}
-	reason := planFileChangeReason(before, after)
+	reason := parentFileChangeReason(before, after)
 	violation := fmt.Errorf("worker呼出開始前に対し%s", reason)
 	if runErr != nil {
 		violation = fmt.Errorf("%v; 呼出error: %w", violation, runErr)
 	}
-	w.recordModelCall(checkpoint, runResult, startedAt, completedAt, "plan_file_violation", "", violation, outputPath, callDiagnostics{})
-	return true, w.failClosedPlanFileGuard(checkpoint.Phase, "plan_file_mismatch", violation.Error(), nil)
+	w.recordModelCall(checkpoint, runResult, startedAt, completedAt, surface.violationOutcome(), "", violation, outputPath, callDiagnostics{})
+	return true, w.failClosedParentFileGuard(checkpoint.Phase, surface, surface.mismatchOutcome(), violation.Error(), nil)
 }
 
-// failClosedPlanFileGuardはplan file不変性確認失敗時の停止semantics。resume checkpointを
+// failClosedParentFileGuardは親Codex専有file不変性確認失敗時の停止semantics。resume checkpointを
 // 消してWaitingSolReviewへ移行し、Sol確認packetを出力する。GLM変更内容はbaselineへ
-// 巻き戾さず現物のままSolへ引き渡す。
-func (w *Workflow) failClosedPlanFileGuard(phase string, outcome string, reason string, cause error) error {
-	w.recordPlanFileEvent(phase, outcome, reason, cause)
+// 巻き戻さず現物のままSolへ引き渡す。
+func (w *Workflow) failClosedParentFileGuard(phase string, surface guardSurface, outcome string, reason string, cause error) error {
+	w.recordParentFileEvent(phase, surface, outcome, reason, cause)
 	if err := w.state.ClearResumeCheckpoint(); err != nil {
 		return err
 	}
@@ -191,16 +278,16 @@ func (w *Workflow) failClosedPlanFileGuard(phase string, outcome string, reason 
 	if cause != nil {
 		reason = fmt.Sprintf("%s: %v", reason, cause)
 	}
-	if err := w.emitPacket(planFileFailClosedPacket(phase, reason)); err != nil {
+	if err := w.emitPacket(parentFileFailClosedPacket(phase, surface, reason)); err != nil {
 		return err
 	}
-	return errPlanFileGuardStopped
+	return errParentFileGuardStopped
 }
 
-// recordPlanFileEventはplan file不変性確認失敗をtelemetryへ記録する。token消費は持たない
-// (best-effort)。task呼出自身の記録はverifyPlanFileAfterCallがplan_file_violation outcomeで
+// recordParentFileEventは親Codex専有file不変性確認失敗をtelemetryへ記録する。token消費は持たない
+// (best-effort)。task呼出自身の記録はverifyGuardedFileAfterCallがviolation/unavailable outcomeで
 // 残すため、二重計上しない。
-func (w *Workflow) recordPlanFileEvent(phase string, outcome string, reason string, cause error) {
+func (w *Workflow) recordParentFileEvent(phase string, surface guardSurface, outcome string, reason string, cause error) {
 	now := w.now().UTC()
 	errorText := reason
 	if cause != nil {
@@ -211,25 +298,25 @@ func (w *Workflow) recordPlanFileEvent(phase string, outcome string, reason stri
 		CallType:    state.CallTypeEvent,
 		StartedAt:   now,
 		CompletedAt: now,
-		Phase:       phase + "-plan-file-check",
+		Phase:       phase + "-" + surface.eventSuffix,
 		Role:        state.WorkerRole,
 		Outcome:     outcome,
 		Error:       boundedText(errorText, packet.MaxDiagnosticBytes),
 	})
 }
 
-func planFileFailClosedPacket(phase string, reason string) packet.Packet {
+func parentFileFailClosedPacket(phase string, surface guardSurface, reason string) packet.Packet {
 	return packet.FromLines([]string{
 		"STATUS: NEEDS_SOL_REVIEW",
 		"RISK: HIGH",
-		fmt.Sprintf("SUMMARY: worker呼出(%s)開始前後でIMPLEMENTATION_PLAN.local.mdの不変を確認できず、reviewerを呼ばずSol確認へ昇格", phase),
-		"REQUIREMENT_COVERAGE: plan読み取り専用契約を機械強制できなかったため親Codexが直接確認する必要あり",
-		"INVARIANTS: IMPLEMENTATION_PLAN.local.mdはtracked canonical sourceであり本文・checkbox・優先順・現在状態を更新できるのは親Codexだけ。GLM worker/reviewerは読み取り専用で、更新候補と根拠をPACKETへ報告する",
-		"TEST_EVIDENCE: worker呼出開始前後のplan file存在・内容比較で欠損・不一致または読込失敗を検出",
+		fmt.Sprintf("SUMMARY: worker呼出(%s)開始前後で%sの不変を確認できず、reviewerを呼ばずSol確認へ昇格", phase, surface.file),
+		fmt.Sprintf("REQUIREMENT_COVERAGE: %s読み取り専用契約を機械強制できなかったため親Codexが直接確認する必要あり", surface.file),
+		fmt.Sprintf("INVARIANTS: %s", surface.invariants),
+		fmt.Sprintf("TEST_EVIDENCE: worker呼出開始前後の%s存在・内容比較で欠損・不一致または読込失敗を検出", surface.file),
 		fmt.Sprintf("ISSUES: %s", reason),
-		"RESIDUAL_RISK: plan fileの現在状態(変更・生成・削除・欠損)はorchestratorが復元せずそのまま残っている",
-		"TARGETS: IMPLEMENTATION_PLAN.local.mdの現在内容とgit index/working tree状態",
+		fmt.Sprintf("RESIDUAL_RISK: %sの現在状態(変更・生成・削除・欠損)はorchestratorが復元せずそのまま残っている", surface.file),
+		fmt.Sprintf("TARGETS: %s", surface.targets),
 		"ARTIFACTS: none",
-		"SOL_QUESTION: 変更されたplan内容の取扱い(親Codexによる再編集・復元)をSolが判断する",
+		fmt.Sprintf("SOL_QUESTION: 変更された%s内容の取扱い(親Codexによる再編集・復元)をSolが判断する", surface.file),
 	})
 }

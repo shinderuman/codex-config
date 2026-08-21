@@ -497,6 +497,156 @@ func TestPlanFileReadErrorFailsClosedBeforeCall(t *testing.T) {
 	}
 }
 
+const historyGuardSeed = "parent owned history\n"
+
+func writeHistoryFileContent(t *testing.T, repoRoot string, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(repoRoot, implementationHistoryFile), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mutateHistoryFile(repoRoot string) error {
+	return os.WriteFile(filepath.Join(repoRoot, implementationHistoryFile), []byte("glm edited history\n"), 0o644)
+}
+
+// removeAndDirGuardFileはguard対象fileを呼出中に削除し同pathへdirectoryを置く。
+// 呼出後の終了状態読込を確実に失敗させるafter-read failure終端の再現用。
+func removeAndDirGuardFile(name string) func(string) error {
+	return func(repoRoot string) error {
+		if err := os.Remove(filepath.Join(repoRoot, name)); err != nil {
+			return err
+		}
+		return os.Mkdir(filepath.Join(repoRoot, name), 0o755)
+	}
+}
+
+// requireGuardTelemetryExactOnceはrunner実行回数・raw telemetryのtask記録数・stats計上の
+// 3者一致(exactly once)と、event記録との役割分離を検証する。
+func requireGuardTelemetryExactOnce(t *testing.T, st *state.StateStore, runnerCalls int, wantTaskOutcome string, wantEventOutcome string) {
+	t.Helper()
+	taskRecords, eventRecords := 0, 0
+	for _, l := range taskLogs(t, st) {
+		if l.CallType == state.CallTypeTask && l.Outcome == wantTaskOutcome {
+			taskRecords++
+		}
+		if l.CallType == state.CallTypeEvent && l.Outcome == wantEventOutcome {
+			eventRecords++
+		}
+	}
+	if taskRecords != 1 {
+		t.Fatalf("outcome %sのtask記録 = %d want 1(runner実行%d回)", wantTaskOutcome, taskRecords, runnerCalls)
+	}
+	if eventRecords != 1 {
+		t.Fatalf("outcome %sのevent記録 = %d want 1", wantEventOutcome, eventRecords)
+	}
+	total := 0
+	for _, l := range taskLogs(t, st) {
+		if l.CallType == state.CallTypeTask {
+			total++
+		}
+	}
+	if total != runnerCalls {
+		t.Fatalf("task記録合計 = %d want %d", total, runnerCalls)
+	}
+	stats := currentStats(t, st)
+	if stats.ModelCalls != runnerCalls {
+		t.Fatalf("stats ModelCalls = %d want %d", stats.ModelCalls, runnerCalls)
+	}
+}
+
+// TestPlanFileAfterReadFailureRecordsExecutedCallOnceはrunner実行後の終了状態読込失敗終端でも
+// 実行済みTask Work Callをraw telemetryへexactly once記録するcross-cutting invariantを固定する。
+// 記録を飛ばすとstats計上だけが残り加法整合が崩れる。
+func TestPlanFileAfterReadFailureRecordsExecutedCallOnce(t *testing.T) {
+	repoRoot := initMutationRepo(t)
+	writePlanFileContent(t, repoRoot, planGuardSeed)
+	w, r, out, st := newPlanFileWorkflow(t, repoRoot, []runnerStep{
+		{output: implementedPacket("done")},
+		{output: passPacket()},
+	}, "worker-new", 0, removeAndDirGuardFile(implementationPlanFile))
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	requirePlanFileFailClosed(t, st, r, out, "終了状態取得失敗", 1)
+	requireGuardTelemetryExactOnce(t, st, 1, "plan_file_unavailable", "plan_file_unavailable")
+}
+
+// TestHistoryFileAfterReadFailureRecordsExecutedCallOnceはhistory面でも同じafter-read失敗終端の
+// exactly once記録を固定する。
+func TestHistoryFileAfterReadFailureRecordsExecutedCallOnce(t *testing.T) {
+	repoRoot := initMutationRepo(t)
+	writePlanFileContent(t, repoRoot, planGuardSeed)
+	writeHistoryFileContent(t, repoRoot, historyGuardSeed)
+	w, r, out, st := newPlanFileWorkflow(t, repoRoot, []runnerStep{
+		{output: implementedPacket("done")},
+		{output: passPacket()},
+	}, "worker-new", 0, removeAndDirGuardFile(implementationHistoryFile))
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	requirePlanFileFailClosed(t, st, r, out, "終了状態取得失敗", 1)
+	requireGuardTelemetryExactOnce(t, st, 1, "history_file_unavailable", "history_file_unavailable")
+}
+
+// TestPlanFileAfterReadFailureOnResumedTaskRecordsCallOnceはtransient復帰の再開task呼出が
+// after-read失敗で終わった場合も、初回transient記録と再開呼出記録の両方を残す。
+func TestPlanFileAfterReadFailureOnResumedTaskRecordsCallOnce(t *testing.T) {
+	repoRoot := initMutationRepo(t)
+	writePlanFileContent(t, repoRoot, planGuardSeed)
+	w, r, out, st := newPlanFileWorkflow(t, repoRoot, []runnerStep{
+		{output: "API Error: 503 Service Unavailable", runErr: errors.New("exit status 1")},
+		{output: implementedPacket("resumed")},
+		{output: passPacket()},
+	}, "worker-new", 0, removeAndDirGuardFile(implementationPlanFile))
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	requirePlanFileFailClosed(t, st, r, out, "終了状態取得失敗", 2)
+	if len(r.probes) != 1 {
+		t.Fatalf("probe 1回の成功後にresumed taskで停止すべき: %d", len(r.probes))
+	}
+	transient := 0
+	for _, l := range taskLogs(t, st) {
+		if l.CallType == state.CallTypeTask && l.Outcome == "transient_error" {
+			transient++
+		}
+	}
+	if transient != 1 {
+		t.Fatalf("初回transient呼出の記録 = %d want 1", transient)
+	}
+	requireGuardTelemetryExactOnce(t, st, 2, "plan_file_unavailable", "plan_file_unavailable")
+	stats := currentStats(t, st)
+	if stats.TransientRetries != 1 {
+		t.Fatalf("TransientRetries = %d want 1", stats.TransientRetries)
+	}
+}
+
+// TestHistoryFileAfterReadFailureOnResumedTaskRecordsCallOnceはhistory面の再開呼出after-read失敗も
+// 同じexactly once契約へ載せる。
+func TestHistoryFileAfterReadFailureOnResumedTaskRecordsCallOnce(t *testing.T) {
+	repoRoot := initMutationRepo(t)
+	writePlanFileContent(t, repoRoot, planGuardSeed)
+	writeHistoryFileContent(t, repoRoot, historyGuardSeed)
+	w, r, out, st := newPlanFileWorkflow(t, repoRoot, []runnerStep{
+		{output: "API Error: 503 Service Unavailable", runErr: errors.New("exit status 1")},
+		{output: implementedPacket("resumed")},
+		{output: passPacket()},
+	}, "worker-new", 0, removeAndDirGuardFile(implementationHistoryFile))
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	requirePlanFileFailClosed(t, st, r, out, "終了状態取得失敗", 2)
+	if len(r.probes) != 1 {
+		t.Fatalf("probe 1回の成功後にresumed taskで停止すべき: %d", len(r.probes))
+	}
+	requireGuardTelemetryExactOnce(t, st, 2, "history_file_unavailable", "history_file_unavailable")
+}
+
 // TestPlanFileReviewerMutationUsesExistingSnapshotInvariantはreviewer呼出をplan guardの
 // 対象外とし、reviewerのplan変更は既存review-end snapshot不変性で検出することを固定する。
 func TestPlanFileReviewerMutationUsesExistingSnapshotInvariant(t *testing.T) {
@@ -522,6 +672,287 @@ func TestPlanFileReviewerMutationUsesExistingSnapshotInvariant(t *testing.T) {
 	for _, l := range taskLogs(t, st) {
 		if l.Outcome == "plan_file_mismatch" || l.Outcome == "plan_file_violation" {
 			t.Fatalf("reviewer経路へplan guardが適用されています: %+v", l)
+		}
+	}
+}
+
+// TestHistoryFileWorkerMutationFailsClosedBeforeReviewはplan存在repoでworkerがhistoryを
+// 編集した場合をplanと同じ呼出前後比較で検出するproduction因果を固定する。
+func TestHistoryFileWorkerMutationFailsClosedBeforeReview(t *testing.T) {
+	repoRoot := initMutationRepo(t)
+	writePlanFileContent(t, repoRoot, planGuardSeed)
+	writeHistoryFileContent(t, repoRoot, historyGuardSeed)
+	w, r, out, st := newPlanFileWorkflow(t, repoRoot, []runnerStep{
+		{output: implementedPacket("done")},
+		{output: passPacket()},
+	}, "worker-new", 0, mutateHistoryFile)
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	requirePlanFileFailClosed(t, st, r, out, "内容が変化", 1)
+	if content, err := os.ReadFile(filepath.Join(repoRoot, implementationHistoryFile)); err != nil || string(content) != "glm edited history\n" {
+		t.Fatalf("GLMのhistory変更がbaselineへ自動復元されています: %q %v", content, err)
+	}
+	if planContent, err := os.ReadFile(filepath.Join(repoRoot, implementationPlanFile)); err != nil || string(planContent) != planGuardSeed {
+		t.Fatalf("planは無変更のまま保たれるべき: %q %v", planContent, err)
+	}
+	taskViolations, mismatchEvents := 0, 0
+	for _, l := range taskLogs(t, st) {
+		if l.CallType == state.CallTypeTask && l.Outcome == "history_file_violation" {
+			taskViolations++
+		}
+		if l.CallType == state.CallTypeEvent && l.Outcome == "history_file_mismatch" && strings.HasSuffix(l.Phase, historyGuardSurface.eventSuffix) {
+			mismatchEvents++
+		}
+	}
+	if taskViolations != 1 || mismatchEvents != 1 {
+		t.Fatalf("telemetry = task violation %d / mismatch event %d want 1/1", taskViolations, mismatchEvents)
+	}
+}
+
+// TestHistoryFileAbsentWorkerCreationFailsClosedはhistory未作成repoでworkerが同fileを生成した
+// 場合を存在比較で検出する。生成禁止契約をplanと同じくwrapper側で機械強制する。
+func TestHistoryFileAbsentWorkerCreationFailsClosed(t *testing.T) {
+	repoRoot := initMutationRepo(t)
+	writePlanFileContent(t, repoRoot, planGuardSeed)
+	w, r, out, st := newPlanFileWorkflow(t, repoRoot, []runnerStep{
+		{output: implementedPacket("done")},
+		{output: passPacket()},
+	}, "worker-new", 0, mutateHistoryFile)
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	requirePlanFileFailClosed(t, st, r, out, "存在しない状態から新規作成", 1)
+}
+
+// TestHistoryFileDeletionFailsClosedはworkerによるhistory削除も同じ不変性違反として検出する。
+func TestHistoryFileDeletionFailsClosed(t *testing.T) {
+	repoRoot := initMutationRepo(t)
+	writePlanFileContent(t, repoRoot, planGuardSeed)
+	writeHistoryFileContent(t, repoRoot, historyGuardSeed)
+	w, r, out, st := newPlanFileWorkflow(t, repoRoot, []runnerStep{
+		{output: implementedPacket("done")},
+		{output: passPacket()},
+	}, "worker-new", 0, func(repoRoot string) error {
+		return os.Remove(filepath.Join(repoRoot, implementationHistoryFile))
+	})
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	requirePlanFileFailClosed(t, st, r, out, "削除されました", 1)
+}
+
+// TestHistoryFileUnchangedProceedsToReviewはhistoryが親Codex置きの内容のまま変更無ければ
+// 通常flowを妨げないことを確認する(false positive回帰)。
+func TestHistoryFileUnchangedProceedsToReview(t *testing.T) {
+	repoRoot := initMutationRepo(t)
+	writePlanFileContent(t, repoRoot, planGuardSeed)
+	writeHistoryFileContent(t, repoRoot, historyGuardSeed)
+	w, r, _, st := newPlanFileWorkflow(t, repoRoot, []runnerStep{
+		{output: implementedPacket("done")},
+		{output: passPacket()},
+	}, "", 0, nil)
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	if st.TaskStatus() != state.TaskStatusComplete {
+		t.Fatalf("history不変時は通常reviewを通ってcompleteになるべき: %q", st.TaskStatus())
+	}
+	if len(r.prompts) != 2 {
+		t.Fatalf("worker/reviewer 2呼出が必要: %d", len(r.prompts))
+	}
+}
+
+// TestHistoryFileAbsentUntrackedProceedsWithPlanはplanが存在してもhistoryが未追跡欠損の
+// 場所は通常作業を許可する互換境界を固定する(history未作成状態)。
+func TestHistoryFileAbsentUntrackedProceedsWithPlan(t *testing.T) {
+	repoRoot := initMutationRepo(t)
+	writePlanFileContent(t, repoRoot, planGuardSeed)
+	w, r, _, st := newPlanFileWorkflow(t, repoRoot, []runnerStep{
+		{output: implementedPacket("done")},
+		{output: passPacket()},
+	}, "", 0, nil)
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	if st.TaskStatus() != state.TaskStatusComplete {
+		t.Fatalf("history未作成状態は通常flowを維持すべき: %q", st.TaskStatus())
+	}
+	if len(r.prompts) != 2 {
+		t.Fatalf("worker/reviewer 2呼出が必要: %d", len(r.prompts))
+	}
+}
+
+// TestHistoryFileGuardInactiveWithoutPlanはplanの無い旧repositoryではhistory契約を適用せず
+// 通常作業を許可する互換境界を固定する。強制はplanが存在するrepositoryだけ。
+func TestHistoryFileGuardInactiveWithoutPlan(t *testing.T) {
+	repoRoot := initMutationRepo(t)
+	w, r, _, st := newPlanFileWorkflow(t, repoRoot, []runnerStep{
+		{output: implementedPacket("done")},
+		{output: passPacket()},
+	}, "worker-new", 0, mutateHistoryFile)
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	if st.TaskStatus() != state.TaskStatusComplete {
+		t.Fatalf("planの無いrepoのhistory新規作成は通常flowを維持すべき: %q", st.TaskStatus())
+	}
+	if len(r.prompts) != 2 {
+		t.Fatalf("worker/reviewer 2呼出が必要: %d", len(r.prompts))
+	}
+}
+
+// TestHistoryFileTrackedMissingFailsClosedBeforeCallはGit indexがhistoryを追跡するのに
+// working treeへ欠損している場合、model呼出前にfail closedする境界を固定する。
+// 呼出前停止のためrunnerは1回も実行せず、task telemetryへphantom記録も残さない。
+func TestHistoryFileTrackedMissingFailsClosedBeforeCall(t *testing.T) {
+	cases := map[string]func(t *testing.T, repoRoot string){
+		"staged index entry": func(t *testing.T, repoRoot string) {
+			gitIn(t, repoRoot, "add", implementationHistoryFile)
+		},
+		"committed tracked file": func(t *testing.T, repoRoot string) {
+			gitIn(t, repoRoot, "add", implementationHistoryFile)
+			gitIn(t, repoRoot, "commit", "-q", "-m", "add history")
+		},
+	}
+	for name, track := range cases {
+		t.Run(name, func(t *testing.T) {
+			repoRoot := initMutationRepo(t)
+			writePlanFileContent(t, repoRoot, planGuardSeed)
+			writeHistoryFileContent(t, repoRoot, historyGuardSeed)
+			track(t, repoRoot)
+			if err := os.Remove(filepath.Join(repoRoot, implementationHistoryFile)); err != nil {
+				t.Fatal(err)
+			}
+			w, r, out, st := newPlanFileWorkflow(t, repoRoot, []runnerStep{
+				{output: implementedPacket("done")},
+				{output: passPacket()},
+			}, "", 0, nil)
+
+			if err := w.ExecuteNewTask("request"); err != nil {
+				t.Fatal(err)
+			}
+			if len(r.prompts) != 0 {
+				t.Fatalf("追跡中history欠損時はmodel呼出前に停止すべき: %d", len(r.prompts))
+			}
+			if st.TaskStatus() != state.TaskStatusWaitingSolReview {
+				t.Fatalf("task status = %q want waiting-sol-review", st.TaskStatus())
+			}
+			if _, err := st.LoadResumeCheckpoint(); err == nil {
+				t.Fatal("追跡中history欠損のfail closed後にresume checkpointが残っています")
+			}
+			pkt := lastPacketFromOutput(t, out.String())
+			if pkt.Status() != "NEEDS_SOL_REVIEW" || pkt.Risk() != "HIGH" {
+				t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status(), pkt.Risk(), out.String())
+			}
+			if !strings.Contains(out.String(), implementationHistoryFile+"がworking treeへ存在しません") {
+				t.Fatalf("追跡中history欠損理由が出力されていません:\n%s", out.String())
+			}
+			if _, err := os.Stat(filepath.Join(repoRoot, implementationHistoryFile)); !os.IsNotExist(err) {
+				t.Fatalf("欠損historyが復元・生成されています: %v", err)
+			}
+			events := 0
+			for _, l := range taskLogs(t, st) {
+				if l.CallType == state.CallTypeTask {
+					t.Fatalf("呼出前停止なのにtask記録が残っています: %+v", l)
+				}
+				if l.Outcome == "history_file_missing" && strings.HasSuffix(l.Phase, historyGuardSurface.eventSuffix) {
+					events++
+				}
+			}
+			if events != 1 {
+				t.Fatalf("history_file_missing event = %d want 1", events)
+			}
+		})
+	}
+}
+
+// TestHistoryFileReadErrorFailsClosedBeforeCallはhistory baseline取得に失敗すると不変性の
+// 基準が確認できないため、model呼出を実行せずfail closedすることを固定する。
+func TestHistoryFileReadErrorFailsClosedBeforeCall(t *testing.T) {
+	repoRoot := initMutationRepo(t)
+	writePlanFileContent(t, repoRoot, planGuardSeed)
+	if err := os.Mkdir(filepath.Join(repoRoot, implementationHistoryFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	w, r, out, st := newPlanFileWorkflow(t, repoRoot, []runnerStep{
+		{output: implementedPacket("done")},
+	}, "", 0, nil)
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.prompts) != 0 {
+		t.Fatalf("history baseline取得失敗時はmodel呼出前に停止すべき: %d", len(r.prompts))
+	}
+	if st.TaskStatus() != state.TaskStatusWaitingSolReview {
+		t.Fatalf("task status = %q want waiting-sol-review", st.TaskStatus())
+	}
+	pkt := lastPacketFromOutput(t, out.String())
+	if pkt.Status() != "NEEDS_SOL_REVIEW" || pkt.Risk() != "HIGH" {
+		t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status(), pkt.Risk(), out.String())
+	}
+	if !strings.Contains(out.String(), "history file baseline取得失敗") {
+		t.Fatalf("history baseline取得失敗理由が出力されていません:\n%s", out.String())
+	}
+	for _, l := range taskLogs(t, st) {
+		if l.CallType == state.CallTypeTask {
+			t.Fatalf("呼出前停止なのにtask記録が残っています: %+v", l)
+		}
+	}
+}
+
+// TestHistoryFileResumeWorkerMutationFailsClosedはrate-limit resume後のworkerによるhistory
+// 変更も検出し、保存済みcheckpointを復元せずfail closedする。
+func TestHistoryFileResumeWorkerMutationFailsClosed(t *testing.T) {
+	repoRoot := initMutationRepo(t)
+	writePlanFileContent(t, repoRoot, planGuardSeed)
+	writeHistoryFileContent(t, repoRoot, historyGuardSeed)
+	st := newStateStoreT(t)
+	seedRateLimitedWorkerCheckpoint(t, st, "request")
+	w, r, out := planFileDecisionWorkflow(t, st, repoRoot, "worker-new", mutateHistoryFile)
+
+	if err := w.ExecuteResume(); err != nil {
+		t.Fatal(err)
+	}
+	requirePlanFileFailClosed(t, st, r, out, "内容が変化", 1)
+	if st.TaskStatus() != state.TaskStatusWaitingSolReview {
+		t.Fatalf("resume復元logicがfail closed状態を上書きしています: %q", st.TaskStatus())
+	}
+}
+
+// TestHistoryFileReviewerMutationUsesExistingSnapshotInvariantはreviewer呼出をhistory guardの
+// 対象外とし、reviewerのhistory変更は既存review-end snapshot不変性で検出することを固定する。
+func TestHistoryFileReviewerMutationUsesExistingSnapshotInvariant(t *testing.T) {
+	repoRoot := initMutationRepo(t)
+	writePlanFileContent(t, repoRoot, planGuardSeed)
+	writeHistoryFileContent(t, repoRoot, historyGuardSeed)
+	w, r, out, st := newPlanFileWorkflow(t, repoRoot, []runnerStep{
+		{output: implementedPacket("done")},
+		{output: passPacket()},
+	}, "", 0, mutateHistoryFile)
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.prompts) != 2 {
+		t.Fatalf("reviewer呼出まで進み既存invariantで停止すべき: %d", len(r.prompts))
+	}
+	if st.TaskStatus() != state.TaskStatusWaitingSolReview {
+		t.Fatalf("task status = %q want waiting-sol-review", st.TaskStatus())
+	}
+	if !strings.Contains(out.String(), "reviewer実行中にrepository状態が変化") {
+		t.Fatalf("reviewer変更はreview-end snapshot検出によるべきです:\n%s", out.String())
+	}
+	for _, l := range taskLogs(t, st) {
+		if l.Outcome == "history_file_mismatch" || l.Outcome == "history_file_violation" {
+			t.Fatalf("reviewer経路へhistory guardが適用されています: %+v", l)
 		}
 	}
 }
@@ -600,9 +1031,14 @@ func TestPlanFileContractWiring(t *testing.T) {
 		"Git indexで追跡されているのにworking treeへ存在しない場合と",
 		"Git repository内で追跡判定自体ができない場合",
 		"未追跡で最初から存在しない他repositoryおよびGit管理外directoryでは通常作業を許可",
+		"親Codex専有のtracked archive",
+		"編集・生成・削除を行わず",
+		"全文を読まず必要な見出しだけを検索して読む",
+		"planが存在するrepositoryでは",
+		"planの無い旧repositoryとhistory未作成状態の通常作業は許可",
 	} {
 		if !strings.Contains(string(agents), want) {
-			t.Errorf("root AGENTS.mdにplan契約文 %qがありません", want)
+			t.Errorf("root AGENTS.mdにplan/history契約文 %qがありません", want)
 		}
 	}
 	eval, err := os.ReadFile(filepath.Join(root, "EVAL.md"))
@@ -618,6 +1054,10 @@ func TestPlanFileContractWiring(t *testing.T) {
 		"index現物",
 		"追跡判定不能なGit異常は呼出前fail closed",
 		"Git管理外directoryだけを未追跡欠損の許可枠",
+		"親Codex専有のtracked archive",
+		"plan file guardと同じ責務で機械強制",
+		"critical分類(`implementation-history`)",
+		"raw telemetryへexactly once記録",
 	} {
 		if !strings.Contains(string(eval), want) {
 			t.Errorf("EVAL.mdの計画file bootstrap節に契約文 %qがありません", want)

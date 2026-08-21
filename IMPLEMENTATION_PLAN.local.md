@@ -16,12 +16,10 @@ GLM委譲率、PACKETサイズ、GLM token、Solへ戻した回数等は代理�
 
 ## 現在作業中
 
-- Task: `glm-worker --watch`をauthoritative task statusのnon-active遷移で最終event drain後に終了させ、親completion wait contractを修正する
-- 前段完了: plan本体・親Codex専有contract・全production worker call前後guard・self-protection/scenarioを`962fb20`へ同一commitし、`install.sh`本配置・installer条件binary byte一致・tracked file・local exclude削除を確認
-- 原因分類: 現行`--watch`はREADMEどおりCtrl-Cまで常駐するtailでstatusを参照せず、親Codexがterminal waitへ誤用した親orchestration失敗。ただし既存taskへ追加AI callなしでattachしてattention/terminal時に戻る手段がないため、Sol decisionで既存`--watch`をnon-active status・task ID切替時に最終drain後exit 0する契約へ拡張する案Aを採用。新`--wait` commandは追加しない
-- GLM状態: task `c0edcb65-af84-4127-a8d0-93ef9076cebd`は同一worker session/checkpointからresumeし、独立reviewer後`NEEDS_SOL_REVIEW`。Sol対象diff確認とfresh `go test -count=1 ./...`・vet・build・gofmt・diff checkを通過し、watch実装・instruction・plan/historyを同一commit済み
-- 親計画管理: 常時読込量を減らすため、現在状態・未完了・次操作だけを本planへ残し、完了証跡とescaped原因分析を`IMPLEMENTATION_HISTORY.md`へ移動して同一commit済み
-- 次の操作: `install.sh`本配置・binary一致・既存non-active taskへの実運用`--watch`即時終了を確認する。完了後、親Codexが本plan/historyを最終同期して同じcommitへamendし、BM25 fingerprint domain修正へ継続する
+- Task: `install.sh` preflightが途中のtest/build failure後も配置を続行するfail-openを修正し、watch本配置を再検証する
+- 発見経路: watch本配置時、tracked `IMPLEMENTATION_HISTORY.md`未分類でworkflow testが失敗した一方、preflight subshellは`if ! (...)`文脈で後続commandへ進み、最後の成功をsubshell成功としてbinary/instruction配置まで続行した
+- 前段完了: plan/history両surfaceの親Codex専有・self-protection/model-call前後guardと、after-read failureを含む実行済みTask Work Call telemetry exact-onceを独立review・Sol品質ゲート後にcommit済み
+- 次の操作: installer preflightの最初の失敗を確実に伝播し、managed file/binaryへ触れず停止するcontractを独立taskで実装・review・commitする。全test通過後に再install・binary/instruction一致・実運用watch終了を確認する
 
 更新タイミング:
 
@@ -46,9 +44,9 @@ GLMにはcommitさせない。独立review・必要なSol確認・品質ゲー�
 
 ## 未完了（優先順）
 
+- [ ] `install.sh` preflightで途中のtest/build failureが後続commandの成功に上書きされ配置が続行するfail-openを修正し、最初の失敗でmanaged file/binaryへ触れず停止することをtestで固定する
 - [ ] task terminal status後も`glm-worker --watch`が終了せず親Codexが無出力待機を続ける実運用問題を、watch process lifecycleと親completion wait contractの境界で特定・修正する
 - [ ] `ba2414b` BM25 repo-search coreのfalse-completeを修正する。fingerprintとenumeration/rebuildでrepository/corpus policyを共有し、nested repo・submodule・default/追加exclude・large file・binary・symlinkの検索対象外状態とcache freshness影響をproduction `Search()` testで固定する
-- [ ] `962fb20` plan-file guardのfalse-completeを修正する。runner実行済みTask Work Callをplan after-read failureを含む全terminal pathでraw telemetryへexactly once記録し、call前停止はphantom無し、initial/resumed/provider recoveryのTask/Probe加法整合を横断testで固定する
 - [ ] tracked canonical planのstale-by-oneを解消する。commit-ready→commit→親Codex plan最終同期→同一commit amend等の単純contractを確定し、commit前の虚偽完了とcommit後のobsolete HEADを両方防ぐ。大規模ledgerは追加しない
 - [ ] Codex↔GLM structured output PoCを実施する
   - [ ] 現行Claude Code・Z.ai Coding Plan・GLM-5.3 mapping・`-p`・`--output-format stream-json`・session resumeの実経路で公式`--json-schema`成立性を最小PoC確認する。schema適合最終output、stream-json抽出、resume維持、invalid/unsupported fail closed、provider classification、token/cost/session metadataを検証し、不成立ならproductionへ進まず`NEEDS_SOL_DECISION`へ戻す

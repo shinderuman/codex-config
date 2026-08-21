@@ -26,8 +26,8 @@ type pathClass struct {
 }
 
 // classifiedFilesはdirectory規則で捕捉できないfile単位の意味分類。
-// installer適用経路・merge engine・管理settings内容・依存manifest・両AGENTS.md・実施計画fileはcritical、
-// 観測専用state file・docs・repo metadataは非対象とする。
+// installer適用経路・merge engine・管理settings内容・依存manifest・両AGENTS.md・実施計画file・
+// 完了証跡history fileはcritical、観測専用state file・docs・repo metadataは非対象とする。
 var classifiedFiles = map[string]pathClass{
 	"install.sh":                             {true, "installer"},
 	".githooks/post-merge":                   {true, "installer"},
@@ -38,6 +38,7 @@ var classifiedFiles = map[string]pathClass{
 	"codex/AGENTS.md":                        {true, "managed-agents"},
 	"AGENTS.md":                              {true, "repo-agents"},
 	"IMPLEMENTATION_PLAN.local.md":           {true, "implementation-plan"},
+	"IMPLEMENTATION_HISTORY.md":              {true, "implementation-history"},
 	"glm-worker/internal/state/stats.go":     {false, "observation"},
 	"glm-worker/internal/state/telemetry.go": {false, "observation"},
 	"README.md":                              {false, "docs"},
