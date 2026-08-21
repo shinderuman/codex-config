@@ -16,21 +16,11 @@ GLM委譲率、PACKETサイズ、GLM token、Solへ戻した回数等は代理�
 
 ## 現在作業中
 
-- Task: 別PCへ引き継ぎ、reviewer snapshotと親専有plan/history更新の両立修正から再開する
-- 前段完了: structured output production移行は`22c1d0b`へcommit・本配置済み。terminal payload二面表示は親Functions store/load contract、fixed Eval、wiring test、2026-08-21の実structured terminal result単一表示を独立review・Sol採否後に個別commit済み
-- 現在境界: 旧PCではterminal単一描画contractをcommit後に本配置しない。別PCでrepository rootの`AGENTS.md`と本planを読み、`install.sh`で新しいbinary/instruction/promptを本配置してから再開する
-- 進行状態: 別PC引継ぎ前の最終commitとplan/history同期を完了。新規GLM task・automation・rate-limit resumeはなく、この区切りで停止する
-- 次の操作: 新PCで`install.sh`本配置と配置済み現物一致を確認し、未完了先頭の「reviewer snapshotと親専有plan/history更新の両立」を新規taskとして開始する
-
-## 別PC引継ぎ前のログ照合
-
-- 本repository: `glm-worker --status`はtask `f03e3dd8-cd81-4594-9830-7723aefeec62`、`waiting-sol-review`、rate limit/provider停止なし、resume不要。worker/reviewer sessionは`d4c60344-9986-47de-9a70-5b0e27ddfc4c` / `37de40aa-1669-42ad-bf5e-c1680ebc76bd`。本task raw telemetryは4 call・154 turn・記録cost約10.53、全call success。直前structured output移行taskは11 call・535 turn・記録cost約30.37で、rate-limit 2・親plan/history driftによるworktree snapshot mismatch 1・invalid result 1・success 7
-- canonical stats: 37 task・Task Work Call 192、worker/reviewer 100/92、rate limit 11、snapshot mismatchはworktree 1件。既知historical coverage gapと旧PACKET compactionの分析・改善優先順は`IMPLEMENTATION_HISTORY.md`の2026-08-21 telemetry項目を正とする
-- Kindle-automation: working tree clean、current branch/HEADは`codex/local-amazon-poc` / `6b2e626`。local `codex/local-amazon-poc`・`codex/pre-release-snapshot`と両origin branchはいずれも`6b2e626`を指す。`ccc39dc`はAmazon取得方式PoC計画だけ、`6b2e626`はLambda PoC資産だけのcommit。`glm-worker --status`はtask/sessionなし・resume不要。現statsはarchive対象2 task・3 callで、最後の保存telemetry `e7b17cb0-4223-41b6-b18a-661bd028f750`は2026-08-20の旧branch復旧判断待ちだが、その後Git履歴が進みcurrent taskは存在しないためresume対象にしない
-
-## 次PCへの最小引継ぎ文
-
-repository rootの`AGENTS.md`と`IMPLEMENTATION_PLAN.local.md`を読み、`install.sh`で本配置を同期してから未完了先頭を継続する。pushは禁止。
+- Task: telemetry測定基盤のcoverage明示
+- 前段完了: reviewer snapshotと親専有plan/history更新を両立するcontractを実装し、必要test・lint・vet・build・独立reviewer・HIGH変更のSol品質gate・個別commitを完了
+- 現在境界: TaskStats model call数とraw JSONL record数の差を推測補完せず、coverage状態・欠損call数・usage unknownとして表示する。既知の`ccc205d1`はhistorical gapとして分離する
+- 進行状態: 前taskのplan/historyを同一commitへamendする直前
+- 次の操作: amend後に`install.sh`で本配置と一致を確認し、telemetry coverage改善を新規GLM taskとして開始する
 
 更新タイミング:
 
@@ -55,7 +45,6 @@ GLMにはcommitさせない。独立review・必要なSol確認・品質ゲー�
 
 ## 未完了（優先順）
 
-- [ ] reviewer snapshotと親専有plan/history更新を両立させる。rate-limit待機中の親Codex必須更新だけでreview-resumeの全worktree同一性が失敗した実例を基準に、worker/reviewer実装surfaceの外部変更はfail closedのまま、親管理2fileの承認済み親変更を識別してreview再開できる単一contractへ修正する。親更新禁止・snapshot全面緩和・worker/reviewer checklist追加では代替しない
 - [ ] telemetry測定基盤を改善し、TaskStats model call数とraw JSONL record数のcoverageを`complete/incomplete`・欠損call数・usage unknownとして表示する。既知の`ccc205d1`はwrapper孤児化時の1 callがstatsだけに残るため、推測補完せずhistorical gapとして分離する
 - [ ] worker call長大化を品質を落とさず制御可能にする。v3 worker-new 41 callのturn中央値55・p95 137に対し現task resumeは320 turn／約20.08であり、まずoutlierをtask/phase/session別に可視化し、複数責務の事前分割または意味milestone checkpointへ返す。hard turn cap・session rotationは中断時の品質と追加call costを検証するまで導入しない
 - [ ] compaction閾値、worker model routing、test impact selectionを品質を落とさず評価可能にする。現event metadataはBash回数・durationだけでtest/search/build等を区別できないため、raw commandを保存せずallowlist分類したoperation categoryを追加する。reviewerはvalid終端66件中8件が`FIX_REQUIRED`、GLM-4.7は6 call treeのみのため、review縮小・4.7拡大・test省略はDirect/orchestrated品質証拠なしに実施しない

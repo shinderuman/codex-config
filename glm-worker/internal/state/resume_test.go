@@ -127,3 +127,42 @@ func TestLoadResumeCheckpointConvertsLegacyV2(t *testing.T) {
 		t.Fatalf("broken v2 error = %v", err)
 	}
 }
+
+func TestResumeCheckpointStopParentFilesRoundTrip(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	stop := &ParentFileStates{
+		Plan:    ParentFileState{Exists: true, SHA256: "plan-sha"},
+		History: ParentFileState{Exists: true, SHA256: "history-sha"},
+	}
+	if err := st.SaveResumeCheckpoint(ResumeCheckpoint{
+		Stage:           ResumeStageReview,
+		Phase:           "reviewer-1",
+		Model:           "sonnet",
+		RateLimited:     true,
+		StopParentFiles: stop,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.LoadResumeCheckpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.StopParentFiles == nil || *got.StopParentFiles != *stop {
+		t.Fatalf("stop parent files round-trip = %#v", got.StopParentFiles)
+	}
+}
+
+func TestResumeCheckpointLegacyWithoutStopParentFiles(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	legacy := `{"version":3,"stage":"reviewer","phase":"reviewer-1","role":"reviewer","model":"sonnet","prompt":"p","request":"r","rate_limited":true}`
+	if err := os.WriteFile(st.Path(resumeStateFile), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.LoadResumeCheckpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.StopParentFiles != nil {
+		t.Fatalf("旧binary checkpointのstop_parent_filesはnil: %#v", got.StopParentFiles)
+	}
+}

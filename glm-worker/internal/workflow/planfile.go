@@ -28,8 +28,8 @@ import (
 // baseline取得不能として同じく呼出前にfail closedする。history契約の強制はplanが置かれた
 // repositoryだけとし、planの無い旧repositoryおよびhistory未作成状態の通常作業を許可する。
 const (
-	implementationPlanFile    = "IMPLEMENTATION_PLAN.local.md"
-	implementationHistoryFile = "IMPLEMENTATION_HISTORY.md"
+	implementationPlanFile    = state.ParentPlanFile
+	implementationHistoryFile = state.ParentHistoryFile
 )
 
 // errParentFileGuardStoppedは親Codex専有file不変性確認によるfail closed停止が完了したことを
@@ -96,6 +96,34 @@ func readParentFileState(repoRoot string, name string) (parentFileState, error) 
 	}
 	sum := sha256.Sum256(b)
 	return parentFileState{exists: true, sha256: hex.EncodeToString(sum[:])}, nil
+}
+
+// readParentFileStatesは親管理2fileの現在状態を読む。review-start基準の記録とreview resumeの
+// 承認判定が同じ観測を共有する。
+func readParentFileStates(repoRoot string) (state.ParentFileStates, error) {
+	plan, err := readParentFileState(repoRoot, implementationPlanFile)
+	if err != nil {
+		return state.ParentFileStates{}, err
+	}
+	history, err := readParentFileState(repoRoot, implementationHistoryFile)
+	if err != nil {
+		return state.ParentFileStates{}, err
+	}
+	return state.ParentFileStates{Plan: parentFileStateValue(plan), History: parentFileStateValue(history)}, nil
+}
+
+func parentFileStateValue(s parentFileState) state.ParentFileState {
+	return state.ParentFileState{Exists: s.exists, SHA256: s.sha256}
+}
+
+// captureStopParentFilesはrate-limit/provider-unavailable停止を保存する直前の親管理2file状態を
+// checkpoint記録値へ変換する。読込失敗時はnilを返し、resume時の承認識別をfail closed側へ倒す。
+func captureStopParentFiles(repoRoot string) *state.ParentFileStates {
+	states, err := readParentFileStates(repoRoot)
+	if err != nil {
+		return nil
+	}
+	return &states
 }
 
 func parentFileChangeReason(before, after parentFileState) string {

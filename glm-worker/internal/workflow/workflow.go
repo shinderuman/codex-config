@@ -281,7 +281,7 @@ func (w *Workflow) ExecuteResume() error {
 		}
 		// review工程resume時は5h上限の時間経過を挟んでreview-start snapshotと現在状態を再照合する。
 		if checkpoint.Stage == state.ResumeStageReview {
-			if stopped, err := w.verifyReviewResumeSnapshot(); err != nil {
+			if stopped, err := w.verifyReviewResumeSnapshot(checkpoint); err != nil {
 				return err
 			} else if stopped {
 				return nil
@@ -313,6 +313,9 @@ func (w *Workflow) ExecuteResume() error {
 			}
 			saved, loadErr := w.state.LoadResumeCheckpoint()
 			if loadErr != nil || (!saved.RateLimited && !saved.ProviderUnavailable) {
+				// 復元はmodel呼出を実行した後の失敗也可能なため、親管理2fileの停止時状態を復元時点へ
+				// 固定し直す。呼出中の変化が停止期間中の親更新として誤承認されるのを防ぐ。
+				previousCheckpoint.StopParentFiles = captureStopParentFiles(w.config.RepoRoot)
 				_ = w.state.SaveResumeCheckpoint(previousCheckpoint)
 			}
 			// 誤resume防止のためstatusは保存済みcheckpointの停止理由と一致させる。
@@ -824,6 +827,12 @@ func (w *Workflow) runModel(checkpoint state.ResumeCheckpoint) (packet.Result, e
 	if stopped {
 		return packet.Result{}, err
 	}
+	// review工程のpre-call保存はmodel呼出をこれから開始する時点であり停止確定ではない。前回停止時の
+	// 親管理2file基準を持ち越したままcrash等で再開されると、呼出中の改変が停止期間中の親更新として
+	// 誤承認される。基準を保存時に持たせず、基準なしfail closedへ倒す。
+	if checkpoint.Stage == state.ResumeStageReview {
+		checkpoint.StopParentFiles = nil
+	}
 	if err := w.state.SaveResumeCheckpoint(checkpoint); err != nil {
 		return packet.Result{}, err
 	}
@@ -1032,6 +1041,9 @@ func (w *Workflow) persistRateLimitedStop(checkpoint state.ResumeCheckpoint, lim
 	checkpoint.ProviderUnavailableClassification = ""
 	checkpoint.ProviderUnavailableProbes = 0
 	checkpoint.ProviderUnavailableStartedAt = time.Time{}
+	// 停止保存直前の親管理2file状態を固定する。review resumeのsnapshot例外がこの値と現在値を
+	// 比較し、model呼出が存在しない停止期間中の変化だけを親Codex更新として承認する。
+	checkpoint.StopParentFiles = captureStopParentFiles(w.config.RepoRoot)
 	if err := w.state.SaveResumeCheckpoint(checkpoint); err != nil {
 		return "", err
 	}
@@ -1270,6 +1282,8 @@ func (w *Workflow) saveProviderUnavailable(checkpoint state.ResumeCheckpoint, cl
 	checkpoint.ProviderUnavailableProbes = probes
 	checkpoint.ProviderUnavailableStartedAt = recoveryStart
 	checkpoint.RateLimited = false
+	// rate-limit停止と同じく、停止保存直前の親管理2file状態をreview resume承認の基準へ固定する。
+	checkpoint.StopParentFiles = captureStopParentFiles(w.config.RepoRoot)
 	if err := w.state.SaveResumeCheckpoint(checkpoint); err != nil {
 		return nil, err
 	}
@@ -1740,6 +1754,11 @@ func (w *Workflow) verifyReviewStartSnapshot() (bool, error) {
 	if err != nil {
 		return true, w.failClosedSnapshot(state.SnapshotStageReviewStart, workerEnd, state.GitSnapshot{}, "review-start snapshot取得失敗", err)
 	}
+	// review開始時の親管理2file状態を基準へ記録する。読込失敗時は記録なし(nil)とし、resume例外を
+	// 使えないfail closed側へ倒す。ここで停止する理由は無い。
+	if parentStates, parentErr := readParentFileStates(w.config.RepoRoot); parentErr == nil {
+		reviewStart.ParentFiles = &parentStates
+	}
 	if err := w.state.SaveReviewStartSnapshot(reviewStart); err != nil {
 		return true, w.failClosedSnapshot(state.SnapshotStageReviewStart, workerEnd, reviewStart, "review-start snapshot保存失敗", err)
 	}
@@ -1754,7 +1773,12 @@ func (w *Workflow) verifyReviewStartSnapshot() (bool, error) {
 	return false, nil
 }
 
-func (w *Workflow) verifyReviewResumeSnapshot() (bool, error) {
+// verifyReviewResumeSnapshotはrate-limit/provider-unavailable停止を挟んだreview resumeで、保存
+// review-start snapshotへ現在状態を再照合する。3軸一致時は従来どおり再開する。不一致時は停止期間中の
+// 親Codexによる親管理2file更新だけを承認済みdeltaとして例外にし、review基準を現状へ再固定して
+// reviewerを再開する。それ以外の外部変更(worker/reviewer実装surface・親2file削除・head/index移動)は
+// 従来どおりfail closedする。
+func (w *Workflow) verifyReviewResumeSnapshot(checkpoint state.ResumeCheckpoint) (bool, error) {
 	saved, err := w.state.LoadReviewStartSnapshot()
 	if err != nil {
 		return true, w.failClosedSnapshot(state.SnapshotStageReviewResume, state.GitSnapshot{}, state.GitSnapshot{}, "review-start snapshot読込失敗", err)
@@ -1764,14 +1788,76 @@ func (w *Workflow) verifyReviewResumeSnapshot() (bool, error) {
 		return true, w.failClosedSnapshot(state.SnapshotStageReviewResume, saved, state.GitSnapshot{}, "resume時snapshot取得失敗", err)
 	}
 	comparison := state.CompareGitSnapshot(saved, current, state.SnapshotStageReviewResume, "")
+	if !comparison.Matched && !w.acceptReviewResumeParentDelta(saved, current, checkpoint) {
+		if err := w.state.SaveSnapshotComparison(comparison); err != nil {
+			return true, w.failClosedSnapshot(state.SnapshotStageReviewResume, saved, current, "snapshot comparison保存失敗", err)
+		}
+		return true, w.failClosedSnapshot(state.SnapshotStageReviewResume, saved, current, "review開始時から状態が変化しています", nil)
+	}
+	if !comparison.Matched {
+		comparison.ParentUpdateAccepted = true
+		comparison.Reason = "停止期間中の承認済み親管理file更新のみのためreview基準を現状へ再固定"
+	}
 	if err := w.state.SaveSnapshotComparison(comparison); err != nil {
 		return true, w.failClosedSnapshot(state.SnapshotStageReviewResume, saved, current, "snapshot comparison保存失敗", err)
 	}
-	if !comparison.Matched {
-		return true, w.failClosedSnapshot(state.SnapshotStageReviewResume, saved, current, "review開始時から状態が変化しています", nil)
+	if comparison.ParentUpdateAccepted {
+		if parentStates, parentErr := readParentFileStates(w.config.RepoRoot); parentErr == nil {
+			current.ParentFiles = &parentStates
+		}
+		if err := w.state.SaveReviewStartSnapshot(current); err != nil {
+			return true, w.failClosedSnapshot(state.SnapshotStageReviewResume, saved, current, "review-start snapshot再固定保存失敗", err)
+		}
+		w.recordSnapshotParentUpdateEvent(checkpoint)
 	}
-	w.pendingSnapshot = snapshotDiagnosticPtr(state.BuildSnapshotDiagnostic(state.SnapshotStageReviewResume, saved, current, comparison, ""))
+	w.pendingSnapshot = snapshotDiagnosticPtr(state.BuildSnapshotDiagnostic(state.SnapshotStageReviewResume, saved, current, comparison, comparison.Reason))
 	return false, nil
+}
+
+// acceptReviewResumeParentDeltaはreview-resume時の3軸不一致が停止期間中の親管理2file更新だけに
+// 帰着するかを判定する。head・indexが一致し親2file除外worktree digestが保存値と等しければ、変化は
+// 親2fileだけに限られる。その上で停止保存時の親2file状態と現在値の差分だけが、変化がmodel呼出の
+// 存在しない停止期間中に起きた(=親Codexによる)機械識別可能な証拠になる。reviewer呼出中の変更は
+// 停止保存時に固定済みのため現在値と一致し、pathだけの全面allowlistと違いfile単位で拒否される。
+// 削除はplan正喪失のfail closed契約を維持し、旧binaryのcheckpoint/snapshot(基準なし)も拒否する。
+func (w *Workflow) acceptReviewResumeParentDelta(saved, current state.GitSnapshot, checkpoint state.ResumeCheckpoint) bool {
+	if saved.Head != current.Head || saved.IndexDigest != current.IndexDigest {
+		return false
+	}
+	if saved.WorktreeDigestExcludingParent == "" || saved.WorktreeDigestExcludingParent != current.WorktreeDigestExcludingParent {
+		return false
+	}
+	if saved.ParentFiles == nil || checkpoint.StopParentFiles == nil {
+		return false
+	}
+	now, err := readParentFileStates(w.config.RepoRoot)
+	if err != nil {
+		return false
+	}
+	stop := checkpoint.StopParentFiles
+	if (stop.Plan.Exists && !now.Plan.Exists) || (stop.History.Exists && !now.History.Exists) {
+		return false
+	}
+	if (now.Plan == stop.Plan && stop.Plan != saved.ParentFiles.Plan) ||
+		(now.History == stop.History && stop.History != saved.ParentFiles.History) {
+		return false
+	}
+	return now.Plan != stop.Plan || now.History != stop.History
+}
+
+// recordSnapshotParentUpdateEventはreview基準の再固定をtelemetryへ記録する。comparison fileは
+// 後続のreview-end比較で上書きされるため、承認判断の永続証跡はこのeventだけが持つ(best-effort)。
+func (w *Workflow) recordSnapshotParentUpdateEvent(checkpoint state.ResumeCheckpoint) {
+	now := w.now().UTC()
+	w.state.RecordModelCallLog(state.ModelCallLog{
+		TaskID:      w.state.ReadOr("task.id", "unknown"),
+		CallType:    state.CallTypeEvent,
+		StartedAt:   now,
+		CompletedAt: now,
+		Phase:       checkpoint.Phase + "-review-resume-parent-update",
+		Role:        state.ReviewerRole,
+		Outcome:     "snapshot_parent_update",
+	})
 }
 
 // verifyReviewEndSnapshotはreviewer呼出成功直後・結果採用前にもreview-start snapshotへ再照合する。
