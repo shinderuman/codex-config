@@ -283,9 +283,10 @@ func terminalPayloadRealWorkerTerminalResult(t *testing.T) {
 
 // terminalPayloadFakeResultJSONはfake claude binaryが返す単一行のresult event。
 // structured_outputだけが結果解析の権威であり、追加AI callなしに受理可能な
-// NEEDS_SOL_DECISION terminal resultを再現する。
+// NEEDS_SOL_DECISION terminal resultを再現する。対象が概念的なためtargetsは
+// 予約値none sentinelで埋める(旧protocolの`TARGETS: none`値相当)。
 func terminalPayloadFakeResultJSON() string {
-	return `{"type":"result","subtype":"success","is_error":false,"result":"STATUS: NEEDS_SOL_DECISION","structured_output":{"status":"NEEDS_SOL_DECISION","risk":"HIGH","decision":"terminal payload単一描画境界の検証として親が選択する判断","evidence":"fake claude binaryの固定result event","options":"契約手順で単一描画 / 旧形の二面表示","recommendation":"契約手順","test_obligations":"background exec→wait→同期取得境界の検証維持","targets":[],"artifacts":[]},"duration_ms":3,"duration_api_ms":3,"num_turns":1,"usage":{"input_tokens":1,"output_tokens":1}}`
+	return `{"type":"result","subtype":"success","is_error":false,"result":"STATUS: NEEDS_SOL_DECISION","structured_output":{"status":"NEEDS_SOL_DECISION","risk":"HIGH","decision":"terminal payload単一描画境界の検証として親が選択する判断","evidence":"fake claude binaryの固定result event","options":"契約手順で単一描画 / 旧形の二面表示","recommendation":"契約手順","test_obligations":"background exec→wait→同期取得境界の検証維持","targets":["none"],"artifacts":[]},"duration_ms":3,"duration_api_ms":3,"num_turns":1,"usage":{"input_tokens":1,"output_tokens":1}}`
 }
 
 // terminalPayloadHelperMainはtest binary再実行helper本体。親と同じbinaryのproduction経路

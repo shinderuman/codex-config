@@ -28,7 +28,6 @@ func TestParseStructuredRejectsContractBreaks(t *testing.T) {
 		{"empty", "   "},
 		{"null", "null"},
 		{"bad json", `{"status":`},
-		{"unknown field", `{"status":"IMPLEMENTED","risk":"LOW","extra":"x","artifacts":[]}`},
 		{"missing status", `{"risk":"LOW","artifacts":[]}`},
 		{"wrong type", `{"status":"IMPLEMENTED","risk":"LOW","targets":"not-array","artifacts":[]}`},
 	}
@@ -69,6 +68,7 @@ func passResult() Result {
 		TestEvidence:        "e",
 		Issues:              "none",
 		ResidualRisk:        "none",
+		Targets:             []string{"a.go:f"},
 	}
 }
 
@@ -81,6 +81,8 @@ func TestValidateWorkerResultStatuses(t *testing.T) {
 		Options:         "o",
 		Recommendation:  "r",
 		TestObligations: "t",
+		// 旧WORKER.md「不要ならnone」の予約値sentinel。旧protocolの`TARGETS: none`値相当。
+		Targets: []string{"none"},
 	}
 	if err := ValidateWorkerResult(implementedResult()); err != nil {
 		t.Fatalf("implemented: %v", err)
@@ -109,6 +111,15 @@ func TestValidateWorkerResultRejections(t *testing.T) {
 			r.Status = StatusNeedsSolDecision
 			r.Risk = RiskLow
 		}, "NEEDS_SOL_DECISIONのrisk", false},
+		{"decision no targets", func(r *Result) {
+			r.Status = StatusNeedsSolDecision
+			r.Risk = RiskHigh
+			r.Decision = "d"
+			r.Evidence = "e"
+			r.Options = "o"
+			r.Recommendation = "r"
+			r.TestObligations = "t"
+		}, "NEEDS_SOL_DECISIONのTARGETSは空", false},
 		{"missing summary", func(r *Result) { r.Summary = " " }, "必須field SUMMARY", false},
 		{"multiline field", func(r *Result) { r.Tests = "line1\nline2" }, "改行", false},
 		{"oversize field", func(r *Result) { r.Summary = strings.Repeat("x", MaxFieldBytes+1) }, "bytes以内", false},
@@ -137,12 +148,24 @@ func TestValidateWorkerResultRejections(t *testing.T) {
 }
 
 func TestValidateReviewerResultStatuses(t *testing.T) {
+	if err := ValidateReviewerResult(passResult()); err != nil {
+		t.Fatalf("pass: %v", err)
+	}
+
 	fix := passResult()
 	fix.Status = StatusFixRequired
 	fix.Risk = RiskHigh
 	fix.Targets = []string{"a.go:f"}
 	if err := ValidateReviewerResult(fix); err != nil {
 		t.Fatalf("fix required: %v", err)
+	}
+
+	// 旧protocolのPASS/FIX_REQUIREDは`TARGETS: none`値を許容した。typed結果では
+	// ["none"]要素がその表示に相当するため、空配列だけを拒否する。
+	fixNone := fix
+	fixNone.Targets = []string{"none"}
+	if err := ValidateReviewerResult(fixNone); err != nil {
+		t.Fatalf("fix required with none target: %v", err)
 	}
 
 	review := passResult()
@@ -164,6 +187,11 @@ func TestValidateReviewerResultRejections(t *testing.T) {
 	}{
 		{"worker status", func(r *Result) { r.Status = StatusImplemented }, "reviewer結果のstatus", true},
 		{"pass high risk", func(r *Result) { r.Risk = RiskHigh }, "PASSのrisk", false},
+		{"pass no targets", func(r *Result) { r.Targets = nil }, "PASSのTARGETSは空", false},
+		{"fix no targets", func(r *Result) {
+			r.Status = StatusFixRequired
+			r.Targets = nil
+		}, "FIX_REQUIREDのTARGETSは空", false},
 		{"sol review low risk", func(r *Result) {
 			r.Status = StatusNeedsSolReview
 			r.Risk = RiskLow
@@ -172,6 +200,7 @@ func TestValidateReviewerResultRejections(t *testing.T) {
 			r.Status = StatusNeedsSolReview
 			r.Risk = RiskHigh
 			r.SolQuestion = "q"
+			r.Targets = nil
 		}, "TARGETSはnone", false},
 		{"sol review none target", func(r *Result) {
 			r.Status = StatusNeedsSolReview
@@ -352,6 +381,8 @@ func TestRejectCategory(t *testing.T) {
 		{&mismatchError{reason: "structured_outputをResultへ解析できません"}, "schema-mismatch"},
 		{&constraintError{reason: "結果に必須field SUMMARYがありません"}, "missing-field"},
 		{&constraintError{reason: "NEEDS_SOL_REVIEWのTARGETSはnoneにできません"}, "targets-none"},
+		{&constraintError{reason: "FIX_REQUIREDのTARGETSは空にできません"}, "targets-none"},
+		{&constraintError{reason: "NEEDS_SOL_DECISIONのTARGETSは空にできません"}, "targets-none"},
 		{&constraintError{reason: "PASSのriskはLOWにしてください"}, "risk"},
 		{&constraintError{reason: "reviewer結果のstatusとして許容されません"}, "status"},
 		{&constraintError{reason: "ARTIFACTSのパスが重複しています"}, "artifacts"},

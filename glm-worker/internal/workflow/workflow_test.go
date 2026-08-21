@@ -167,7 +167,7 @@ func duplicatedImplementedPacket() string {
 }
 
 func passPacket() string {
-	return "PACKET_BEGIN\nSTATUS: PASS\nRISK: LOW\nSUMMARY: pass\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: none\nRESIDUAL_RISK: none\nTARGETS: none\nARTIFACTS: none\nPACKET_END\n"
+	return "PACKET_BEGIN\nSTATUS: PASS\nRISK: LOW\nSUMMARY: pass\nREQUIREMENT_COVERAGE: covered\nINVARIANTS: preserved\nTEST_EVIDENCE: ev\nISSUES: none\nRESIDUAL_RISK: none\nTARGETS: final diff\nARTIFACTS: none\nPACKET_END\n"
 }
 
 func needsSolReviewPacket() string {
@@ -239,6 +239,12 @@ func (c *fakeClock) sleepFunc(d time.Duration) {
 
 func newWorkflowT(t *testing.T, st *state.StateStore, r *scriptedRunner) *Workflow {
 	t.Helper()
+	return newWorkflowTWithOutput(t, st, r, io.Discard)
+}
+
+// newWorkflowTWithOutputは親境界へ放出される結果packetを検証するtest用のwire先を渡せる版。
+func newWorkflowTWithOutput(t *testing.T, st *state.StateStore, r *scriptedRunner, output io.Writer) *Workflow {
+	t.Helper()
 	w := NewWorkflow(config.AppConfig{
 		WorkerModel:           "opus",
 		ReviewerModel:         "haiku",
@@ -247,7 +253,7 @@ func newWorkflowT(t *testing.T, st *state.StateStore, r *scriptedRunner) *Workfl
 		MaxAutoFixRounds:      2,
 		TelemetryContent:      true,
 		RepoRoot:              t.TempDir(),
-	}, st, r, io.Discard)
+	}, st, r, output)
 	w.captureSnapshot = func(string) (state.GitSnapshot, error) {
 		return fixedSnapshot, nil
 	}
@@ -1622,6 +1628,96 @@ func TestFixRequiredOtherTargetsKeepsImplementationAutoFix(t *testing.T) {
 	}
 	if !slices.Contains(phases, "worker-auto-fix-1") {
 		t.Fatalf("telemetryへimplementation auto-fix phaseがありません: %v", phases)
+	}
+}
+
+// TARGETSなしFIX_REQUIREDはauto-fix promptへ修正対象を伝えられないため、
+// 意味検証不合格として同一sessionの修正再依頼へ置き換わり、targets付き再出力だけが
+// 通常auto-fixへdispatchする。旧protocolのstatus別必須field契約復元のproduction因果。
+func TestFixRequiredWithoutTargetsCorrectsBeforeAutoFix(t *testing.T) {
+	st := newStateStoreT(t)
+	fixWithoutTargets := `{"status":"FIX_REQUIRED","risk":"HIGH","summary":"fix","requirement_coverage":"covered","invariants":"preserved","test_evidence":"ev","issues":"i","residual_risk":"r","targets":[],"artifacts":[]}`
+	r := &scriptedRunner{steps: []runnerStep{
+		{output: implementedPacketWithRisk("high risk work", "HIGH")},
+		{structured: fixWithoutTargets},
+		{output: fixRequiredPacketWithTargets("glm-worker/internal/state/store.go:Read")},
+		{output: implementedPacketWithRisk("fixed implementation", "HIGH")},
+		{output: needsSolReviewPacket()},
+	}}
+	w := newWorkflowT(t, st, r)
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	wantPhases := []string{"worker-new", "reviewer-1", "reviewer-1" + resultCorrectionPhaseSuffix, "worker-auto-fix-1", "reviewer-2"}
+	if strings.Join(r.phases, ",") != strings.Join(wantPhases, ",") {
+		t.Fatalf("phases = %v, want %v", r.phases, wantPhases)
+	}
+	if !strings.Contains(r.prompts[2], "意味検証に不合格") {
+		t.Fatalf("修正再依頼promptが選ばれていません: %s", r.prompts[2])
+	}
+	autoFix := r.prompts[3]
+	if !strings.Contains(autoFix, "TARGETS: glm-worker/internal/state/store.go:Read") {
+		t.Fatalf("auto-fix promptへ修正対象targetsが伝わっていません: %s", autoFix)
+	}
+	for i, prompt := range r.prompts {
+		if i != 3 && strings.Contains(prompt, "MODE: APPLY_REVIEW_FIX") {
+			t.Fatalf("targets未確定のFIX_REQUIREDがauto-fixへdispatchしています: prompt %d", i)
+		}
+	}
+	taskID, _ := st.TaskID()
+	logs, logErr := st.ReadModelCallLogs(taskID)
+	if logErr != nil {
+		t.Fatal(logErr)
+	}
+	if len(logs) != 5 || logs[1].Outcome != "invalid_packet" || logs[1].PacketRejectReason != "targets-none" {
+		t.Fatalf("telemetry = %#v", logs)
+	}
+	stats := currentStats(t, st)
+	if stats.ResultCorrections != 1 {
+		t.Fatalf("result corrections = %d, stats = %#v", stats.ResultCorrections, stats)
+	}
+}
+
+// TARGETSなしNEEDS_SOL_DECISIONはSolが現物確認すべき対象を失うため、pending-decisionへの
+// 遷移と親境界への結果放出より前に、意味検証不合格として同一sessionの修正再依頼へ置き換わる。
+// targets付き再出力だけが親へ渡る。旧protocolのworker status別必須field契約復元のproduction因果。
+func TestNeedsSolDecisionWithoutTargetsCorrectsBeforeParentDispatch(t *testing.T) {
+	st := newStateStoreT(t)
+	decisionWithoutTargets := `{"status":"NEEDS_SOL_DECISION","risk":"HIGH","decision":"d","evidence":"e","options":"o","recommendation":"r","test_obligations":"t","targets":[],"artifacts":[]}`
+	r := &scriptedRunner{steps: []runnerStep{
+		{structured: decisionWithoutTargets},
+		{output: needsSolDecisionPacket()},
+	}}
+	var emitted bytes.Buffer
+	w := newWorkflowTWithOutput(t, st, r, &emitted)
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	wantPhases := []string{"worker-new", "worker-new" + resultCorrectionPhaseSuffix}
+	if strings.Join(r.phases, ",") != strings.Join(wantPhases, ",") {
+		t.Fatalf("phases = %v, want %v", r.phases, wantPhases)
+	}
+	if !strings.Contains(r.prompts[1], "意味検証に不合格") {
+		t.Fatalf("修正再依頼promptが選ばれていません: %s", r.prompts[1])
+	}
+	if st.TaskStatus() != state.TaskStatusWaitingDecision || !st.Exists("pending-decision") {
+		t.Fatalf("decision待ち状態へ遷移していません: status=%q pending=%v", st.TaskStatus(), st.Exists("pending-decision"))
+	}
+	if !strings.Contains(emitted.String(), "STATUS: NEEDS_SOL_DECISION") || !strings.Contains(emitted.String(), "TARGETS: t") {
+		t.Fatalf("親境界の結果packetへ修正後targetsが伝わっていません: %s", emitted.String())
+	}
+	taskID, _ := st.TaskID()
+	logs, logErr := st.ReadModelCallLogs(taskID)
+	if logErr != nil {
+		t.Fatal(logErr)
+	}
+	if len(logs) != 2 || logs[0].Outcome != "invalid_packet" || logs[0].PacketRejectReason != "targets-none" {
+		t.Fatalf("telemetry = %#v", logs)
+	}
+	if stats := currentStats(t, st); stats.ResultCorrections != 1 {
+		t.Fatalf("result corrections = %d, stats = %#v", stats.ResultCorrections, stats)
 	}
 }
 

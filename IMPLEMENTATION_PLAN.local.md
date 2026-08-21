@@ -14,13 +14,33 @@ GLM委譲率、PACKETサイズ、GLM token、Solへ戻した回数等は代理�
 
 最上位EvalはDirect Codex対Codex + glm-workerの`Codex Reduction`と`Quality Delta`。
 
+## machine protocol単純化方針
+
+- Codex向け通常出力は旧PACKET風textを正とせず、`GLM typed structured output → Go semantic validation → compact structured JSON → Codex`を第一候補とする。長文fieldのJSON string詰め替えでは完了にせず、machine-oriented表現、重複排除、typed化、最小free text、人間向け表示の分離を一体で行う
+- result fieldの`evidence`・`options`・`recommendation`・`tests`・`test_obligations`・`issues`・`residual_risk`・`sol_question`・`requirement_coverage`を棚卸しし、自然な最小表現の維持、object/array/enum/bool/ID化、短いfree text維持、削除、artifact/reference分離のいずれかへ根拠付き分類する。Codexが文章から状態・分類・対象・選択肢・参照先を再解釈しているfieldを優先するが、typed化自体を目的にしない
+- current statusごとのrequired field・risk constraint・targets・artifact・fix scope・report-only・終端契約を一覧化し、JSON Schemaの型/enum/object/array/basic requiredと、Go validator/state machineのworkflow semanticを対応付ける。producer schemaとconsumer parser/validatorの受理集合を一致させ、schema化しにくい新規意味情報だけをfree textへ残す
+- glm-workerだけが生成・消費するstructured result、Codex向け出力、resume/checkpoint、telemetry/passive event JSONL、convergence/timeline/status観測schema、repo-search cache等は長期公開APIとして扱わず、current schemaだけを正とする。旧parser・legacy field・migration・fallback・suffix/phase推定・複数schema同時維持を恒久追加しない
+- machine-only旧versionは用途に応じてskip/reset/rebuild/delete/resume不能の明示終了を選ぶ。active checkpointがあるschema変更はtask完了後、旧binaryでの完了、必要時のSol判断で保護し、恒久migrationと混同しない。telemetry/eventはversion不一致をskipし、必要なら今回限りのoffline集計だけを行う。再生成可能cacheはversion mismatchでdiscard/rebuildする
+- 後方互換削除とcurrent validation緩和を混同せず、wrong repository・corrupt/incomplete payload・unknown invalid state・semantic violationはfail closedを維持する。同一version内で意味を変えず、意味変更時はversionを上げて旧versionを読まない
+- 効果はglm-worker→Codex output bytes/token proxy、free text比率、structured field比率、legacy/migration code量、protocol branch数、format/semantic correction call数、semantic情報欠落で比較する。実Sol High本番A/Bは明示許可後だけ実行する
+- この整理でMCP、daemon、Unix socket、persistent Claude process、長寿命stream-json sessionを導入せず、1 model call = 1 subprocessとsession IDによるconversation continuityを維持する
+
+## multi-repository・stdin transport方針
+
+- 異なるrepositoryの`glm-worker`は通常利用として同時実行可能にし、canonical repo root hash単位のstate/lock/session/cache分離とsubprocess cwd分離を維持する。global glm-worker lock、daemon、socket、repository横断queue/coordinatorを追加しない
+- `--fix-stdin`・`--decision-stdin`はcaller側`stty raw -echo`を不要にする。pipe/fileはexact byte readを維持し、TTY/PTYだけglm-worker自身が当該invocationのterminal modeを変更する。外部`stty`呼出へ置換せず、変更前termios stateを正常受信・short read・hash mismatch・validation/command errorで復元する
+- payload送信はprocess起動→TTY raw/noecho化→明示feedの順を一次証拠で確認し、Codex PTY APIがfeed前送信しないならREADY handshakeを追加しない。同じTTY deviceを意図的に共有する特殊caseのためのglobal coordinationは行わない
+- 2つの一時Git repositoryを使うprocess-level integration testで、state/lock/task/worker/reviewer/checkpoint/telemetry/event/cache/PTy payload/reset/resume/statusの非混入、別repo同時実行、同一repo 2本目だけのlock拒否、PTY mode相互非影響を追加AI callなしで固定する
+- `GLM_WORKER_HOME`、prompt directory、Claude config/settings、Codex automation TOML/SQLite、provider quota、temp directory、installed binaryをread-only共有・namespace分離・upstream管理・実競合候補へ分類し、具体的collision evidenceなしにglobal serializationを追加しない。provider quota共有はrepository state isolationと分離する
+- stdin payloadをrepo lock前に読む現順序は、同一repo 2本目のpayload受信後lock拒否が実害小なら維持し、変更時もpayload validation前のstate/model call禁止を壊さない。実装後はmanaged caller instructionから`stty raw -echo` recipeを削除し、command・byte count・任意SHA-256・stdin feedだけをcaller contractにする
+
 ## 現在作業中
 
-- Task: external reviewで判明したstructured output protocol regression修正
-- 前段完了: telemetry coverage表示を実装し、必要test・race・lint・vet・build・独立reviewer・HIGH変更のSol品質gate・指摘後再review・個別commitを完了
-- 現在境界: `FIX_REQUIRED`と`PASS`の`TARGETS`必須契約をtyped validatorへ復元し、producer JSON SchemaとGo parserの未知field受理集合を一致させる。旧status別required fieldsとの対応と修正retry分類を機械testで固定する
-- 進行状態: 前taskのplan/historyを同一commitへamendする直前
-- 次の操作: amend後に`install.sh`で本配置と一致を確認し、escaped review原因層規則を読んで新規GLM taskを開始する
+- Task: tracked canonical planのstale-by-one再発修正
+- 前段完了: structured outputのstatus別`TARGETS`意味契約とproducer/consumer未知field受理集合を修正し、必要test・race・lint・vet・build・独立reviewer・HIGH変更のSol品質gate・指摘後再review・個別commitを完了
+- 現在境界: final HEAD上のplanが完了済みcommitを「amend直前」「install前」と記述しないことを機械postconditionで保証し、運用instructionだけの対策に戻さない
+- 進行状態: 前taskの完了証跡と次taskへのplan/history同期を完了し、新規GLM task開始前
+- 次の操作: 親Codex orchestration失敗の一次証拠を固定し、final HEAD postconditionの実装・testを新規GLM taskへ委譲する
 
 更新タイミング:
 
@@ -45,8 +65,13 @@ GLMにはcommitさせない。独立review・必要なSol確認・品質ゲー�
 
 ## 未完了（優先順）
 
-- [ ] external reviewで判明したstructured output protocol regressionを修正する。`FIX_REQUIRED`と`PASS`の`TARGETS`必須契約を旧protocolからtyped validatorへ復元し、producer JSON Schemaが許容する未知fieldとGo parserの受理集合不一致を解消する。status別旧required fieldsから新schema/validatorへの対応表とproducer/consumer acceptance集合を機械testで固定する
 - [ ] tracked canonical planのstale-by-one再発を修正する。final HEAD上のplanが完了済みcommitを「amend直前」「install前」と記述していないことを機械postconditionで保証し、運用instructionだけで解消扱いしない
+- [ ] `--fix-stdin`・`--decision-stdin`のcaller-side `stty raw -echo`依存を除去し、invocation-localなTTY/PTY mode設定と元state復元をglm-worker内部へ閉じる。同時に2 repositoryのprocess-level並列integrationでstate/lock/session/checkpoint/telemetry/event/cache/stdin payload/reset/resume/status分離を固定し、shared resourceを棚卸しする
+- [ ] machine-oriented Codex出力とmachine-only schema単純化を完了する
+  - [ ] current result fieldをfree text維持・typed化・削除・artifact/reference分離へ棚卸しし、status別semantic contractとproducer/consumer acceptance集合を一覧化する
+  - [ ] 旧PACKET風textを正としないcompact structured JSON出力を実装し、人間向け表示を必要なら分離する
+  - [ ] legacy/backward compatibility codeを棚卸しし、不要な旧parser/migration/fallback/推定を削除してcheckpoint/log/cacheのversion mismatchをskip/reset/rebuild/delete/resume不能へ単純化する
+  - [ ] output/token proxy・free text/structured比率・legacy code・protocol branch・correction call・semantic情報欠落を変更前後比較し、独立reviewerと必要なSol品質gateを通す
 - [ ] worker call長大化を品質を落とさず制御可能にする。v3 worker-new 41 callのturn中央値55・p95 137に対し現task resumeは320 turn／約20.08であり、まずoutlierをtask/phase/session別に可視化し、複数責務の事前分割または意味milestone checkpointへ返す。hard turn cap・session rotationは中断時の品質と追加call costを検証するまで導入しない
 - [ ] compaction閾値、worker model routing、test impact selectionを品質を落とさず評価可能にする。現event metadataはBash回数・durationだけでtest/search/build等を区別できないため、raw commandを保存せずallowlist分類したoperation categoryを追加する。reviewerはvalid終端66件中8件が`FIX_REQUIRED`、GLM-4.7は6 call treeのみのため、review縮小・4.7拡大・test省略はDirect/orchestrated品質証拠なしに実施しない
 - [ ] fixed Eval harnessとescaped bug/review corpusの残項目を統合

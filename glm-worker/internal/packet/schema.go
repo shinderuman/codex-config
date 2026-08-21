@@ -78,8 +78,11 @@ func riskProperty() *propertySchema {
 }
 
 // workerSchemaはworker role呼出(worker new/decision/fix/report-only/resume)のschema。
-// 必須はschemaで表現できる共通最小限だけとし、status別必須field・risk整合は
-// ValidateWorkerResultが強制する。
+// targetsをrequiredへ含め、旧protocolがNEEDS_SOL_DECISIONで要求したTARGETS行の存在を
+// schema側でも保証する。schemaはrole共通のためIMPLEMENTEDもkeyの放出を求められるが、
+// status別requiredはcomposition未検証語彙なしでは表現できず、旧IMPLEMENTED(対象なし)は
+// 空配列で表現する。空配列のNEEDS_SOL_DECISION拒否・risk整合はValidateWorkerResultが担う
+// (minItemsは実provider成立性が未検証の語彙のため使わない)。
 func workerSchema() *objectSchema {
 	return &objectSchema{
 		Type: schemaTypeObject,
@@ -98,11 +101,14 @@ func workerSchema() *objectSchema {
 			"targets":              stringsProperty(),
 			"artifacts":            stringsProperty(),
 		},
-		Required: []string{"status", "risk", "artifacts"},
+		Required: []string{"status", "risk", "targets", "artifacts"},
 	}
 }
 
-// reviewerSchemaは独立reviewer・risk floor再出力呼出のschema。
+// reviewerSchemaは独立reviewer・risk floor再出力呼出のschema。targetsをrequiredへ含め、
+// 旧protocolが全reviewer STATUSで要求したTARGETS行の存在をschema側でも保証する。
+// 空配列の拒否とNEEDS_SOL_REVIEWのnone拒否はValidateReviewerResultが担う
+// (minItemsは実provider成立性が未検証の語彙のため使わない)。
 func reviewerSchema() *objectSchema {
 	return &objectSchema{
 		Type: schemaTypeObject,
@@ -119,7 +125,7 @@ func reviewerSchema() *objectSchema {
 			"targets":              stringsProperty(),
 			"artifacts":            stringsProperty(),
 		},
-		Required: []string{"status", "risk", "artifacts"},
+		Required: []string{"status", "risk", "targets", "artifacts"},
 	}
 }
 

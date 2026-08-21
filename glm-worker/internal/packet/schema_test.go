@@ -90,8 +90,19 @@ func TestWorkerSchemaContents(t *testing.T) {
 		t.Fatalf("worker status enum = %v", values)
 	}
 	required := decoded["required"].([]any)
-	if len(required) != 3 {
+	if len(required) != 4 {
 		t.Fatalf("required = %v", required)
+	}
+	for _, want := range []string{"status", "risk", "targets", "artifacts"} {
+		found := false
+		for _, raw := range required {
+			if raw == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("worker requiredに%sがありません: %v", want, required)
+		}
 	}
 	for _, want := range []string{"decision", "evidence", "options", "recommendation", "test_obligations", "targets", "artifacts"} {
 		if _, ok := properties[want]; !ok {

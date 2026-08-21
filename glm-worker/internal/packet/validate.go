@@ -66,7 +66,10 @@ func ValidateWorkerResult(result Result) error {
 		if result.Risk != RiskHigh {
 			return &constraintError{reason: "NEEDS_SOL_DECISIONのriskはHIGHにしてください"}
 		}
-		return validateFields(result, needsSolDecisionFields)
+		if err := validateFields(result, needsSolDecisionFields); err != nil {
+			return err
+		}
+		return requireTargets(result)
 	default:
 		// status enumはrole別schemaが保証するため、ここへの到達はschema違反でありfail closed対象。
 		return &mismatchError{reason: fmt.Sprintf("worker結果のstatusとして許容されません: %q", string(result.Status))}
@@ -80,12 +83,18 @@ func ValidateReviewerResult(result Result) error {
 		if result.Risk != RiskLow {
 			return &constraintError{reason: "PASSのriskはLOWにしてください。高リスクならNEEDS_SOL_REVIEWを返してください"}
 		}
-		return validateFields(result, reviewerFields)
+		if err := validateFields(result, reviewerFields); err != nil {
+			return err
+		}
+		return requireTargets(result)
 	case StatusFixRequired:
 		if result.Risk != RiskLow && result.Risk != RiskHigh {
 			return &constraintError{reason: fmt.Sprintf("riskはLOWまたはHIGHで指定してください: %q", string(result.Risk))}
 		}
-		return validateFields(result, reviewerFields)
+		if err := validateFields(result, reviewerFields); err != nil {
+			return err
+		}
+		return requireTargets(result)
 	case StatusNeedsSolReview:
 		if result.Risk != RiskHigh {
 			return &constraintError{reason: "NEEDS_SOL_REVIEWのriskはHIGHにしてください"}
@@ -134,6 +143,19 @@ func reviewerFields(result Result) []displayField {
 		{key: "ISSUES", value: result.Issues},
 		{key: "RESIDUAL_RISK", value: result.ResidualRisk},
 	}
+}
+
+// requireTargetsは旧protocolのstatus別必須field契約(worker NEEDS_SOL_DECISIONとreviewer
+// PASS/FIX_REQUIRED/NEEDS_SOL_REVIEWのすべてでTARGETS行を要求)をtyped結果へ復元する。
+// 空targetsのFIX_REQUIREDはauto-fix promptへ修正対象の所在を伝えられず、空targetsの
+// NEEDS_SOL_DECISIONはSolが現物確認すべき対象を失うため、意味検証で空配列を拒否する。
+// 要素"none"は旧protocolの`TARGETS: none`値(旧WORKER.md「不要ならnone」)に相当するため
+// NEEDS_SOL_DECISION/PASS/FIX_REQUIREDでは許容し、NEEDS_SOL_REVIEWだけlistOnlyNone検査で拒否する。
+func requireTargets(result Result) error {
+	if len(result.Targets) == 0 {
+		return &constraintError{reason: fmt.Sprintf("%sのTARGETSは空にできません: Solが読むべき最小対象をfile:symbol/行範囲で指定してください", string(result.Status))}
+	}
+	return nil
 }
 
 // validateFieldsはstatus別必須fieldの非空・改行なし・byte上限を検証する。

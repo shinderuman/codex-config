@@ -84,15 +84,16 @@ func IsMismatchError(err error) bool {
 }
 
 // ParseStructuredはresult eventのauthoritative structured_outputをtyped結果へ変換する。
-// 不明field・型不一致は契約ミスマッチとしてfail closedに分類する。
+// producer schemaはadditionalProperties未検証の語彙制限から未知propertyを許容するため、
+// decoderも未知fieldを無害に無視して表示・stateへ伝播させない。既知fieldの型不一致と
+// status欠落だけを契約ミスマッチとしてfail closedに分類し、必須性・status別意味制約は
+// Validate*Resultが厳格に強制する。
 func ParseStructured(data []byte) (Result, error) {
 	if len(bytes.TrimSpace(data)) == 0 || string(bytes.TrimSpace(data)) == "null" {
 		return Result{}, &mismatchError{reason: "result eventにstructured_outputがありません"}
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	var result Result
-	if err := decoder.Decode(&result); err != nil {
+	if err := json.Unmarshal(data, &result); err != nil {
 		return Result{}, &mismatchError{reason: fmt.Sprintf("structured_outputをResultへ解析できません: %v", err)}
 	}
 	if result.Status == "" {

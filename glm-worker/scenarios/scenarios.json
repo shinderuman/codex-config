@@ -37,7 +37,7 @@
       "TEST_EVIDENCE: ev",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     },
@@ -102,7 +102,7 @@
       "TEST_EVIDENCE: ev",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     },
@@ -167,7 +167,7 @@
       "TEST_EVIDENCE: ev",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     },
@@ -232,7 +232,7 @@
       "TEST_EVIDENCE: ev",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     },
@@ -297,7 +297,7 @@
       "TEST_EVIDENCE: ev",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     },
@@ -423,7 +423,7 @@
       "TEST_EVIDENCE: ev",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     },
@@ -466,17 +466,7 @@
    ],
    "runner_steps": [
     {
-     "lines": [
-      "STATUS: NEEDS_SOL_DECISION",
-      "RISK: HIGH",
-      "DECISION: live障害発生後の新設計方針",
-      "EVIDENCE: 本番で連続アクセスblockが判明し現行設計では回避不能",
-      "OPTIONS: 既存設計の維持 / 取得間隔の再設計",
-      "RECOMMENDATION: 設計判断はSolが決定し実装は新規taskへ分離",
-      "TEST_OBLIGATIONS: 新設計決定後に実装taskで全体test",
-      "TARGETS: none",
-      "ARTIFACTS: none"
-     ]
+     "raw": "{\"status\":\"NEEDS_SOL_DECISION\",\"risk\":\"HIGH\",\"decision\":\"live障害発生後の新設計方針\",\"evidence\":\"本番で連続アクセスblockが判明し現行設計では回避不能\",\"options\":\"既存設計の維持 / 取得間隔の再設計\",\"recommendation\":\"設計判断はSolが決定し実装は新規taskへ分離\",\"test_obligations\":\"新設計決定後に実装taskで全体test\",\"targets\":[\"none\"],\"artifacts\":[]}"
     }
    ],
    "expected_models": [
@@ -520,7 +510,7 @@
       "TEST_EVIDENCE: ev",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     }
@@ -677,7 +667,7 @@
       "TEST_EVIDENCE: ev",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     }
@@ -725,7 +715,7 @@
       "TEST_EVIDENCE: ev",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     }
@@ -1121,7 +1111,7 @@
       "TEST_EVIDENCE: ev",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     }
@@ -1342,7 +1332,7 @@
       "TEST_EVIDENCE: ev",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ],
      "usage": {
@@ -1545,7 +1535,7 @@
       "TEST_EVIDENCE: ev",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ],
      "usage": {
@@ -1864,7 +1854,7 @@
       "TEST_EVIDENCE: ev",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ],
      "usage": {
@@ -1971,7 +1961,7 @@
       "TEST_EVIDENCE: planの全未完了項目が完了済みであることを確認",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     },
@@ -2206,7 +2196,7 @@
       "TEST_EVIDENCE: diffを確認",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     },
@@ -2271,7 +2261,7 @@
       "TEST_EVIDENCE: diffを確認",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     },
@@ -2337,7 +2327,7 @@
       "TEST_EVIDENCE: diffを確認",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     },
@@ -2402,7 +2392,7 @@
       "TEST_EVIDENCE: diffを確認",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     },
@@ -2466,7 +2456,7 @@
       "TEST_EVIDENCE: diffを確認",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     },
@@ -2530,7 +2520,7 @@
       "TEST_EVIDENCE: diffを確認",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     },
@@ -2597,7 +2587,7 @@
       "TEST_EVIDENCE: diffを確認",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     }
@@ -2645,7 +2635,7 @@
       "TEST_EVIDENCE: diffを確認",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     },
@@ -2797,7 +2787,7 @@
       "TEST_EVIDENCE: schema・到達・認証の検証記録を確認",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     }
@@ -2846,7 +2836,7 @@
       "TEST_EVIDENCE: 既存契約・認証・実行環境が変更されていないことを確認",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     }
@@ -2982,7 +2972,7 @@
       "TEST_EVIDENCE: 停止後queue残存・checkpoint保全のtestを確認",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     }
@@ -3067,17 +3057,7 @@
    "changed_paths": [],
    "runner_steps": [
     {
-     "lines": [
-      "STATUS: NEEDS_SOL_DECISION",
-      "RISK: HIGH",
-      "DECISION: 証拠取得不能なまま推測修正を続けるか、証拠取得条件を変えるか",
-      "EVIDENCE: status/size/error分類だけでは原因も再現条件も判定できない。応答本文断片の保存を試みたが対象が本文を返さず証拠取得不能。保存試行の失敗はbest-effort warningとして記録済み",
-      "OPTIONS: 利用者経由で応答本文等の証拠を取得して再委譲 / 対象機能の一時停止 / 推測に基づくworkaround実装",
-      "RECOMMENDATION: 「判定不能」として扱い、証拠取得条件を整えてから再開する。推測修正は行わない",
-      "TEST_OBLIGATIONS: 再開後に取得証拠へ基づく原因判定と回帰testを確認する",
-      "TARGETS: none",
-      "ARTIFACTS: none"
-     ]
+     "raw": "{\"status\":\"NEEDS_SOL_DECISION\",\"risk\":\"HIGH\",\"decision\":\"証拠取得不能なまま推測修正を続けるか、証拠取得条件を変えるか\",\"evidence\":\"status/size/error分類だけでは原因も再現条件も判定できない。応答本文断片の保存を試みたが対象が本文を返さず証拠取得不能。保存試行の失敗はbest-effort warningとして記録済み\",\"options\":\"利用者経由で応答本文等の証拠を取得して再委譲 / 対象機能の一時停止 / 推測に基づくworkaround実装\",\"recommendation\":\"「判定不能」として扱い、証拠取得条件を整えてから再開する。推測修正は行わない\",\"test_obligations\":\"再開後に取得証拠へ基づく原因判定と回帰testを確認する\",\"targets\":[\"none\"],\"artifacts\":[]}"
     }
    ],
    "expected_models": [
@@ -3124,7 +3104,7 @@
       "TEST_EVIDENCE: 429 backoffのtestを確認",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     }
@@ -3151,17 +3131,7 @@
    "changed_paths": [],
    "runner_steps": [
     {
-     "lines": [
-      "STATUS: NEEDS_SOL_DECISION",
-      "RISK: HIGH",
-      "DECISION: 原因層を親Codex orchestration失敗と確定し対策方向を選択する",
-      "EVIDENCE: raw telemetryとGit履歴でsemantic deltaのないreview phase遷移優先のreview invocationが親側で発生しており、worker/reviewer promptとscenario契約は一致している",
-      "OPTIONS: 親側のreview invocation契約で対策 / worker/reviewer promptへ個別checklist追加 / 既存対策へ重複する新対策追加",
-      "RECOMMENDATION: 親側contractで対策し、worker/reviewerチェック増殖と重複新対策は行わない",
-      "TEST_OBLIGATIONS: 採用時は親側契約変更のrouting配線testと該当scenario期待結果の現物再照合を要件とする",
-      "TARGETS: none",
-      "ARTIFACTS: none"
-     ]
+     "raw": "{\"status\":\"NEEDS_SOL_DECISION\",\"risk\":\"HIGH\",\"decision\":\"原因層を親Codex orchestration失敗と確定し対策方向を選択する\",\"evidence\":\"raw telemetryとGit履歴でsemantic deltaのないreview phase遷移優先のreview invocationが親側で発生しており、worker/reviewer promptとscenario契約は一致している\",\"options\":\"親側のreview invocation契約で対策 / worker/reviewer promptへ個別checklist追加 / 既存対策へ重複する新対策追加\",\"recommendation\":\"親側contractで対策し、worker/reviewerチェック増殖と重複新対策は行わない\",\"test_obligations\":\"採用時は親側契約変更のrouting配線testと該当scenario期待結果の現物再照合を要件とする\",\"targets\":[\"none\"],\"artifacts\":[]}"
     }
    ],
    "expected_models": [
@@ -3257,7 +3227,7 @@
       "TEST_EVIDENCE: diffがdocs限定であることを確認",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     }
@@ -3305,7 +3275,7 @@
       "TEST_EVIDENCE: diffとtelemetry記録を確認",
       "ISSUES: none",
       "RESIDUAL_RISK: none",
-      "TARGETS: none",
+      "TARGETS: final diff",
       "ARTIFACTS: none"
      ]
     },

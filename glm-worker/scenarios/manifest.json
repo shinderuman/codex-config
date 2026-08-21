@@ -26,7 +26,7 @@
     },
     {
       "path": "codex/glm-worker/prompts/WORKER.md",
-      "sha256": "902c629b9bacc4ef0d0d2541c60665fb582ea853c95055196f47528ea4910644",
+      "sha256": "91acd2842e55385a5bcef35faba817b88c3065d67b13fcab58de62e6c726bd90",
       "scenarios": [
         "state-residual-after-removal",
         "state-deleted-value-reflow-alt-path",
@@ -75,7 +75,7 @@
     },
     {
       "path": "codex/glm-worker/prompts/REVIEWER.md",
-      "sha256": "3bf867651be3588b342f7f88d8605edb8788ea063f3b887dad257da391e97e37",
+      "sha256": "f2a75969b0e50d6623ed7c709ea562197fce77eff175c60000187f39d64beb99",
       "scenarios": [
         "state-residual-after-removal",
         "state-deleted-value-reflow-alt-path",

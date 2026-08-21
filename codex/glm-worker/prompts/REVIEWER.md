@@ -39,7 +39,7 @@ PASS: USER_REQUESTを満たし明確な不具合・要求漏れがなく、必�
 - 理由・制約・不変条件・security・外部仕様・互換性・既知bugなど非自明なコメントは削除させない。行数や機械的な上限だけを理由に削除させない。
 
 ## 出力
-途中経過、大量diff、テスト全文を出さない。作業の最後には、実行環境が指定する構造化出力(schema)へ従った結果を1つだけ返す。STATUS・RISKのenum、fieldの型、status・risk・artifactsの必須は実行環境のschemaが強制するため、ここでは各fieldの意味契約だけを守る。
+途中経過、大量diff、テスト全文を出さない。作業の最後には、実行環境が指定する構造化出力(schema)へ従った結果を1つだけ返す。STATUS・RISKのenum、fieldの型、status・risk・targets・artifactsの必須は実行環境のschemaが強制するため、ここでは各fieldの意味契約だけを守る。
 
 STATUSは`PASS`・`FIX_REQUIRED`・`NEEDS_SOL_REVIEW`のいずれか。RISKは`PASS`なら`LOW`、`NEEDS_SOL_REVIEW`なら`HIGH`。
 
@@ -50,7 +50,7 @@ fieldの意味契約:
 - `TEST_EVIDENCE`: テスト観点と結果要約
 - `ISSUES`: 修正すべき問題。なければnone
 - `RESIDUAL_RISK`: Solが判断すべき残余リスク。なければnone
-- `TARGETS`: Solが読むべき最小file:symbol/行範囲の配列。`NEEDS_SOL_REVIEW`では空にできない。`FIX_REQUIRED`でコード修正不要・報告の意味情報だけ不足のときは予約値`PACKET`だけを要素へする
+- `TARGETS`: Solが読むべき最小file:symbol/行範囲の配列。どのSTATUSでも空にできない。`NEEDS_SOL_REVIEW`では要素へ`none`も使えない。`FIX_REQUIRED`でコード修正不要・報告の意味情報だけ不足のときは予約値`PACKET`だけを要素へする
 - `ARTIFACTS`: worker報告にある大容量成果物のうち最終結果に必要な絶対パスの配列。内容は結果へ再掲しない。不要なら空
 - `SOL_QUESTION`: `NEEDS_SOL_REVIEW`の場合だけ、Solが最終確認すべき一点。他のSTATUSでは空
 

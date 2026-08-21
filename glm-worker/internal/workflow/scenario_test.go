@@ -560,7 +560,7 @@ func validCorpus() (scenarioFile, manifestFile) {
 			InstructionFiles: []string{"codex/glm-worker/prompts/WORKER.md"},
 			RunnerSteps: []scenarioStep{
 				{Lines: []string{"STATUS: IMPLEMENTED", "RISK: LOW", "SUMMARY: s", "REQUIREMENT_COVERAGE: c", "TESTS: t", "UNVERIFIED: none", "ARTIFACTS: none"}},
-				{Lines: []string{"STATUS: PASS", "RISK: LOW", "SUMMARY: s", "REQUIREMENT_COVERAGE: c", "INVARIANTS: i", "TEST_EVIDENCE: e", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: none", "ARTIFACTS: none"}},
+				{Lines: []string{"STATUS: PASS", "RISK: LOW", "SUMMARY: s", "REQUIREMENT_COVERAGE: c", "INVARIANTS: i", "TEST_EVIDENCE: e", "ISSUES: none", "RESIDUAL_RISK: none", "TARGETS: final diff", "ARTIFACTS: none"}},
 			},
 			ExpectedModels:       []string{"opus", "haiku"},
 			ExpectedPacketStatus: "PASS",
@@ -768,6 +768,9 @@ func validateTypedResult(result packet.Result) error {
 }
 
 // lastPacketFromOutputはwrapper stdoutの表示行(KEY: value)からtyped結果を復元する。
+// 表示の`TARGETS: none`は空配列と予約値none sentinel(旧protocolの`TARGETS: none`値)の
+// どちらにも同じ文字列でrenderされるため、契約検証ではsentinelへ読み替える。
+// sentinel不許容のNEEDS_SOL_REVIEWはこの表示で受理されないため読み替えは無害。
 func lastPacketFromOutput(t *testing.T, out string) packet.Result {
 	t.Helper()
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
@@ -783,6 +786,11 @@ func lastPacketFromOutput(t *testing.T, out string) packet.Result {
 	value, err := packet.FromDisplayLines(emitted)
 	if err != nil {
 		t.Fatalf("emitted result is not display lines: %v:\n%s", err, out)
+	}
+	for _, ln := range emitted {
+		if ln == "TARGETS: none" && value.Targets == nil {
+			value.Targets = []string{"none"}
+		}
 	}
 	return value
 }
