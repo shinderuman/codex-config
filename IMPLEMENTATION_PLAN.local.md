@@ -16,10 +16,10 @@ GLM委譲率、PACKETサイズ、GLM token、Solへ戻した回数等は代理�
 
 ## 現在作業中
 
-- Task: Codex↔GLM structured output PoCとして、現行Claude Code・Z.ai Coding Plan・GLM-5.3・`-p`・stream-json・session resumeで公式`--json-schema`の成立性を検証する
-- 前段完了: tracked planのcommit-ready初回commit→親Codex plan/history最終同期→同一commit amend→final HEAD/clean確認、というstale-by-one防止contractを`git.md`・EVAL・wiring test・install smokeへ固定して独立review・Sol品質ゲート後にcommit済み
-- PoC境界: production PACKET/parserは変更しない。schema適合最終output、stream-json抽出、resume、invalid/unsupported fail closed、provider error/rate-limit分類、token/cost/session metadataを最小実経路で確認する。MCP/Tool Use、persistent process、daemon/socket、実Sol Direct A/Bはscope外
-- 次の操作: feasibility gateを適用し、追加の大規模benchmark frameworkを作らず現行PACKETとのbyte/token proxy・format/recompression call・意味情報・parser複雑性・GLM call数・Sol判断情報を比較する。成立しなければproductionへ進まず`NEEDS_SOL_DECISION`へ戻す
+- Task: PoCで成立したCodex↔GLM structured outputをproduction workflowへ単一protocolとして移行する
+- 前段完了: Claude Code 2.1.226・Z.ai Coding Plan・GLM-5.3・stream-json・`--json-schema`の実経路でschema適合output 2/2、同一session resume、deterministic extraction、metadata保持、invalid/unsupported fail closed、provider分類channel維持を確認し、現行PACKET比較後にGo判断を個別commit済み
+- 移行境界: `1 model call = 1 subprocess`とsession continuityを維持する。schema vocabularyをGo側で事前制限し、typed resultを唯一のworkflow protocolへ移す。field間semantic validation・disk/state invariantはGo側に残し、旧PACKET+JSONの恒久二重protocol、MCP/custom tool、persistent process、daemon/socketは導入しない
+- 次の操作: schema/typed result、Claude runner transport、worker/reviewer/report-only/recompression経路、semantic validator、telemetry、migration testのproduction責務境界をGLMへ設計・実装させ、独立reviewとHIGH時のSol品質ゲートへ進める
 
 更新タイミング:
 
@@ -44,12 +44,12 @@ GLMにはcommitさせない。独立review・必要なSol確認・品質ゲー�
 
 ## 未完了（優先順）
 
-- [ ] Codex↔GLM structured output PoCを実施する
-  - [ ] 現行Claude Code・Z.ai Coding Plan・GLM-5.3 mapping・`-p`・`--output-format stream-json`・session resumeの実経路で公式`--json-schema`成立性を最小PoC確認する。schema適合最終output、stream-json抽出、resume維持、invalid/unsupported fail closed、provider classification、token/cost/session metadataを検証し、不成立ならproductionへ進まず`NEEDS_SOL_DECISION`へ戻す
-  - [ ] 現行PACKETとstructured outputについてbyte/token proxy、format/recompression call、意味情報欠落、parser/validator複雑性、GLM call数、Sol判断情報保持を比較する。実Sol High Direct baseline・本番A/Bはユーザー明示許可なしに実行しない
-  - [ ] 成立後の目標protocolはstatus/risk/decision/targets/artifacts/test obligations/options/state transition/evidence/findings等をtyped JSONへ移し、未知の意味問題だけ短いfree-textへ残す。日本語を英語化すること自体を目的にしない
-  - [ ] PoC成立前にproduction PACKET/parserを置換しない。成立後は独自`PACKET_BEGIN/END`・KEY parser・duplicate/stray/reemitの不要部分を削除し、旧PACKET+JSONの恒久二重protocolを避ける。field間workflow semanticsは必要に応じGo validator/state machineへ残す
-  - [ ] MCP/hosted MCP quota、custom Tool Use、`--input-format stream-json`長寿命process、daemon/socketは今回scope外。`1 model call = 1 subprocess`とsession ID/`--resume` continuityを維持する
+- [ ] Codex↔GLM structured outputをproduction workflowへ単一protocolとして移行
+  - [ ] status/risk/decision/targets/artifacts/test obligations/options/state transition/evidence/findings等をtyped schemaへ移し、未知の意味問題だけ短いfree-textへ残す。日本語を英語化すること自体を目的にしない
+  - [ ] Claude runnerへ`--json-schema`とauthoritative `structured_output`抽出を統合し、schema vocabularyをGo側でobject root・properties/required/enum/array/items/boolean/string/numberへ事前制限する。CLI/result contract欠落とstructured retry exhaustionはfail closedにする
+  - [ ] worker/reviewer/report-only/fix/recompressionのproduction dispatchをtyped resultへ統一し、field間workflow semantics・artifact存在・risk floor・snapshot/state invariantはGo validator/state machineへ保持する
+  - [ ] 独自`PACKET_BEGIN/END`・KEY parser・duplicate/stray/reemit・構造欠陥用recompressionの不要部分を削除し、旧PACKET+JSONの恒久二重protocolを作らない。provider error/rate-limitのplain/result signal分類は維持する
+  - [ ] unit/scenario/production integration、session resume、telemetry exact-once、report-only、provider recovery、installer preflightを固定し、自然発生した最初の429で分類channelを再確認する。retry-exhaustion頻度・costが旧recompressionを上回る場合は撤退する
 - [ ] fixed Eval harnessとescaped bug/review corpusの残項目を統合
   - [x] workflow clock abstraction逸脱を固定（`946a49e`、install preflight・配置一致完了）
   - [ ] reviewer/SolがHIGH変更の意味上の欠陥を逃すbehavioral scenarioを固定（wrapper production gateは`e79e1ab`で固定。live reviewer/Sol positive/negative Evalは明示許可待ち）

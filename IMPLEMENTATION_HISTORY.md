@@ -35,6 +35,7 @@
 
 ## 完了済み
 
+- [x] Codex↔GLM structured output feasibility PoCをClaude Code 2.1.226・Z.ai Coding Plan・GLM-5.3・stream-json・`--json-schema`の実経路で実施。schema適合output 2/2、同一session resumeとprompt cache continuity、deterministic extraction、token/cost/session metadata保持、invalid JSONのclient側拒否、unsupported schemaのretry exhaustion後fail closed、既存provider分類channel維持を一次artifactで確認しGo判断。現行PACKETとbyte/token proxyは同等だが保存telemetryのformat failure 65件中53件（82%）は構造欠陥であり、typed fieldへSol判断情報を保持したままrecompression call削減余地を確認。productionはGo側schema事前制限・contract preflight・自然発生429再確認・retry cost撤退条件付きとし、PoC中のrepo/PACKET/parser変更なし
 - [x] tracked canonical planのstale-by-oneを、commit-ready初回commit→親Codex plan/history最終同期→同一commit即時amend→final HEAD/clean確認の親orchestration contractで解消（独立review・Sol fresh test/vet/build/gofmt/shell syntax・同commitでの実運用完了）
 - [x] `ba2414b` BM25 fingerprint domainのfalse-completeを修正し、nested repo・submodule・default/追加exclude・large/binary/symlinkの検索/index corpusとcache freshnessを同一policyへ統一（独立review・Sol設計採否・fresh test/vet/build/gofmt完了、同commitへplan/history同期）
 - [x] `glm-worker --watch`をauthoritative task statusのnon-active/task切替時に最終event drain後終了させ、通常は主process、attach recoveryだけwatchを使う親completion wait contractへ修正（独立review・Sol fresh test/vet/build/gofmt・本配置・binary/instruction一致・実non-active taskの`WATCH_EXIT`/exit 0確認完了）
