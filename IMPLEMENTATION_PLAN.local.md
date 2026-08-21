@@ -16,10 +16,10 @@ GLM委譲率、PACKETサイズ、GLM token、Solへ戻した回数等は代理�
 
 ## 現在作業中
 
-- Task: `ba2414b` BM25 repo-search coreのfingerprint domainをproduction Searchの検索/index corpus境界と整合させる
-- 前段完了: watch non-active終端、plan/history親専有guardとTask Work Call telemetry exact-once、installer preflight fail-closedをそれぞれ独立review・Sol品質ゲート後にcommit。本配置preflight成功、本配置binary/instruction byte一致、既存`waiting-sol-review` taskへの実`--watch`が保存済みeventをdrain後`WATCH_EXIT`を出して追加AI callなしでexit 0することを確認済み
-- 原因分類: `glm-worker`内部pipeline/review失敗。repository境界を`enumerateFiles()` helperの局所contractとして確認し、production `Search()`のfingerprint→enumeration→rebuild全体で同じcorpus policyを共有するか確認しなかった
-- 次の操作: nested repo・submodule・default/追加exclude・large file・binary・symlinkを検索/index対象とfreshness無効化対象の責務として整理し、stale cacheを許さずproduction `Search()` testで固定する独立taskを開始する
+- Task: tracked canonical planのstale-by-oneを解消し、commit前の虚偽完了とcommit後HEADのobsolete状態を両方防ぐ単純な運用contractを固定する
+- 前段完了: BM25 fingerprintをproduction Searchのtracked/untracked列挙と`readSearchableFile`の同一corpus投影へ収束し、HEAD metadata軸を削除。nested repo・submodule・default/追加exclude・large/binary/symlink境界をproduction Search testで固定して独立review・Sol品質ゲート後にcommit済み
+- 原因分類: 親Codex orchestration失敗。planをtask commitへ含める、`[x]`はcommit後だけ、各commit直後に更新する、という3契約の自己参照を解消せず最初のtracked plan HEADを一世代古くした
+- 次の操作: 大規模ledgerを追加せず、commit-ready planを含む初回commit→親Codexが完了/次taskへ同期→同一commitへ即時amend、の実運用済み二段階を正式contractとtestへ固定する。初回commitとamendの間に停止・handoff・別task着手しない
 
 更新タイミング:
 
@@ -44,7 +44,6 @@ GLMにはcommitさせない。独立review・必要なSol確認・品質ゲー�
 
 ## 未完了（優先順）
 
-- [ ] `ba2414b` BM25 repo-search coreのfalse-completeを修正する。fingerprintとenumeration/rebuildでrepository/corpus policyを共有し、nested repo・submodule・default/追加exclude・large file・binary・symlinkの検索対象外状態とcache freshness影響をproduction `Search()` testで固定する
 - [ ] tracked canonical planのstale-by-oneを解消する。commit-ready→commit→親Codex plan最終同期→同一commit amend等の単純contractを確定し、commit前の虚偽完了とcommit後のobsolete HEADを両方防ぐ。大規模ledgerは追加しない
 - [ ] Codex↔GLM structured output PoCを実施する
   - [ ] 現行Claude Code・Z.ai Coding Plan・GLM-5.3 mapping・`-p`・`--output-format stream-json`・session resumeの実経路で公式`--json-schema`成立性を最小PoC確認する。schema適合最終output、stream-json抽出、resume維持、invalid/unsupported fail closed、provider classification、token/cost/session metadataを検証し、不成立ならproductionへ進まず`NEEDS_SOL_DECISION`へ戻す

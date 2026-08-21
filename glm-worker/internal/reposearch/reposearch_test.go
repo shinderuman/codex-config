@@ -208,9 +208,9 @@ func TestSearchContextCancelAborts(t *testing.T) {
 
 	ctx, cancelDuringSearch := context.WithCancel(context.Background())
 	original := captureFingerprint
-	captureFingerprint = func(ctx context.Context, repoRoot string) (fingerprint, error) {
+	captureFingerprint = func(ctx context.Context, repoRoot string, excludeDirs map[string]bool) (fingerprint, error) {
 		cancelDuringSearch()
-		return original(ctx, repoRoot)
+		return original(ctx, repoRoot, excludeDirs)
 	}
 	t.Cleanup(func() { captureFingerprint = original })
 	if _, err := Search(ctx, dir, "needle", Options{DisableCache: true}); err == nil {

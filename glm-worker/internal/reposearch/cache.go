@@ -26,7 +26,6 @@ type cacheData struct {
 	TokenizerVersion   int      `json:"tokenizer_version"`
 	EnumerationVersion int      `json:"enumeration_version"`
 	ExcludeDirs        []string `json:"exclude_dirs"`
-	Head               string   `json:"head"`
 	IndexDigest        string   `json:"index_digest"`
 	WorktreeDigest     string   `json:"worktree_digest"`
 	IndexedFiles       int      `json:"indexed_files"`
@@ -92,7 +91,7 @@ func cacheMatchesRepository(cached cacheData, repoRoot string, fp fingerprint, s
 	if !slices.Equal(cached.ExcludeDirs, sortedExcludeDirs(settings.excludeDirs)) {
 		return false
 	}
-	if cached.Head != fp.Head || cached.IndexDigest != fp.IndexDigest || cached.WorktreeDigest != fp.WorktreeDigest {
+	if cached.IndexDigest != fp.IndexDigest || cached.WorktreeDigest != fp.WorktreeDigest {
 		return false
 	}
 	if cached.IndexedFiles != len(cached.Docs) || cached.IndexedFiles < 0 || cached.SkippedFiles < 0 {
@@ -155,7 +154,6 @@ func writeIndex(settings searchSettings, repoRoot string, fp fingerprint, index 
 		TokenizerVersion:   tokenizerVersion,
 		EnumerationVersion: enumerationVersion,
 		ExcludeDirs:        sortedExcludeDirs(settings.excludeDirs),
-		Head:               fp.Head,
 		IndexDigest:        fp.IndexDigest,
 		WorktreeDigest:     fp.WorktreeDigest,
 		IndexedFiles:       len(docs),

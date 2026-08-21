@@ -44,11 +44,11 @@ func rebuildIndex(ctx context.Context, repoRoot string, settings searchSettings)
 		if err != nil {
 			return builtIndex{}, err
 		}
-		content, ok, err := readSearchableFile(abs)
+		content, outcome, err := readSearchableFile(abs)
 		if err != nil {
 			return builtIndex{}, err
 		}
-		if !ok {
+		if outcome != readIndexed {
 			index.skipped++
 			continue
 		}
@@ -71,27 +71,39 @@ func rebuildIndex(ctx context.Context, repoRoot string, settings searchSettings)
 	return index, nil
 }
 
+// readOutcomeはfile1つが検索/index対象corpusへどう現れるか。rebuildのskip計上と
+// fingerprintのfreshness評価が同じ分類を共有するための区分。
+type readOutcome int
+
+const (
+	readIndexed readOutcome = iota
+	readSkipped
+	readMissing
+)
+
 // readSearchableFileは検索対象として読める通常fileの内容を返す。symlink・FIFO等の
-// 特殊file、maxFileBytes超、先頭binarySniffBytes内にNULを含むfileは検索対象外とする。
-// tracked pathのworking treeからの消失(deleted・rename旧path)も対象外扱いにする。
-// Lstatで対象を確認してから読むため、特殊fileを読み切ってhangさせることはない。
-func readSearchableFile(abs string) ([]byte, bool, error) {
+// 特殊file、maxFileBytes超、先頭binarySniffBytes内にNULを含むfileはreadSkippedとして
+// 内容を読まず対象外扱いにする。tracked pathのworking treeからの消失(deleted・rename
+// 旧path)はreadMissingで区別する。Lstatで対象を確認してから読むため、特殊fileを
+// 読み切ってhangさせることはない。読み込むのはmaxFileBytes以下の対象file本文だけで、
+// fingerprintもこの関数経由で同じ上限内の読み込みに限る。
+func readSearchableFile(abs string) ([]byte, readOutcome, error) {
 	info, err := os.Lstat(abs)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, false, nil
+		return nil, readMissing, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("%sをstatできません: %w", abs, err)
+		return nil, readSkipped, fmt.Errorf("%sをstatできません: %w", abs, err)
 	}
 	if !info.Mode().IsRegular() || info.Size() > maxFileBytes {
-		return nil, false, nil
+		return nil, readSkipped, nil
 	}
 	content, err := os.ReadFile(abs)
 	if err != nil {
-		return nil, false, fmt.Errorf("%sを読めません: %w", abs, err)
+		return nil, readSkipped, fmt.Errorf("%sを読めません: %w", abs, err)
 	}
 	if bytes.IndexByte(content[:min(len(content), binarySniffBytes)], 0) >= 0 {
-		return nil, false, nil
+		return nil, readSkipped, nil
 	}
-	return content, true, nil
+	return content, readIndexed, nil
 }

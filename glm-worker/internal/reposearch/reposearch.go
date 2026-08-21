@@ -202,7 +202,7 @@ func defaultCacheRoot() (string, error) {
 // cache書込みも行わない。最終確認後のcache atomic書込み失敗時だけは結果を返し、
 // CacheStatusWriteWarningとwarningで明示する。
 func attemptSearch(ctx context.Context, root string, queryTokens []string, settings searchSettings) (Report, bool, error) {
-	before, err := computeFingerprint(ctx, root)
+	before, err := computeFingerprint(ctx, root, settings.excludeDirs)
 	if err != nil {
 		return Report{}, false, err
 	}
@@ -213,13 +213,13 @@ func attemptSearch(ctx context.Context, root string, queryTokens []string, setti
 			return Report{}, false, err
 		}
 	}
-	raced, err := fingerprintUnchanged(ctx, root, before)
+	raced, err := fingerprintUnchanged(ctx, root, settings.excludeDirs, before)
 	if err != nil || raced {
 		return Report{}, raced, err
 	}
 	results := rankDocuments(index.docs, queryTokens, settings.limit, settings.pathWeight)
 	warnings := attachSnippets(root, results, queryTokens)
-	raced, err = fingerprintUnchanged(ctx, root, before)
+	raced, err = fingerprintUnchanged(ctx, root, settings.excludeDirs, before)
 	if err != nil || raced {
 		return Report{}, raced, err
 	}
@@ -239,14 +239,6 @@ func attemptSearch(ctx context.Context, root string, queryTokens []string, setti
 		IndexedFiles: index.indexed,
 		SkippedFiles: index.skipped,
 	}, false, nil
-}
-
-func fingerprintUnchanged(ctx context.Context, root string, before fingerprint) (bool, error) {
-	after, err := computeFingerprint(ctx, root)
-	if err != nil {
-		return false, err
-	}
-	return after != before, nil
 }
 
 // resolveCanonicalRootはrepoRootを絶対path・symlink評価したgit toplevelとして返す。

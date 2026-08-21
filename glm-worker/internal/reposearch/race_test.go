@@ -17,12 +17,12 @@ func mutateDuringCapture(t *testing.T, dir string, mutateAt func(call int) bool)
 	t.Helper()
 	original := captureFingerprint
 	call := 0
-	captureFingerprint = func(ctx context.Context, repoRoot string) (fingerprint, error) {
+	captureFingerprint = func(ctx context.Context, repoRoot string, excludeDirs map[string]bool) (fingerprint, error) {
 		call++
 		if mutateAt(call) {
 			writeTestFile(t, filepath.Join(dir, "raced.txt"), fmt.Sprintf("needle raced %d\n", call))
 		}
-		return original(ctx, repoRoot)
+		return original(ctx, repoRoot, excludeDirs)
 	}
 	t.Cleanup(func() { captureFingerprint = original })
 }

@@ -106,12 +106,12 @@ func attachSnippets(root string, results []Result, queryTokens []string) []strin
 			warnings = append(warnings, fmt.Sprintf("snippet対象pathがrepository境界を越えています: %s: %v", results[i].Path, err))
 			continue
 		}
-		content, ok, err := readSearchableFile(abs)
+		content, outcome, err := readSearchableFile(abs)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("snippet生成に失敗しました: %s: %v", results[i].Path, err))
 			continue
 		}
-		if !ok {
+		if outcome != readIndexed {
 			continue
 		}
 		results[i].Line, results[i].Snippet = bestLine(string(content), queryTokens)

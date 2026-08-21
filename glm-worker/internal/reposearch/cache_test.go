@@ -366,7 +366,9 @@ func TestDisableCacheConflictsWithCacheRoot(t *testing.T) {
 	}
 }
 
-func TestCacheRebuildsOnHeadAndIndexChange(t *testing.T) {
+// HEAD移動だけでindex・worktreeの検索対象corpusが不変ならcacheを再利用する。
+// staged変更はindex digestのblob sha経由で必ず無効化する。
+func TestCacheFreshnessTracksCorpusNotHead(t *testing.T) {
 	dir := initRepo(t)
 	writeTestFile(t, filepath.Join(dir, "a.txt"), "needle one\n")
 	commitAll(t, dir, "init")
@@ -374,8 +376,8 @@ func TestCacheRebuildsOnHeadAndIndexChange(t *testing.T) {
 
 	searchNeedle(t, dir, opts)
 	gitRun(t, dir, "commit", "--quiet", "--allow-empty", "-m", "second")
-	if report := searchNeedle(t, dir, opts); report.CacheStatus != CacheStatusRebuilt {
-		t.Fatalf("HEAD移動後status = %q want rebuilt", report.CacheStatus)
+	if report := searchNeedle(t, dir, opts); report.CacheStatus != CacheStatusHit {
+		t.Fatalf("corpus不変のHEAD移動後status = %q want hit", report.CacheStatus)
 	}
 
 	searchNeedle(t, dir, opts)

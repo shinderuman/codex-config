@@ -54,8 +54,10 @@ func excludedPath(rel string, excludeDirs map[string]bool) bool {
 // .gitignore・info/excludeをgit自身の規則で適用し、nested repoは`dir/`形式のentryと
 // して現れるため末端`/`で除外する。既定・追加の除外directory配下もここで落とす。
 // deleted tracked file・binary・巨大file・特殊fileの除外はrebuildIndexの読み込み段階が担う。
+// fingerprintのfreshness判定もtrackedFileEntries・untrackedFilePaths・excludedPathの
+// 同一実装でこのcorpus policyを共有する。
 func enumerateFiles(ctx context.Context, repoRoot string, excludeDirs map[string]bool) ([]string, error) {
-	tracked, err := trackedFilePaths(ctx, repoRoot)
+	entries, err := trackedFileEntries(ctx, repoRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -63,9 +65,16 @@ func enumerateFiles(ctx context.Context, repoRoot string, excludeDirs map[string
 	if err != nil {
 		return nil, err
 	}
-	seen := make(map[string]bool, len(tracked)+len(untracked))
-	paths := make([]string, 0, len(tracked)+len(untracked))
-	for _, path := range append(tracked, untracked...) {
+	seen := make(map[string]bool, len(entries)+len(untracked))
+	paths := make([]string, 0, len(entries)+len(untracked))
+	for _, entry := range entries {
+		if entry.path == "" || seen[entry.path] || excludedPath(entry.path, excludeDirs) {
+			continue
+		}
+		seen[entry.path] = true
+		paths = append(paths, entry.path)
+	}
+	for _, path := range untracked {
 		if path == "" || seen[path] || excludedPath(path, excludeDirs) {
 			continue
 		}
@@ -76,18 +85,26 @@ func enumerateFiles(ctx context.Context, repoRoot string, excludeDirs map[string
 	return paths, nil
 }
 
-func trackedFilePaths(ctx context.Context, repoRoot string) ([]string, error) {
+// trackedEntryは検索対象modeのindex登録1件分。fingerprintのindex digestも列挙と
+// 同一のmode filter・path集合で状態識別するため、mode・blob shaをpathとともに返す。
+type trackedEntry struct {
+	mode string
+	sha  string
+	path string
+}
+
+func trackedFileEntries(ctx context.Context, repoRoot string) ([]trackedEntry, error) {
 	output, err := gitOutput(ctx, repoRoot, "ls-files", "-z", "-s", "--cached")
 	if err != nil {
 		return nil, fmt.Errorf("git ls-files --cached: %w", err)
 	}
 	seen := map[string]bool{}
-	var paths []string
+	var entries []trackedEntry
 	for _, entry := range strings.Split(string(output), "\x00") {
 		if entry == "" {
 			continue
 		}
-		mode, path, ok := parseLsFilesStage(entry)
+		mode, sha, path, ok := parseLsFilesStage(entry)
 		if !ok {
 			return nil, fmt.Errorf("git ls-files --cachedのentryを解析できません: %q", entry)
 		}
@@ -98,9 +115,9 @@ func trackedFilePaths(ctx context.Context, repoRoot string) ([]string, error) {
 			continue
 		}
 		seen[path] = true
-		paths = append(paths, path)
+		entries = append(entries, trackedEntry{mode: mode, sha: sha, path: path})
 	}
-	return paths, nil
+	return entries, nil
 }
 
 func untrackedFilePaths(ctx context.Context, repoRoot string) ([]string, error) {
@@ -118,16 +135,16 @@ func untrackedFilePaths(ctx context.Context, repoRoot string) ([]string, error) 
 	return paths, nil
 }
 
-func parseLsFilesStage(entry string) (string, string, bool) {
+func parseLsFilesStage(entry string) (string, string, string, bool) {
 	tab := strings.IndexByte(entry, '\t')
 	if tab < 0 {
-		return "", "", false
+		return "", "", "", false
 	}
 	header := strings.Fields(entry[:tab])
 	if len(header) != 3 {
-		return "", "", false
+		return "", "", "", false
 	}
-	return header[0], entry[tab+1:], true
+	return header[0], header[1], entry[tab+1:], true
 }
 
 // joinWithinRootはroot配下へpathを結合し、絶対path・`..`越え等repository境界を越える
