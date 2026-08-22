@@ -1721,6 +1721,135 @@ func TestNeedsSolDecisionWithoutTargetsCorrectsBeforeParentDispatch(t *testing.T
 	}
 }
 
+// TARGETS要素の意味検証(空白のみ要素・none混在)もauto-fix dispatchの前に止まる。
+// 空要素を要素へ持つFIX_REQUIREDは修正対象の所在を伝えられないため、意味検証不合格と
+// して同一sessionの修正再依頼へ置き換わり、正規targets付き再出力だけがauto-fixへdispatchする。
+func TestFixRequiredBlankTargetsElementCorrectsBeforeAutoFix(t *testing.T) {
+	st := newStateStoreT(t)
+	fixWithBlankElement := `{"status":"FIX_REQUIRED","risk":"HIGH","summary":"fix","requirement_coverage":"covered","invariants":"preserved","test_evidence":"ev","issues":"i","residual_risk":"r","targets":["   "],"artifacts":[]}`
+	r := &scriptedRunner{steps: []runnerStep{
+		{output: implementedPacketWithRisk("high risk work", "HIGH")},
+		{structured: fixWithBlankElement},
+		{output: fixRequiredPacketWithTargets("glm-worker/internal/state/store.go:Read")},
+		{output: implementedPacketWithRisk("fixed implementation", "HIGH")},
+		{output: needsSolReviewPacket()},
+	}}
+	w := newWorkflowT(t, st, r)
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	wantPhases := []string{"worker-new", "reviewer-1", "reviewer-1" + resultCorrectionPhaseSuffix, "worker-auto-fix-1", "reviewer-2"}
+	if strings.Join(r.phases, ",") != strings.Join(wantPhases, ",") {
+		t.Fatalf("phases = %v, want %v", r.phases, wantPhases)
+	}
+	if !strings.Contains(r.prompts[2], "意味検証に不合格") || !strings.Contains(r.prompts[2], "TARGETSの要素は空・空白のみ") {
+		t.Fatalf("修正再依頼promptへ要素違反が伝わっていません: %s", r.prompts[2])
+	}
+	autoFix := r.prompts[3]
+	if !strings.Contains(autoFix, "TARGETS: glm-worker/internal/state/store.go:Read") {
+		t.Fatalf("auto-fix promptへ修正対象targetsが伝わっていません: %s", autoFix)
+	}
+	for i, prompt := range r.prompts {
+		if i != 3 && strings.Contains(prompt, "MODE: APPLY_REVIEW_FIX") {
+			t.Fatalf("要素違反FIX_REQUIREDがauto-fixへdispatchしています: prompt %d", i)
+		}
+	}
+	taskID, _ := st.TaskID()
+	logs, logErr := st.ReadModelCallLogs(taskID)
+	if logErr != nil {
+		t.Fatal(logErr)
+	}
+	if len(logs) != 5 || logs[1].Outcome != "invalid_packet" || logs[1].PacketRejectReason != "targets-none" {
+		t.Fatalf("telemetry = %#v", logs)
+	}
+}
+
+// noneと具体targetの混在したNEEDS_SOL_DECISIONはSolが読むべき対象の正規形を壊すため、
+// pending-decisionへの遷移と親境界への結果放出より前に意味検証不合格として修正再依頼へ
+// 置き換わる。正規targets付き再出力だけが親へ渡る。
+func TestNeedsSolDecisionMixedNoneTargetsCorrectsBeforeParentDispatch(t *testing.T) {
+	st := newStateStoreT(t)
+	decisionMixedNone := `{"status":"NEEDS_SOL_DECISION","risk":"HIGH","decision":"d","evidence":"e","options":"o","recommendation":"r","test_obligations":"t","targets":["none","glm-worker/internal/packet/validate.go:validateTargets"],"artifacts":[]}`
+	r := &scriptedRunner{steps: []runnerStep{
+		{structured: decisionMixedNone},
+		{output: needsSolDecisionPacket()},
+	}}
+	var emitted bytes.Buffer
+	w := newWorkflowTWithOutput(t, st, r, &emitted)
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	wantPhases := []string{"worker-new", "worker-new" + resultCorrectionPhaseSuffix}
+	if strings.Join(r.phases, ",") != strings.Join(wantPhases, ",") {
+		t.Fatalf("phases = %v, want %v", r.phases, wantPhases)
+	}
+	if !strings.Contains(r.prompts[1], "意味検証に不合格") || !strings.Contains(r.prompts[1], "混在できません") {
+		t.Fatalf("修正再依頼promptへ混在違反が伝わっていません: %s", r.prompts[1])
+	}
+	if st.TaskStatus() != state.TaskStatusWaitingDecision || !st.Exists("pending-decision") {
+		t.Fatalf("decision待ち状態へ遷移していません: status=%q pending=%v", st.TaskStatus(), st.Exists("pending-decision"))
+	}
+	if !strings.Contains(emitted.String(), "STATUS: NEEDS_SOL_DECISION") || !strings.Contains(emitted.String(), "TARGETS: t") {
+		t.Fatalf("親境界の結果packetへ修正後targetsが伝わっていません: %s", emitted.String())
+	}
+	if strings.Contains(emitted.String(), "TARGETS: none;") {
+		t.Fatalf("none混在targetsが親境界へ流出しています: %s", emitted.String())
+	}
+	taskID, _ := st.TaskID()
+	logs, logErr := st.ReadModelCallLogs(taskID)
+	if logErr != nil {
+		t.Fatal(logErr)
+	}
+	if len(logs) != 2 || logs[0].Outcome != "invalid_packet" || logs[0].PacketRejectReason != "targets-none" {
+		t.Fatalf("telemetry = %#v", logs)
+	}
+}
+
+// NEEDS_SOL_REVIEWのnone要素(1要素でも混在でも)はEVAL契約「none要素拒否」として、
+// waiting-sol-reviewへの遷移と親へ渡るlast-reviewより前に意味検証不合格として
+// 修正再依頼へ置き換わる。具体targets付き再出力だけがSol判断へ流出する。
+func TestNeedsSolReviewNoneElementCorrectsBeforeSolReviewDispatch(t *testing.T) {
+	st := newStateStoreT(t)
+	reviewMixedNone := `{"status":"NEEDS_SOL_REVIEW","risk":"HIGH","summary":"review","requirement_coverage":"covered","invariants":"preserved","test_evidence":"ev","issues":"i","residual_risk":"r","targets":["none","glm-worker/internal/packet/validate.go:validateTargets"],"artifacts":[],"sol_question":"q"}`
+	r := &scriptedRunner{steps: []runnerStep{
+		{output: implementedPacketWithRisk("high risk work", "HIGH")},
+		{structured: reviewMixedNone},
+		{output: needsSolReviewPacket()},
+	}}
+	w := newWorkflowT(t, st, r)
+
+	if err := w.ExecuteNewTask("request"); err != nil {
+		t.Fatal(err)
+	}
+	wantPhases := []string{"worker-new", "reviewer-1", "reviewer-1" + resultCorrectionPhaseSuffix}
+	if strings.Join(r.phases, ",") != strings.Join(wantPhases, ",") {
+		t.Fatalf("phases = %v, want %v", r.phases, wantPhases)
+	}
+	if !strings.Contains(r.prompts[2], "意味検証に不合格") {
+		t.Fatalf("修正再依頼promptが選ばれていません: %s", r.prompts[2])
+	}
+	if st.TaskStatus() != state.TaskStatusWaitingSolReview {
+		t.Fatalf("status = %q want waiting-sol-review", st.TaskStatus())
+	}
+	review := st.ReadOr("last-review", "")
+	if !strings.Contains(review, "TARGETS: t") || strings.Contains(review, "TARGETS: none") {
+		t.Fatalf("Sol境界のreview packetへ正規targetsだけが伝わっていません: %s", review)
+	}
+	taskID, _ := st.TaskID()
+	logs, logErr := st.ReadModelCallLogs(taskID)
+	if logErr != nil {
+		t.Fatal(logErr)
+	}
+	if len(logs) != 3 || logs[1].Outcome != "invalid_packet" || logs[1].PacketRejectReason != "targets-none" {
+		t.Fatalf("telemetry = %#v", logs)
+	}
+	if stats := currentStats(t, st); stats.ResultCorrections != 1 {
+		t.Fatalf("result corrections = %d, stats = %#v", stats.ResultCorrections, stats)
+	}
+}
+
 func TestRiskFloorRejectsPassOnHighRiskWorker(t *testing.T) {
 	st := newStateStoreT(t)
 	r := &scriptedRunner{steps: []runnerStep{

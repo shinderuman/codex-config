@@ -61,7 +61,10 @@ func ValidateWorkerResult(result Result) error {
 		if result.Risk != RiskLow && result.Risk != RiskHigh {
 			return &constraintError{reason: fmt.Sprintf("riskはLOWまたはHIGHで指定してください: %q", string(result.Risk))}
 		}
-		return validateFields(result, workerImplementedFields)
+		if err := validateFields(result, workerImplementedFields); err != nil {
+			return err
+		}
+		return validateTargets(result)
 	case StatusNeedsSolDecision:
 		if result.Risk != RiskHigh {
 			return &constraintError{reason: "NEEDS_SOL_DECISIONのriskはHIGHにしてください"}
@@ -69,7 +72,7 @@ func ValidateWorkerResult(result Result) error {
 		if err := validateFields(result, needsSolDecisionFields); err != nil {
 			return err
 		}
-		return requireTargets(result)
+		return validateTargets(result)
 	default:
 		// status enumはrole別schemaが保証するため、ここへの到達はschema違反でありfail closed対象。
 		return &mismatchError{reason: fmt.Sprintf("worker結果のstatusとして許容されません: %q", string(result.Status))}
@@ -86,7 +89,7 @@ func ValidateReviewerResult(result Result) error {
 		if err := validateFields(result, reviewerFields); err != nil {
 			return err
 		}
-		return requireTargets(result)
+		return validateTargets(result)
 	case StatusFixRequired:
 		if result.Risk != RiskLow && result.Risk != RiskHigh {
 			return &constraintError{reason: fmt.Sprintf("riskはLOWまたはHIGHで指定してください: %q", string(result.Risk))}
@@ -94,7 +97,7 @@ func ValidateReviewerResult(result Result) error {
 		if err := validateFields(result, reviewerFields); err != nil {
 			return err
 		}
-		return requireTargets(result)
+		return validateTargets(result)
 	case StatusNeedsSolReview:
 		if result.Risk != RiskHigh {
 			return &constraintError{reason: "NEEDS_SOL_REVIEWのriskはHIGHにしてください"}
@@ -105,10 +108,7 @@ func ValidateReviewerResult(result Result) error {
 		if strings.TrimSpace(result.SolQuestion) == "" {
 			return &constraintError{reason: "結果に必須field SOL_QUESTIONがありません"}
 		}
-		if len(result.Targets) == 0 || listOnlyNone(result.Targets) {
-			return &constraintError{reason: "NEEDS_SOL_REVIEWのTARGETSはnoneにできません: Solが読むべき最小対象をfile:symbol/行範囲で指定してください"}
-		}
-		return nil
+		return validateTargets(result)
 	default:
 		// status enumはrole別schemaが保証するため、ここへの到達はschema違反でありfail closed対象。
 		return &mismatchError{reason: fmt.Sprintf("reviewer結果のstatusとして許容されません: %q", string(result.Status))}
@@ -145,15 +145,55 @@ func reviewerFields(result Result) []displayField {
 	}
 }
 
-// requireTargetsは旧protocolのstatus別必須field契約(worker NEEDS_SOL_DECISIONとreviewer
-// PASS/FIX_REQUIRED/NEEDS_SOL_REVIEWのすべてでTARGETS行を要求)をtyped結果へ復元する。
-// 空targetsのFIX_REQUIREDはauto-fix promptへ修正対象の所在を伝えられず、空targetsの
-// NEEDS_SOL_DECISIONはSolが現物確認すべき対象を失うため、意味検証で空配列を拒否する。
-// 要素"none"は旧protocolの`TARGETS: none`値(旧WORKER.md「不要ならnone」)に相当するため
-// NEEDS_SOL_DECISION/PASS/FIX_REQUIREDでは許容し、NEEDS_SOL_REVIEWだけlistOnlyNone検査で拒否する。
-func requireTargets(result Result) error {
+// validateTargetsはTARGETS要素の正規形を強制する唯一のpredicateで、worker/reviewer
+// 両roleの全statusが共有する。schema(array of string)で表現できない意味契約をここへ集約する:
+//   - TARGETSを要求するstatus(worker NEEDS_SOL_DECISION・reviewer PASS/FIX_REQUIRED/
+//     NEEDS_SOL_REVIEW)は配列長1以上。IMPLEMENTEDだけ旧契約どおり空配列を許す
+//   - 各要素はTrimSpace後に空ではない(空要素・空白のみ要素の拒否)。具体対象の
+//     外側空白自体は正規形違反としない
+//   - 予約値noneは小文字厳密表現"none"の単独要素だけを対象なしsentinelの正規形とし、
+//     NONE等の大小文字・前後空白variantは全statusで拒否し、具体対象との混在も
+//     全statusで拒否する
+//   - NEEDS_SOL_REVIEWはnone要素を1つでも含めたら拒否する(Solが読む対象を実質失う)
+//   - 予約値PACKETはreviewer FIX_REQUIREDの報告再出力専用(IsReportOnlyFix)で、
+//     大小文字・前後空白variantごと拒否し、厳密表現"PACKET"の単独要素としてだけ許す
+//   - TrimSpace後に同一の要素重複は拒否する
+func validateTargets(result Result) error {
 	if len(result.Targets) == 0 {
+		if result.Status == StatusImplemented {
+			return nil
+		}
 		return &constraintError{reason: fmt.Sprintf("%sのTARGETSは空にできません: Solが読むべき最小対象をfile:symbol/行範囲で指定してください", string(result.Status))}
+	}
+	seen := make(map[string]struct{}, len(result.Targets))
+	hasNone := false
+	for _, element := range result.Targets {
+		trimmed := strings.TrimSpace(element)
+		if trimmed == "" {
+			return &constraintError{reason: "TARGETSの要素は空・空白のみにできません: 具体対象または予約値none/PACKETを指定してください"}
+		}
+		if _, duplicate := seen[trimmed]; duplicate {
+			return &constraintError{reason: "TARGETSの要素が重複しています: 各対象は1回だけ指定してください"}
+		}
+		seen[trimmed] = struct{}{}
+		if strings.EqualFold(trimmed, noneTargetsSentinel) {
+			if element != noneTargetsSentinel {
+				return &constraintError{reason: "TARGETSの予約値noneは小文字厳密表現のnoneだけを要素にできます: 大小文字・空白の変形は使えません"}
+			}
+			hasNone = true
+		}
+		if strings.EqualFold(trimmed, ReportOnlyTargets) &&
+			!(result.Status == StatusFixRequired && element == ReportOnlyTargets && len(result.Targets) == 1) {
+			return &constraintError{reason: "TARGETSの予約値PACKETはFIX_REQUIREDの報告再出力専用です: 実装修正では具体対象を指定してください"}
+		}
+	}
+	if hasNone {
+		if len(result.Targets) > 1 {
+			return &constraintError{reason: "TARGETSの予約値noneは具体対象と混在できません: 対象が概念的なときはnoneだけを要素にしてください"}
+		}
+		if result.Status == StatusNeedsSolReview {
+			return &constraintError{reason: "NEEDS_SOL_REVIEWのTARGETSはnoneにできません: Solが読むべき最小対象をfile:symbol/行範囲で指定してください"}
+		}
 	}
 	return nil
 }
@@ -184,15 +224,6 @@ func validateFields(result Result, fields func(Result) []displayField) error {
 		return &constraintError{reason: fmt.Sprintf("結果全体は%d bytes以内にしてください: %d bytes", MaxPacketBytes, size)}
 	}
 	return nil
-}
-
-func listOnlyNone(values []string) bool {
-	for _, value := range values {
-		if !strings.EqualFold(value, "none") {
-			return false
-		}
-	}
-	return len(values) > 0
 }
 
 // IsReportOnlyFixはreviewer結果が報告再出力専用のTARGETS予約値かを判定する。

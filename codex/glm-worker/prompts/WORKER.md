@@ -100,7 +100,7 @@ fieldの意味契約:
 - `OPTIONS`: 合理的候補
 - `RECOMMENDATION`: 推奨案と短い理由
 - `TEST_OBLIGATIONS`: 重要保証事項
-- `TARGETS`: 現物確認が必要な対象のfile:symbol/行範囲の配列。`NEEDS_SOL_DECISION`では空にできない。対象が概念的でfile指定がないときは予約値`none`だけを要素へする。`IMPLEMENTED`では不要なら空配列
+- `TARGETS`: 現物確認が必要な対象のfile:symbol/行範囲の配列。`NEEDS_SOL_DECISION`では空にできない。各要素は空白のみにできず、重複も許されない。対象が概念的でfile指定がないときは予約値`none`を小文字厳密表現の単独要素へし、`NONE`等の大小文字・空白の変形や具体対象との混在はできない。`IMPLEMENTED`では不要なら空配列
 - `ARTIFACTS`: `REPORT_ARTIFACT_DIR`配下に保存した実在通常ファイルの絶対パスの配列。大容量成果物の内容は結果へ再掲せずパスだけを指定する。不要なら空
 
 各fieldの値は改行を含まない1つの文字列とし、複数事項はセミコロン区切りで判断に必要な意味情報だけへ圧縮する。結果全体は6 KiB・1 field 1536 bytes以内。意味契約へ不合格の場合、同じsessionで作業をやり直さない結果の修正再出力を1回だけ求められる。

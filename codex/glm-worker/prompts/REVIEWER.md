@@ -50,7 +50,7 @@ fieldの意味契約:
 - `TEST_EVIDENCE`: テスト観点と結果要約
 - `ISSUES`: 修正すべき問題。なければnone
 - `RESIDUAL_RISK`: Solが判断すべき残余リスク。なければnone
-- `TARGETS`: Solが読むべき最小file:symbol/行範囲の配列。どのSTATUSでも空にできない。`NEEDS_SOL_REVIEW`では要素へ`none`も使えない。`FIX_REQUIRED`でコード修正不要・報告の意味情報だけ不足のときは予約値`PACKET`だけを要素へする
+- `TARGETS`: Solが読むべき最小file:symbol/行範囲の配列。どのSTATUSでも空にできず、各要素は空白のみにできず重複も許されない。`NEEDS_SOL_REVIEW`では要素へ`none`も使えない。対象が概念的でfile指定がないときは予約値`none`を小文字厳密表現の単独要素へし、`NONE`等の大小文字・空白の変形や具体対象との混在はできない。`FIX_REQUIRED`でコード修正不要・報告の意味情報だけ不足のときは予約値`PACKET`だけを要素へする
 - `ARTIFACTS`: worker報告にある大容量成果物のうち最終結果に必要な絶対パスの配列。内容は結果へ再掲しない。不要なら空
 - `SOL_QUESTION`: `NEEDS_SOL_REVIEW`の場合だけ、Solが最終確認すべき一点。他のSTATUSでは空
 

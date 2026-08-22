@@ -201,7 +201,7 @@ func TestValidateReviewerResultRejections(t *testing.T) {
 			r.Risk = RiskHigh
 			r.SolQuestion = "q"
 			r.Targets = nil
-		}, "TARGETSはnone", false},
+		}, "TARGETSは空", false},
 		{"sol review none target", func(r *Result) {
 			r.Status = StatusNeedsSolReview
 			r.Risk = RiskHigh

@@ -81,7 +81,8 @@ func riskProperty() *propertySchema {
 // targetsをrequiredへ含め、旧protocolがNEEDS_SOL_DECISIONで要求したTARGETS行の存在を
 // schema側でも保証する。schemaはrole共通のためIMPLEMENTEDもkeyの放出を求められるが、
 // status別requiredはcomposition未検証語彙なしでは表現できず、旧IMPLEMENTED(対象なし)は
-// 空配列で表現する。空配列のNEEDS_SOL_DECISION拒否・risk整合はValidateWorkerResultが担う
+// 空配列で表現する。空配列のNEEDS_SOL_DECISION拒否・risk整合・要素正規形は
+// ValidateWorkerResultの共有targets predicateが担う
 // (minItemsは実provider成立性が未検証の語彙のため使わない)。
 func workerSchema() *objectSchema {
 	return &objectSchema{
@@ -107,8 +108,8 @@ func workerSchema() *objectSchema {
 
 // reviewerSchemaは独立reviewer・risk floor再出力呼出のschema。targetsをrequiredへ含め、
 // 旧protocolが全reviewer STATUSで要求したTARGETS行の存在をschema側でも保証する。
-// 空配列の拒否とNEEDS_SOL_REVIEWのnone拒否はValidateReviewerResultが担う
-// (minItemsは実provider成立性が未検証の語彙のため使わない)。
+// 空配列の拒否・要素正規形・NEEDS_SOL_REVIEWのnone拒否はValidateReviewerResultの
+// 共有targets predicateが担う(minItemsは実provider成立性が未検証の語彙のため使わない)。
 func reviewerSchema() *objectSchema {
 	return &objectSchema{
 		Type: schemaTypeObject,

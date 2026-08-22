@@ -9,8 +9,9 @@ import (
 
 // 必須fieldの意味対応は、旧text protocolのstatus別requiredFields(packet.go@22c1d0b^)を
 // typed結果契約へ写したものである。TARGETSを要求した4 STATUS(worker NEEDS_SOL_DECISIONと
-// reviewer PASS/FIX_REQUIRED/NEEDS_SOL_REVIEW)すべてで非空を要求し、旧WORKER.mdの
-// 「不要ならnone」sentinelは要素"none"として維持する。IMPLEMENTEDだけ旧契約どおり対象なしを許す。
+// reviewer PASS/FIX_REQUIRED/NEEDS_SOL_REVIEW)すべてで配列長1以上を要求し、旧WORKER.mdの
+// 「不要ならnone」sentinelは小文字厳密表現"none"の単独要素だけを正規形とする。
+// IMPLEMENTEDだけ旧契約どおり対象なし(空配列)を許す。
 type requiredFieldCase struct {
 	key   string
 	blank func(*Result)
@@ -123,7 +124,7 @@ func statusContracts() []statusContract {
 				{"TEST_EVIDENCE", func(r *Result) { r.TestEvidence = "" }, "必須field TEST_EVIDENCE", false},
 				{"ISSUES", func(r *Result) { r.Issues = "" }, "必須field ISSUES", false},
 				{"RESIDUAL_RISK", func(r *Result) { r.ResidualRisk = "" }, "必須field RESIDUAL_RISK", false},
-				{"TARGETS", func(r *Result) { r.Targets = nil }, "TARGETSはnone", false},
+				{"TARGETS", func(r *Result) { r.Targets = nil }, "TARGETSは空", false},
 				{"SOL_QUESTION", func(r *Result) { r.SolQuestion = "" }, "必須field SOL_QUESTION", false},
 			},
 		},
@@ -179,6 +180,135 @@ func TestWorkerDecisionTargetsNoneSentinel(t *testing.T) {
 	}
 	if err := ValidateWorkerResult(decision); err != nil {
 		t.Fatalf("予約値none要素のNEEDS_SOL_DECISIONは旧契約どおり有効: %v", err)
+	}
+}
+
+// targetsElementCaseはTARGETS受理集合の要素表現1件。旧text protocolの
+// 「field値が非空」をtyped arrayへ写す際、配列長だけでなく要素内容まで比較する。
+type targetsElementCase struct {
+	name    string
+	targets []string
+	accept  bool
+	// wantRejectSubstringは拒否時の理由文。受理期待caseでは空。
+	wantRejectSubstring string
+}
+
+// sharedTargetsElementCasesはstatus非依存の要素正規形。予約値の扱いだけ
+// status別契約(validators側のtable)へ差し込む。
+func sharedTargetsElementCases() []targetsElementCase {
+	return []targetsElementCase{
+		{name: "empty element", targets: []string{""}, accept: false, wantRejectSubstring: "空・空白のみ"},
+		{name: "whitespace element", targets: []string{"   "}, accept: false, wantRejectSubstring: "空・空白のみ"},
+		{name: "blank among concrete", targets: []string{"a.go:10", " "}, accept: false, wantRejectSubstring: "空・空白のみ"},
+		{name: "concrete single", targets: []string{"glm-worker/internal/packet/validate.go:validateTargets"}, accept: true},
+		{name: "concrete multiple", targets: []string{"a.go:10", "b.go:20"}, accept: true},
+		{name: "padded concrete", targets: []string{" a.go:10 "}, accept: true},
+		{name: "duplicate", targets: []string{"a.go:10", "a.go:10"}, accept: false, wantRejectSubstring: "重複"},
+		{name: "duplicate after trim", targets: []string{"a.go:10", " a.go:10"}, accept: false, wantRejectSubstring: "重複"},
+		// 重複拒否理由へ要素文字列を埋め込まないため、artifact等の集計keywordを含む
+		// 要素でもRejectCategoryはtargets-noneのまま保たれる。
+		{name: "duplicate artifacts-like element", targets: []string{"artifact.go:10", "artifact.go:10"}, accept: false, wantRejectSubstring: "重複"},
+		{name: "mixed none", targets: []string{"none", "glm-worker/internal/foo.go:10"}, accept: false, wantRejectSubstring: "混在"},
+		{name: "none case variant sole", targets: []string{"NONE"}, accept: false, wantRejectSubstring: "厳密表現"},
+		{name: "none title case variant", targets: []string{"None"}, accept: false, wantRejectSubstring: "厳密表現"},
+		{name: "padded none", targets: []string{" none "}, accept: false, wantRejectSubstring: "厳密表現"},
+		{name: "mixed none case variant", targets: []string{"glm-worker/internal/foo.go:10", "NONE"}, accept: false, wantRejectSubstring: "厳密表現"},
+	}
+}
+
+// TestTargetsElementAcceptanceByStatusはworker/reviewer全statusのTARGETS受理集合を
+// 同一の要素表現tableへ通して比較する。EVAL文言「NEEDS_SOL_REVIEWのnone要素拒否」は
+// all-noneだけでなく1要素でも含めた拒否として実装側と一致させる。
+func TestTargetsElementAcceptanceByStatus(t *testing.T) {
+	validTargets := []string{"glm-worker/internal/packet/validate.go:validateTargets"}
+	statuses := []struct {
+		name      string
+		valid     Result
+		validate  func(Result) error
+		empty     bool
+		noneSole  bool
+		packetFix bool
+	}{
+		{name: "worker IMPLEMENTED", valid: implementedResult(), validate: ValidateWorkerResult, empty: true, noneSole: true},
+		{
+			name: "worker NEEDS_SOL_DECISION",
+			valid: Result{
+				Status:          StatusNeedsSolDecision,
+				Risk:            RiskHigh,
+				Decision:        "d",
+				Evidence:        "e",
+				Options:         "o",
+				Recommendation:  "r",
+				TestObligations: "t",
+				Targets:         validTargets,
+			},
+			validate: ValidateWorkerResult,
+			noneSole: true,
+		},
+		{name: "reviewer PASS", valid: passResult(), validate: ValidateReviewerResult, noneSole: true},
+		{
+			name: "reviewer FIX_REQUIRED",
+			valid: func() Result {
+				fix := passResult()
+				fix.Status = StatusFixRequired
+				fix.Risk = RiskHigh
+				return fix
+			}(),
+			validate:  ValidateReviewerResult,
+			noneSole:  true,
+			packetFix: true,
+		},
+		{
+			name: "reviewer NEEDS_SOL_REVIEW",
+			valid: func() Result {
+				review := passResult()
+				review.Status = StatusNeedsSolReview
+				review.Risk = RiskHigh
+				review.SolQuestion = "q"
+				return review
+			}(),
+			validate: ValidateReviewerResult,
+		},
+	}
+	for _, status := range statuses {
+		t.Run(status.name, func(t *testing.T) {
+			if err := status.validate(status.valid); err != nil {
+				t.Fatalf("正例が拒否されました: %v", err)
+			}
+			cases := sharedTargetsElementCases()
+			cases = append(cases,
+				targetsElementCase{name: "empty array", targets: nil, accept: status.empty, wantRejectSubstring: "TARGETSは空"},
+				targetsElementCase{name: "none sole", targets: []string{"none"}, accept: status.noneSole, wantRejectSubstring: "TARGETSはnone"},
+				targetsElementCase{name: "PACKET sole", targets: []string{"PACKET"}, accept: status.packetFix, wantRejectSubstring: "PACKET"},
+				targetsElementCase{name: "PACKET case variant", targets: []string{"packet"}, accept: false, wantRejectSubstring: "PACKET"},
+				targetsElementCase{name: "PACKET mixed", targets: []string{"PACKET", "a.go:10"}, accept: false, wantRejectSubstring: "PACKET"},
+			)
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					mutated := status.valid
+					mutated.Targets = c.targets
+					err := status.validate(mutated)
+					if c.accept {
+						if err != nil {
+							t.Fatalf("受理期待のtargets %qが拒否されました: %v", c.targets, err)
+						}
+						return
+					}
+					if err == nil {
+						t.Fatalf("拒否期待のtargets %qが受理されました", c.targets)
+					}
+					if !IsConstraintError(err) {
+						t.Fatalf("error must be constraint, got %v", err)
+					}
+					if !strings.Contains(err.Error(), c.wantRejectSubstring) {
+						t.Fatalf("err = %q, want substring %q", err.Error(), c.wantRejectSubstring)
+					}
+					if category := RejectCategory(err); category != "targets-none" {
+						t.Fatalf("category = %q, want targets-none (%v)", category, err)
+					}
+				})
+			}
+		})
 	}
 }
 

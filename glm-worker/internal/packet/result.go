@@ -43,6 +43,10 @@ const (
 // 報告再出力をこの値だけで機械識別する。
 const ReportOnlyTargets = "PACKET"
 
+// noneTargetsSentinelは「対象が概念的でfile targetがない」ことを表す旧WORKER.md
+// 「不要ならnone」由来のTARGETS予約値。小文字厳密表現の単独要素としてだけ使用できる。
+const noneTargetsSentinel = "none"
+
 // Resultは1回のmodel呼出が返すtyped結果。worker/reviewer両roleで同じ構造を持ち、
 // statusenumと意味検証でrole契約を強制する。未知の意味問題は各free text fieldへ
 // 残り、構造はschemaとこの型が固定する。
@@ -247,7 +251,7 @@ func FromDisplayLines(lines []string) (Result, error) {
 
 // splitDisplayListは表示のセミコロン区切りを配列へ戻す。"none"・空は要素なし扱い。
 func splitDisplayList(value string) []string {
-	if value == "" || value == "none" {
+	if value == "" || value == noneTargetsSentinel {
 		return nil
 	}
 	parts := strings.Split(value, ";")
