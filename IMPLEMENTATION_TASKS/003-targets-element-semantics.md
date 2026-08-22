@@ -2,7 +2,7 @@
 
 ## Status
 
-planned
+active
 
 ## Original instruction
 
@@ -167,7 +167,7 @@ typed arrayへの移行で「非空field」を配列長だけへ誤写像したa
 
 ## Dependencies
 
-- `IMPLEMENTATION_TASKS/001-requirement-task-lifecycle.md`
+- none（Task 001 requirement/task lifecycleは完了しHistoryへ移行済み）
 
 ## Review findings
 
@@ -175,4 +175,4 @@ typed arrayへの移行で「非空field」を配列長だけへ誤写像したa
 
 ## Current boundary
 
-未着手。外部review `4cedc91..ce86313`で再open。
+ACTIVEへ昇格。外部review `4cedc91..ce86313`で再openしたTARGETS element semanticのproduction修正は未着手。

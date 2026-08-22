@@ -25,6 +25,7 @@ ZIPからでも同じで、任意の場所へ展開して`./install.sh`を実行
 バックアップは作成しない。
 
 管理ファイルを変更する前に、`glm-worker`とJSON merge toolのtest/buildをpreflightとして実行する。preflight失敗時は管理ファイルを更新しない。
+`IMPLEMENTATION_PLAN.local.md`をGit管理するrepositoryでは、preflight前にfinal HEADのplanがfinal HEAD postcondition(ACTIVE/NEXT/task fileのHEAD tree存在・Git境界・過渡表現なし)を満たしていることを検証し、失敗時は配置を行わない。
 install完了後、既に開いているCodexタスクが`AGENTS.md`を再読込する保証はない。ルール反映を保証するには新しいCodexタスクを開始する。
 
 ## 2回目以降

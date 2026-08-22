@@ -149,6 +149,41 @@ func TestResolveActiveTaskPathMatrix(t *testing.T) {
 			wantErrPart: "regular fileではありません",
 		},
 		{
+			name: "unclosed backtick rejected",
+			plan: func(t *testing.T, repoRoot string) {
+				writePlanWithActive(t, repoRoot, "## ACTIVE\n\n- `IMPLEMENTATION_TASKS/001-a.md\n")
+				writeTaskFileAtPath(t, repoRoot, "IMPLEMENTATION_TASKS/001-a.md")
+			},
+			wantWired:   true,
+			wantErrPart: "bullet構文",
+		},
+		{
+			name: "text after closing backtick rejected",
+			plan: func(t *testing.T, repoRoot string) {
+				writePlanWithActive(t, repoRoot, "## ACTIVE\n\n- `IMPLEMENTATION_TASKS/001-a.md` (次task)\n")
+				writeTaskFileAtPath(t, repoRoot, "IMPLEMENTATION_TASKS/001-a.md")
+			},
+			wantWired:   true,
+			wantErrPart: "bullet構文",
+		},
+		{
+			name: "text before opening backtick rejected",
+			plan: func(t *testing.T, repoRoot string) {
+				writePlanWithActive(t, repoRoot, "## ACTIVE\n\n- see `IMPLEMENTATION_TASKS/001-a.md`\n")
+				writeTaskFileAtPath(t, repoRoot, "IMPLEMENTATION_TASKS/001-a.md")
+			},
+			wantWired:   true,
+			wantErrPart: "bullet構文",
+		},
+		{
+			name: "multiple backtick pairs rejected",
+			plan: func(t *testing.T, repoRoot string) {
+				writePlanWithActive(t, repoRoot, "## ACTIVE\n\n- `IMPLEMENTATION_TASKS/001-a.md` `IMPLEMENTATION_TASKS/002-b.md`\n")
+			},
+			wantWired:   true,
+			wantErrPart: "bullet構文",
+		},
+		{
 			name: "symlink target rejected",
 			plan: func(t *testing.T, repoRoot string) {
 				// repository外の実fileへ向くsymlinkを要求正本にできない。os.Statは辿って

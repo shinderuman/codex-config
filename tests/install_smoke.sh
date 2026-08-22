@@ -612,4 +612,465 @@ if ! cmp -s "$broken_state_case/state-before.json" "$state_file"; then
     exit 1
 fi
 
+# tracked canonical planのfinal HEAD postcondition gate。
+# 同期amendを飛ばした4cedc91型stale HEAD plan・削除済み/欠損ACTIVE task file参照・NEXTの
+# 削除済み参照・NEXT/ACTIVEのtask path契約違反・閉じbacktick欠損等のmalformed bullet・
+# ACTIVE重複・Git境界branch不一致は、go test/build・binary配置・managed files配置よりも
+# 前にfail closedし、呼出・配置が一切起きないことを固定する。過渡表現の正当な
+# amend後/uninstall前記述は通過させる。
+make_plan_gate_repo() {
+    source_dir=$1
+    copy_source "$source_dir"
+    git -C "$source_dir" init -q -b main
+    git -C "$source_dir" config user.email t@example.com
+    git -C "$source_dir" config user.name tester
+    chmod 0644 "$source_dir/.githooks/post-merge"
+    mkdir -p "$source_dir/IMPLEMENTATION_TASKS"
+    printf '%s\n' '# Task: next' >"$source_dir/IMPLEMENTATION_TASKS/next-task.md"
+    printf '%s\n' '# Task: future' >"$source_dir/IMPLEMENTATION_TASKS/future-task.md"
+}
+
+commit_plan_gate_repo() {
+    git_dir=$1
+    git -C "$git_dir" add -A
+    git -C "$git_dir" commit -qm 'feat: task complete'
+}
+
+write_plan_gate_plan() {
+    plan_dir=$1
+    active_task=$2
+    next_tasks=$3
+    boundary_branch=$4
+    stop_reason=$5
+    next_operation=$6
+
+    cat >"$plan_dir/IMPLEMENTATION_PLAN.local.md" <<EOF
+# 実装index
+
+## ACTIVE
+
+- \`$active_task\`
+
+## NEXT（優先順）
+$next_tasks
+
+## 現在のGit境界
+
+- branch: \`$boundary_branch\`
+- implementation baseline: 前task completion commit（current HEAD）
+- metadata boundary: 前taskをHistoryへ移行してtask fileを削除し、次taskをACTIVEへ昇格
+- push: 禁止
+
+## 現在の停止理由
+
+$stop_reason
+
+## 次の親Codex操作
+
+$next_operation
+EOF
+}
+
+write_plan_gate_synced() {
+    write_plan_gate_plan "$1" \
+        'IMPLEMENTATION_TASKS/next-task.md' \
+        '- `IMPLEMENTATION_TASKS/future-task.md`' \
+        'main' \
+        '前taskは完了。next-taskの開始前。' \
+        'next-taskの要件を確認してGLM workerへ委譲する。'
+}
+
+expect_plan_gate_failure() {
+    label=$1
+    source_dir=$2
+    case_dir=$3
+    shim_dir=$4
+    log_file=$5
+    expected_reason=$6
+
+    mkdir -p "$case_dir/codex" "$case_dir/claude"
+    printf '%s\n' 'gate-sentinel' >"$case_dir/codex/AGENTS.md"
+
+    if run_installer "$source_dir" "$case_dir" "$shim_dir" >"$log_file" 2>&1; then
+        printf '%s\n' "plan gate失敗($label)時にinstall.shが成功しました" >&2
+        exit 1
+    fi
+
+    test "$(sed -n '1p' "$case_dir/codex/AGENTS.md")" = 'gate-sentinel'
+    test ! -f "$shim_dir/invocations.log"
+    test ! -e "$case_dir/bin"
+    test ! -e "$case_dir/codex/config.toml"
+    test ! -e "$case_dir/codex/.codex-config-managed-files"
+    test ! -e "$case_dir/claude/settings.json"
+    test ! -d "$case_dir/glm-home"
+    test ! -x "$source_dir/.githooks/post-merge"
+    if git -C "$source_dir" config --local --get core.hooksPath >/dev/null 2>&1; then
+        printf '%s\n' "plan gate失敗($label)時にgit hookを有効化しました" >&2
+        exit 1
+    fi
+    grep -Fq "$expected_reason" "$log_file"
+}
+
+# 4cedc91型stale HEAD。完了済みcommitの同期amendを飛ばし、停止理由・次の親Codex操作が
+# amend直前・install前の過渡表現を残したplanをfinal HEADへcommitしている。
+stale_source="$test_root/plan-gate-stale-source"
+stale_case="$test_root/plan-gate-stale-case"
+stale_shim="$test_root/plan-gate-stale-shim"
+make_plan_gate_repo "$stale_source"
+write_plan_gate_plan "$stale_source" \
+    'IMPLEMENTATION_TASKS/next-task.md' \
+    '- `IMPLEMENTATION_TASKS/future-task.md`' \
+    'main' \
+    '前taskの実装・test・review・commitは完了したが、plan/historyの同期を同一commitへamendする直前。' \
+    'amend後に`install.sh`で本配置と一致を確認し、next-taskを開始する。'
+commit_plan_gate_repo "$stale_source"
+make_go_shim "$stale_shim" ''
+expect_plan_gate_failure '4cedc91型stale HEAD' \
+    "$stale_source" "$stale_case" "$stale_shim" \
+    "$test_root/plan-gate-stale.log" \
+    '現在状態記述が完了済みcommitの操作を未実施としています'
+
+# 完了task fileを削除したcommit後もplanがACTIVE参照を残している削除済みACTIVE。
+deleted_active_source="$test_root/plan-gate-deleted-active-source"
+deleted_active_case="$test_root/plan-gate-deleted-active-case"
+deleted_active_shim="$test_root/plan-gate-deleted-active-shim"
+make_plan_gate_repo "$deleted_active_source"
+write_plan_gate_synced "$deleted_active_source"
+commit_plan_gate_repo "$deleted_active_source"
+git -C "$deleted_active_source" rm -q IMPLEMENTATION_TASKS/next-task.md
+git -C "$deleted_active_source" commit -qm 'chore: remove completed task'
+make_go_shim "$deleted_active_shim" ''
+expect_plan_gate_failure '削除済みACTIVE参照' \
+    "$deleted_active_source" "$deleted_active_case" "$deleted_active_shim" \
+    "$test_root/plan-gate-deleted-active.log" \
+    'IMPLEMENTATION_TASKS/next-task.md がHEAD treeへregular fileとして存在しません'
+
+# ACTIVE欄がHEAD treeに存在しないtask fileを指す欠損ACTIVE file。
+missing_active_source="$test_root/plan-gate-missing-active-source"
+missing_active_case="$test_root/plan-gate-missing-active-case"
+missing_active_shim="$test_root/plan-gate-missing-active-shim"
+make_plan_gate_repo "$missing_active_source"
+write_plan_gate_plan "$missing_active_source" \
+    'IMPLEMENTATION_TASKS/ghost-task.md' \
+    '- `IMPLEMENTATION_TASKS/future-task.md`' \
+    'main' \
+    '前taskは完了。ghost-taskの開始前。' \
+    'ghost-taskの要件を確認してGLM workerへ委譲する。'
+commit_plan_gate_repo "$missing_active_source"
+make_go_shim "$missing_active_shim" ''
+expect_plan_gate_failure '欠損ACTIVE file' \
+    "$missing_active_source" "$missing_active_case" "$missing_active_shim" \
+    "$test_root/plan-gate-missing-active.log" \
+    'IMPLEMENTATION_TASKS/ghost-task.md がHEAD treeへregular fileとして存在しません'
+
+# NEXTが削除済みtask fileを参照している場合も同じpostcondition違反として拒否する。
+next_missing_source="$test_root/plan-gate-next-missing-source"
+next_missing_case="$test_root/plan-gate-next-missing-case"
+next_missing_shim="$test_root/plan-gate-next-missing-shim"
+make_plan_gate_repo "$next_missing_source"
+write_plan_gate_plan "$next_missing_source" \
+    'IMPLEMENTATION_TASKS/next-task.md' \
+    '- `IMPLEMENTATION_TASKS/vanished-task.md`' \
+    'main' \
+    '前taskは完了。next-taskの開始前。' \
+    'next-taskの要件を確認してGLM workerへ委譲する。'
+commit_plan_gate_repo "$next_missing_source"
+make_go_shim "$next_missing_shim" ''
+expect_plan_gate_failure 'NEXTの削除済み参照' \
+    "$next_missing_source" "$next_missing_case" "$next_missing_shim" \
+    "$test_root/plan-gate-next-missing.log" \
+    'IMPLEMENTATION_TASKS/vanished-task.md がHEAD treeへregular fileとして存在しません'
+
+# NEXTのbulletがtask pathへ解決できない場合もfail closedする。認識できないbulletを
+# 黙って無視するとinvalid scheduled entryを含むHEADがgateを通過する。
+next_garbage_source="$test_root/plan-gate-next-garbage-source"
+next_garbage_case="$test_root/plan-gate-next-garbage-case"
+next_garbage_shim="$test_root/plan-gate-next-garbage-shim"
+make_plan_gate_repo "$next_garbage_source"
+write_plan_gate_plan "$next_garbage_source" \
+    'IMPLEMENTATION_TASKS/next-task.md' \
+    '- garbage' \
+    'main' \
+    '前taskは完了。next-taskの開始前。' \
+    'next-taskの要件を確認してGLM workerへ委譲する。'
+commit_plan_gate_repo "$next_garbage_source"
+make_go_shim "$next_garbage_shim" ''
+expect_plan_gate_failure 'NEXT非task項目' \
+    "$next_garbage_source" "$next_garbage_case" "$next_garbage_shim" \
+    "$test_root/plan-gate-next-garbage.log" \
+    'NEXT/BLOCKED欄にtask pathへ解決できない項目があります: garbage'
+
+# NEXTのbulletが配置契約外のpathを指す場合も同じfail closedで拒否する。
+next_outside_source="$test_root/plan-gate-next-outside-source"
+next_outside_case="$test_root/plan-gate-next-outside-case"
+next_outside_shim="$test_root/plan-gate-next-outside-shim"
+make_plan_gate_repo "$next_outside_source"
+write_plan_gate_plan "$next_outside_source" \
+    'IMPLEMENTATION_TASKS/next-task.md' \
+    '- `tasks/future-task.md`' \
+    'main' \
+    '前taskは完了。next-taskの開始前。' \
+    'next-taskの要件を確認してGLM workerへ委譲する。'
+commit_plan_gate_repo "$next_outside_source"
+make_go_shim "$next_outside_shim" ''
+expect_plan_gate_failure 'NEXT配置契約外path' \
+    "$next_outside_source" "$next_outside_case" "$next_outside_shim" \
+    "$test_root/plan-gate-next-outside.log" \
+    'NEXT/BLOCKED欄にtask pathへ解決できない項目があります: tasks/future-task.md'
+
+# ACTIVE欄自体が配置契約外のpathを指す場合も共通task path契約で拒否する。
+active_outside_source="$test_root/plan-gate-active-outside-source"
+active_outside_case="$test_root/plan-gate-active-outside-case"
+active_outside_shim="$test_root/plan-gate-active-outside-shim"
+make_plan_gate_repo "$active_outside_source"
+write_plan_gate_plan "$active_outside_source" \
+    'tasks/next-task.md' \
+    '- `IMPLEMENTATION_TASKS/future-task.md`' \
+    'main' \
+    '前taskは完了。next-taskの開始前。' \
+    'next-taskの要件を確認してGLM workerへ委譲する。'
+commit_plan_gate_repo "$active_outside_source"
+make_go_shim "$active_outside_shim" ''
+expect_plan_gate_failure 'ACTIVE配置契約違反' \
+    "$active_outside_source" "$active_outside_case" "$active_outside_shim" \
+    "$test_root/plan-gate-active-outside.log" \
+    'ACTIVE欄がtask path契約(IMPLEMENTATION_TASKS/配下の.md・配置契約準拠)へ違反しています: tasks/next-task.md'
+
+# 閉じbacktickのないbulletはruntime抽出とinstaller抽出の受理集合を揃えるため、
+# ACTIVE/NEXT/BLOCKEDすべてでmalformedとしてfail closedする。
+active_unclosed_source="$test_root/plan-gate-active-unclosed-source"
+active_unclosed_case="$test_root/plan-gate-active-unclosed-case"
+active_unclosed_shim="$test_root/plan-gate-active-unclosed-shim"
+make_plan_gate_repo "$active_unclosed_source"
+write_plan_gate_plan "$active_unclosed_source" \
+    'IMPLEMENTATION_TASKS/next-task.md' \
+    '- `IMPLEMENTATION_TASKS/future-task.md`' \
+    'main' \
+    '前taskは完了。next-taskの開始前。' \
+    'next-taskの要件を確認してGLM workerへ委譲する。'
+sed -e 's/^- `IMPLEMENTATION_TASKS\/next-task.md`$/- `IMPLEMENTATION_TASKS\/next-task.md/' \
+    "$active_unclosed_source/IMPLEMENTATION_PLAN.local.md" >"$active_unclosed_source/plan.tmp"
+mv "$active_unclosed_source/plan.tmp" "$active_unclosed_source/IMPLEMENTATION_PLAN.local.md"
+commit_plan_gate_repo "$active_unclosed_source"
+make_go_shim "$active_unclosed_shim" ''
+expect_plan_gate_failure 'ACTIVE閉じbacktick欠損' \
+    "$active_unclosed_source" "$active_unclosed_case" "$active_unclosed_shim" \
+    "$test_root/plan-gate-active-unclosed.log" \
+    'ACTIVE欄にbullet構文(逆引用符1組で囲まれた単一task path、または逆引用符なしの直書き)へ違反している項目があります'
+
+# 閉じbacktickの後ろに余分なtextがあればmalformedとして拒否する。
+active_suffix_source="$test_root/plan-gate-active-suffix-source"
+active_suffix_case="$test_root/plan-gate-active-suffix-case"
+active_suffix_shim="$test_root/plan-gate-active-suffix-shim"
+make_plan_gate_repo "$active_suffix_source"
+write_plan_gate_plan "$active_suffix_source" \
+    'IMPLEMENTATION_TASKS/next-task.md` (次task)' \
+    '- `IMPLEMENTATION_TASKS/future-task.md`' \
+    'main' \
+    '前taskは完了。next-taskの開始前。' \
+    'next-taskの要件を確認してGLM workerへ委譲する。'
+commit_plan_gate_repo "$active_suffix_source"
+make_go_shim "$active_suffix_shim" ''
+expect_plan_gate_failure 'ACTIVE余分なsuffix' \
+    "$active_suffix_source" "$active_suffix_case" "$active_suffix_shim" \
+    "$test_root/plan-gate-active-suffix.log" \
+    'ACTIVE欄にbullet構文(逆引用符1組で囲まれた単一task path、または逆引用符なしの直書き)へ違反している項目があります'
+
+# 複数backtick組もmalformedとして拒否する。
+active_multi_source="$test_root/plan-gate-active-multi-source"
+active_multi_case="$test_root/plan-gate-active-multi-case"
+active_multi_shim="$test_root/plan-gate-active-multi-shim"
+make_plan_gate_repo "$active_multi_source"
+write_plan_gate_plan "$active_multi_source" \
+    'IMPLEMENTATION_TASKS/next-task.md` `IMPLEMENTATION_TASKS/future-task.md' \
+    '- `IMPLEMENTATION_TASKS/future-task.md`' \
+    'main' \
+    '前taskは完了。next-taskの開始前。' \
+    'next-taskの要件を確認してGLM workerへ委譲する。'
+commit_plan_gate_repo "$active_multi_source"
+make_go_shim "$active_multi_shim" ''
+expect_plan_gate_failure 'ACTIVE複数backtick組' \
+    "$active_multi_source" "$active_multi_case" "$active_multi_shim" \
+    "$test_root/plan-gate-active-multi.log" \
+    'ACTIVE欄にbullet構文(逆引用符1組で囲まれた単一task path、または逆引用符なしの直書き)へ違反している項目があります'
+
+# NEXTの閉じbacktick欠損も同じmalformed拒否へ流れる。
+next_unclosed_source="$test_root/plan-gate-next-unclosed-source"
+next_unclosed_case="$test_root/plan-gate-next-unclosed-case"
+next_unclosed_shim="$test_root/plan-gate-next-unclosed-shim"
+make_plan_gate_repo "$next_unclosed_source"
+write_plan_gate_plan "$next_unclosed_source" \
+    'IMPLEMENTATION_TASKS/next-task.md' \
+    '- `IMPLEMENTATION_TASKS/future-task.md' \
+    'main' \
+    '前taskは完了。next-taskの開始前。' \
+    'next-taskの要件を確認してGLM workerへ委譲する。'
+commit_plan_gate_repo "$next_unclosed_source"
+make_go_shim "$next_unclosed_shim" ''
+expect_plan_gate_failure 'NEXT閉じbacktick欠損' \
+    "$next_unclosed_source" "$next_unclosed_case" "$next_unclosed_shim" \
+    "$test_root/plan-gate-next-unclosed.log" \
+    'NEXT/BLOCKED欄にbullet構文(逆引用符1組で囲まれた単一task path、または逆引用符なしの直書き)へ違反している項目があります'
+
+# BLOCKED欄の閉じbacktick欠損も同じmalformed拒否へ流れる。
+blocked_unclosed_source="$test_root/plan-gate-blocked-unclosed-source"
+blocked_unclosed_case="$test_root/plan-gate-blocked-unclosed-case"
+blocked_unclosed_shim="$test_root/plan-gate-blocked-unclosed-shim"
+make_plan_gate_repo "$blocked_unclosed_source"
+write_plan_gate_plan "$blocked_unclosed_source" \
+    'IMPLEMENTATION_TASKS/next-task.md' \
+    '- `IMPLEMENTATION_TASKS/future-task.md`' \
+    'main' \
+    '前taskは完了。next-taskの開始前。' \
+    'next-taskの要件を確認してGLM workerへ委譲する。'
+printf '\n## BLOCKED / USER_PERMISSION_WAIT\n\n- `IMPLEMENTATION_TASKS/future-task.md\n' \
+    >>"$blocked_unclosed_source/IMPLEMENTATION_PLAN.local.md"
+commit_plan_gate_repo "$blocked_unclosed_source"
+make_go_shim "$blocked_unclosed_shim" ''
+expect_plan_gate_failure 'BLOCKED閉じbacktick欠損' \
+    "$blocked_unclosed_source" "$blocked_unclosed_case" "$blocked_unclosed_shim" \
+    "$test_root/plan-gate-blocked-unclosed.log" \
+    'NEXT/BLOCKED欄にbullet構文(逆引用符1組で囲まれた単一task path、または逆引用符なしの直書き)へ違反している項目があります'
+
+# NEXT昇格を忘れて完了済みACTIVE taskをNEXTへ残す重複記載。
+active_dup_source="$test_root/plan-gate-active-dup-source"
+active_dup_case="$test_root/plan-gate-active-dup-case"
+active_dup_shim="$test_root/plan-gate-active-dup-shim"
+make_plan_gate_repo "$active_dup_source"
+write_plan_gate_plan "$active_dup_source" \
+    'IMPLEMENTATION_TASKS/next-task.md' \
+    '- `IMPLEMENTATION_TASKS/next-task.md`
+- `IMPLEMENTATION_TASKS/future-task.md`' \
+    'main' \
+    '前taskは完了。next-taskの開始前。' \
+    'next-taskの要件を確認してGLM workerへ委譲する。'
+commit_plan_gate_repo "$active_dup_source"
+make_go_shim "$active_dup_shim" ''
+expect_plan_gate_failure 'ACTIVE重複記載' \
+    "$active_dup_source" "$active_dup_case" "$active_dup_shim" \
+    "$test_root/plan-gate-active-dup.log" \
+    'IMPLEMENTATION_TASKS/next-task.md がNEXT/BLOCKEDへ重複して記載されています'
+
+# PlanのGit境界branchがHEADの実際のbranchと矛盾している場合を拒否する。
+branch_mismatch_source="$test_root/plan-gate-branch-mismatch-source"
+branch_mismatch_case="$test_root/plan-gate-branch-mismatch-case"
+branch_mismatch_shim="$test_root/plan-gate-branch-mismatch-shim"
+make_plan_gate_repo "$branch_mismatch_source"
+write_plan_gate_plan "$branch_mismatch_source" \
+    'IMPLEMENTATION_TASKS/next-task.md' \
+    '- `IMPLEMENTATION_TASKS/future-task.md`' \
+    'feature-x' \
+    '前taskは完了。next-taskの開始前。' \
+    'next-taskの要件を確認してGLM workerへ委譲する。'
+commit_plan_gate_repo "$branch_mismatch_source"
+make_go_shim "$branch_mismatch_shim" ''
+expect_plan_gate_failure 'HEAD境界不一致' \
+    "$branch_mismatch_source" "$branch_mismatch_case" "$branch_mismatch_shim" \
+    "$test_root/plan-gate-branch-mismatch.log" \
+    'Git境界branch feature-xが現在のbranch(main)と矛盾しています'
+
+# amend失敗(pre-commit hook拒否)でHEADがstaleのまま残ってもgateは拒否し続け、
+# 同期済みplanへの同一commit復旧amendだけで通過する。
+amend_fail_source="$test_root/plan-gate-amend-fail-source"
+amend_fail_case="$test_root/plan-gate-amend-fail-case"
+amend_fail_shim="$test_root/plan-gate-amend-fail-shim"
+make_plan_gate_repo "$amend_fail_source"
+write_plan_gate_plan "$amend_fail_source" \
+    'IMPLEMENTATION_TASKS/next-task.md' \
+    '- `IMPLEMENTATION_TASKS/future-task.md`' \
+    'main' \
+    '前taskの実装・test・review・commitは完了したが、plan/historyの同期を同一commitへamendする直前。' \
+    'amend後に`install.sh`で本配置と一致を確認し、next-taskを開始する。'
+commit_plan_gate_repo "$amend_fail_source"
+make_go_shim "$amend_fail_shim" ''
+expect_plan_gate_failure 'amend失敗後もstale' \
+    "$amend_fail_source" "$amend_fail_case" "$amend_fail_shim" \
+    "$test_root/plan-gate-amend-fail.log" \
+    '現在状態記述が完了済みcommitの操作を未実施としています'
+
+mkdir -p "$amend_fail_source/.git/hooks"
+printf '%s\n' '#!/bin/sh' 'exit 1' >"$amend_fail_source/.git/hooks/pre-commit"
+chmod +x "$amend_fail_source/.git/hooks/pre-commit"
+if git -C "$amend_fail_source" commit --amend --no-edit >/dev/null 2>&1; then
+    printf '%s\n' 'pre-commit hook拒否によるamend失敗再現に失敗しました' >&2
+    exit 1
+fi
+rm "$amend_fail_source/.git/hooks/pre-commit"
+
+# 同期済みfinal HEADへの同一commit復旧amend。追加commitを挟まず同じHEADへ同期内容を
+# 収めた後はgateを通過し、本配置まで進む。
+write_plan_gate_synced "$amend_fail_source"
+git -C "$amend_fail_source" add -A
+git -C "$amend_fail_source" commit --amend --no-edit -q
+run_installer "$amend_fail_source" "$test_root/plan-gate-amend-recover-case" \
+    >"$test_root/plan-gate-amend-recover.log" 2>&1
+grep -Fq 'plan final head: verified' "$test_root/plan-gate-amend-recover.log"
+test -x "$test_root/plan-gate-amend-recover-case/bin/glm-worker"
+
+# 同期済みfinal HEADは本配置まで進む。working treeのplanを未commitのstale内容へ
+# 書き換えても、gateはHEADだけを判定するため影響しない。
+synced_source="$test_root/plan-gate-synced-source"
+synced_case="$test_root/plan-gate-synced-case"
+make_plan_gate_repo "$synced_source"
+write_plan_gate_synced "$synced_source"
+commit_plan_gate_repo "$synced_source"
+run_installer "$synced_source" "$synced_case" >"$test_root/plan-gate-synced.log" 2>&1
+grep -Fq 'plan final head: verified' "$test_root/plan-gate-synced.log"
+test -x "$synced_case/bin/glm-worker"
+
+write_plan_gate_plan "$synced_source" \
+    'IMPLEMENTATION_TASKS/next-task.md' \
+    '- `IMPLEMENTATION_TASKS/future-task.md`' \
+    'main' \
+    '前taskの実装・test・review・commitは完了したが、plan/historyの同期を同一commitへamendする直前。' \
+    'amend後に`install.sh`で本配置と一致を確認し、next-taskを開始する。'
+run_installer "$synced_source" "$synced_case" >"$test_root/plan-gate-dirty.log" 2>&1
+grep -Fq 'plan final head: verified' "$test_root/plan-gate-dirty.log"
+
+# 過渡表現patternはpending操作だけを対象にする。「amend後のpostcondition」は現在taskの
+# 正当な記述、「uninstall前」は英数字identifier境界で別語のため、いずれも拒否しない。
+positive_source="$test_root/plan-gate-positive-source"
+positive_case="$test_root/plan-gate-positive-case"
+make_plan_gate_repo "$positive_source"
+write_plan_gate_plan "$positive_source" \
+    'IMPLEMENTATION_TASKS/next-task.md' \
+    '- `IMPLEMENTATION_TASKS/future-task.md`' \
+    'main' \
+    '前taskは完了。next-taskはamend後のpostcondition検証とuninstall前のsettings確認を含む。' \
+    'next-taskの要件を確認してGLM workerへ委譲する。'
+commit_plan_gate_repo "$positive_source"
+run_installer "$positive_source" "$positive_case" >"$test_root/plan-gate-positive.log" 2>&1
+grep -Fq 'plan final head: verified' "$test_root/plan-gate-positive.log"
+test -x "$positive_case/bin/glm-worker"
+
+# planをGit indexへ置かないrepositoryではgateはskipしてHEAD postconditionの適用外と
+# なり、過渡的なworking tree planを理由に配置を拒否しない。skip後にpreflight段階まで
+# 到達したこととgate失敗案内が出ないことを固定する。なお本source copyのpreflightは
+# tracked canonical planを要求する自己保護testを別契約として持つため、untracked planの
+# installはpreflightで失敗する。gate側のskipだけを本scenarioの対象とする。
+untracked_source="$test_root/plan-gate-untracked-source"
+untracked_case="$test_root/plan-gate-untracked-case"
+make_plan_gate_repo "$untracked_source"
+rm "$untracked_source/IMPLEMENTATION_PLAN.local.md"
+commit_plan_gate_repo "$untracked_source"
+write_plan_gate_plan "$untracked_source" \
+    'IMPLEMENTATION_TASKS/next-task.md' \
+    '- `IMPLEMENTATION_TASKS/future-task.md`' \
+    'main' \
+    '前taskの実装・test・review・commitは完了したが、plan/historyの同期を同一commitへamendする直前。' \
+    'amend後に`install.sh`で本配置と一致を確認し、next-taskを開始する。'
+if run_installer "$untracked_source" "$untracked_case" >"$test_root/plan-gate-untracked.log" 2>&1; then
+    printf '%s\n' 'untracked plan repositoryのinstall.shが成功しました' >&2
+    exit 1
+fi
+grep -Fq 'plan final head: skipped (IMPLEMENTATION_PLAN.local.md is untracked)' \
+    "$test_root/plan-gate-untracked.log"
+grep -Fq 'preflight: validating source before applying managed files' \
+    "$test_root/plan-gate-untracked.log"
+if grep -Fq '同一commitへamendしてからinstallすること' "$test_root/plan-gate-untracked.log"; then
+    printf '%s\n' 'untracked plan repositoryでplan gateが拒否しました' >&2
+    exit 1
+fi
+test ! -e "$untracked_case/bin"
+
 printf '%s\n' 'install smoke: PASS'

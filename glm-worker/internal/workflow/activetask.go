@@ -28,8 +28,9 @@ const activeTaskPathExt = ".md"
 
 // resolveActiveTaskPathは`IMPLEMENTATION_PLAN.local.md`のACTIVE欄からACTIVE task fileの
 // repository相対pathを解決する。planが存在しないrepositoryでは配線なし(wired=false, err=nil)を
-// 返し、既存の通常作業を許可する。planが存在する場合はACTIVE欄が一意・配置契約内(`.md`)・
-// path escapeなし・参照先がsymlinkを辿らないregular fileとしてworking treeへ実在することを全て
+// 返し、既存の通常作業を許可する。planが存在する場合はACTIVE欄が一意・bullet構文
+// (逆引用符1組の単一task pathか逆引用符なし直書き)・配置契約内(`.md`)・path escapeなし・
+// 参照先がsymlinkを辿らないregular fileとしてworking treeへ実在することを全て
 // 満たす必要があり、欠けた場合は要求正本を特定できないためerrorを返し呼出元がmodel呼出前に
 // fail closedする。
 func resolveActiveTaskPath(repoRoot string) (string, bool, error) {
@@ -88,21 +89,30 @@ func activeSectionEntries(planContent string) ([]string, error) {
 		if !strings.HasPrefix(trimmed, "- ") {
 			continue
 		}
-		entries = append(entries, activeEntryPath(strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))))
+		path, err := activeEntryPath(strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, path)
 	}
 	return entries, nil
 }
 
-// activeEntryPathはlist項目から逆引用符で囲まれたpathを優先して取り出す。Planの記載形式は
-// 「- `IMPLEMENTATION_TASKS/....md`」を標準とし、逆引用符なしの直書きも受理する。
-func activeEntryPath(item string) string {
-	if start := strings.IndexByte(item, '`'); start >= 0 {
-		rest := item[start+1:]
-		if end := strings.IndexByte(rest, '`'); end >= 0 {
-			return rest[:end]
+// activeEntryPathはlist項目からtask path候補を取り出す。標準形式は
+// 「- `IMPLEMENTATION_TASKS/....md`」で、逆引用符なしの直書きも受理する。逆引用符は
+// 項目全体を1組で囲む場合だけpath区切りとして扱い、閉じ欠損・前後の余分なtext・複数組は
+// bullet構文違反としてerrorを返す。installer final HEAD gateのplan_bullet_pathsと同じ
+// 規則であり、受理集合の一致はTestPlanFinalHeadBulletExtractionMatchesRuntimeが固定する。
+func activeEntryPath(item string) (string, error) {
+	switch strings.Count(item, "`") {
+	case 0:
+		return item, nil
+	case 2:
+		if strings.HasPrefix(item, "`") && strings.HasSuffix(item, "`") {
+			return item[1 : len(item)-1], nil
 		}
 	}
-	return item
+	return "", fmt.Errorf("ACTIVE欄の項目 %qがbullet構文(逆引用符1組で囲まれた単一task path、または逆引用符なしの直書き)へ違反しています", item)
 }
 
 // validateActiveTaskPathはACTIVE task pathが`IMPLEMENTATION_TASKS/`配下の`.md` file契約へ収まり

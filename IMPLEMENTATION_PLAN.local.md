@@ -8,11 +8,10 @@ Sol High相当の品質をできるだけ維持しながらCodex / Sol側の実�
 
 ## ACTIVE
 
-- `IMPLEMENTATION_TASKS/002-plan-final-head-postcondition.md`
+- `IMPLEMENTATION_TASKS/003-targets-element-semantics.md`
 
 ## NEXT（優先順）
 
-- `IMPLEMENTATION_TASKS/003-targets-element-semantics.md`
 - `IMPLEMENTATION_TASKS/004-self-contained-stdin-pty.md`
 - `IMPLEMENTATION_TASKS/instruction-fixed-context-audit.md`
 - `IMPLEMENTATION_TASKS/005-multi-repository-isolation.md`
@@ -46,14 +45,14 @@ Sol High相当の品質をできるだけ維持しながらCodex / Sol側の実�
 ## 現在のGit境界
 
 - branch: `main`
-- implementation baseline: Task 001 completion commit（current HEAD）。Task 002 implementationは未着手
-- metadata boundary: Task 001をHistoryへ移行してtask fileを削除し、Task 002をACTIVEへ昇格。Task 001のparent-managed metadata 4面guardとACTIVE requirement wiringをcurrent HEADへ収録し、本配置・source一致・status smoke確認済み
+- implementation baseline: Task 002 completion commit（current HEAD）
+- metadata boundary: Task 002をHistoryへ移行してtask fileを削除し、Task 003をACTIVEへ昇格。final HEAD Plan postcondition gateとinstaller/runtimeのpath・bullet受理集合同値化をcurrent HEADへ収録し、本配置・source一致・status smoke確認済み
 - push: 禁止
 
 ## 現在の停止理由
 
-Task 001は完了。Task 002は未着手で、現在の主要作業を開始する前の境界。
+Task 002は完了。Task 003はACTIVEへ昇格済みで未着手。
 
 ## 次の親Codex操作
 
-Task 002のOriginal instruction・Amendments・参照Historyを再読し、新4層構造向けfinal HEAD postcondition設計から同taskを開始する。
+Task 003のOriginal instruction・Amendments・参照Historyを再読し、TARGETS element semanticのproduction修正を開始する。
