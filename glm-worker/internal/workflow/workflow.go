@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -124,11 +125,27 @@ func (w *Workflow) ExecuteNewTask(request string) error {
 		if err := w.state.Write("last-request", request); err != nil {
 			return err
 		}
-		if err := w.state.Remove("last-decision", "last-review"); err != nil {
+		// 新task開始時に前taskのACTIVE task固定を除去する。解決失敗時は未設定のまま残り、
+		// 親CodexがPlan・task fileを修復して同じtaskを--fix等で再開した時点で再解決される。
+		if err := w.state.Remove("last-decision", "last-review", activeTaskStateKey); err != nil {
+			return err
+		}
+		// ACTIVE task file pathはtask開始時に一度だけ解決してstateへ固定する。以降のdecision・fix・
+		// reviewer・auto-fix各呼出とworker呼出前の存在確認は同じ値を読むため、親Codexが停止中にPlanの
+		// ACTIVE欄を切り替えても実行中taskの要求正本が別taskへすり替わらない。planの無いrepositoryでは
+		// 配線なしとして要求source blockを付けず、解決失敗はmodel呼出前にfail closedする。
+		activeTaskPath, wired, err := resolveActiveTaskPath(w.config.RepoRoot)
+		if err != nil {
+			return w.failClosedActiveTaskResolution("worker-new", err)
+		}
+		if !wired {
+			activeTaskPath = ""
+		}
+		if err := w.state.Write(activeTaskStateKey, activeTaskPath); err != nil {
 			return err
 		}
 
-		prompt := newTaskPrompt(request)
+		prompt := newTaskPrompt(request, activeTaskPath)
 		checkpoint := state.ResumeCheckpoint{
 			Stage:          state.ResumeStageWorker,
 			Phase:          "worker-new",
@@ -167,7 +184,13 @@ func (w *Workflow) ExecuteDecision(decision string) error {
 		}
 		w.state.RecordDecision()
 
-		prompt := decisionPrompt(request, decision)
+		// ACTIVE解決fail closed後に親がPlan・task fileを修復してdecisionで再開する場合、
+		// state未設定を検出してからpromptを作る。固定済みなら現在taskを維持する。
+		activeTaskPath, err := w.ensureActiveTaskPath("worker-decision")
+		if err != nil {
+			return err
+		}
+		prompt := decisionPrompt(request, decision, activeTaskPath)
 		checkpoint := state.ResumeCheckpoint{
 			Stage:          state.ResumeStageWorker,
 			Phase:          "worker-decision",
@@ -209,7 +232,12 @@ func (w *Workflow) ExecuteExplicitFix(instruction string) error {
 			return err
 		}
 		w.state.RecordFix()
-		prompt := explicitFixPrompt(request, decision, review, instruction)
+		// decision同様、ACTIVE解決fail closed後の修復再開ではstate未設定を検出して再解決する。
+		activeTaskPath, err := w.ensureActiveTaskPath("worker-explicit-fix")
+		if err != nil {
+			return err
+		}
+		prompt := explicitFixPrompt(request, decision, review, instruction, activeTaskPath)
 		checkpoint := state.ResumeCheckpoint{
 			Stage:          state.ResumeStageWorker,
 			Phase:          "worker-explicit-fix",
@@ -485,12 +513,19 @@ func (w *Workflow) reviewUntilStable(
 	decision := w.state.ReadOr("last-decision", "none")
 	hasDecision := w.state.Exists("last-decision")
 	risk := w.computeEffectiveRisk(workerResult, autoFixes, hasDecision, w.state.Exists("last-review"))
+	// worker継続呼出と同じく、reviewer promptもACTIVE解決fail closed後の修復再開ではstate
+	// 未設定を検出してから作る。再解決失敗はreviewer呼出前にfail closedする。
+	activeTaskPath, err := w.ensureActiveTaskPath(fmt.Sprintf("reviewer-%d", reviewNumber))
+	if err != nil {
+		return err
+	}
 	prompt := reviewerPrompt(
 		request,
 		decision,
 		workerResult,
 		reviewNumber,
 		w.state.BaselineDescription(),
+		activeTaskPath,
 	)
 	checkpoint := state.ResumeCheckpoint{
 		Stage:               state.ResumeStageReview,
@@ -583,8 +618,13 @@ func (w *Workflow) handleReviewResult(
 
 		nextAutoFixes := autoFixes + 1
 		decision := w.state.ReadOr("last-decision", "none")
-		prompt := automaticFixPrompt(request, decision, reviewResult)
 		phase := fmt.Sprintf("worker-auto-fix-%d", nextAutoFixes)
+		// auto-fixもACTIVE解決fail closed後の修復再開経路に含める。未設定なら再解決して固定する。
+		activeTaskPath, err := w.ensureActiveTaskPath(phase)
+		if err != nil {
+			return err
+		}
+		prompt := automaticFixPrompt(request, decision, reviewResult, activeTaskPath)
 		reportOnly := isReportOnlyFix(reviewResult)
 		// TARGETS: PACKETはreviewerがコード・diffを正しいと確認しPACKET/reportの意味情報だけを
 		// 不足と指摘した予約marker。実装修正へ流さず報告再出力専用promptへ分岐する。
@@ -592,7 +632,7 @@ func (w *Workflow) handleReviewResult(
 		// report-only workerはReadOnly capabilityで実行し、開始前3軸snapshotを基準とした
 		// 前後同一性をprompt遵守ではなくwrapper側で強制する。
 		if reportOnly {
-			prompt = reportOnlyFixPrompt(request, decision, reviewResult)
+			prompt = reportOnlyFixPrompt(request, decision, reviewResult, activeTaskPath)
 			phase = fmt.Sprintf("worker-report-only-%d", nextAutoFixes)
 		}
 		checkpoint := state.ResumeCheckpoint{
@@ -1754,7 +1794,7 @@ func (w *Workflow) verifyReviewStartSnapshot() (bool, error) {
 	if err != nil {
 		return true, w.failClosedSnapshot(state.SnapshotStageReviewStart, workerEnd, state.GitSnapshot{}, "review-start snapshot取得失敗", err)
 	}
-	// review開始時の親管理2file状態を基準へ記録する。読込失敗時は記録なし(nil)とし、resume例外を
+	// review開始時の親管理metadata集合状態を基準へ記録する。読込失敗時は記録なし(nil)とし、resume例外を
 	// 使えないfail closed側へ倒す。ここで停止する理由は無い。
 	if parentStates, parentErr := readParentFileStates(w.config.RepoRoot); parentErr == nil {
 		reviewStart.ParentFiles = &parentStates
@@ -1775,8 +1815,8 @@ func (w *Workflow) verifyReviewStartSnapshot() (bool, error) {
 
 // verifyReviewResumeSnapshotはrate-limit/provider-unavailable停止を挟んだreview resumeで、保存
 // review-start snapshotへ現在状態を再照合する。3軸一致時は従来どおり再開する。不一致時は停止期間中の
-// 親Codexによる親管理2file更新だけを承認済みdeltaとして例外にし、review基準を現状へ再固定して
-// reviewerを再開する。それ以外の外部変更(worker/reviewer実装surface・親2file削除・head/index移動)は
+// 親Codexによる親管理metadata集合更新だけを承認済みdeltaとして例外にし、review基準を現状へ再固定して
+// reviewerを再開する。それ以外の外部変更(worker/reviewer実装surface・親管理metadata削除・head/index移動)は
 // 従来どおりfail closedする。
 func (w *Workflow) verifyReviewResumeSnapshot(checkpoint state.ResumeCheckpoint) (bool, error) {
 	saved, err := w.state.LoadReviewStartSnapshot()
@@ -1814,12 +1854,14 @@ func (w *Workflow) verifyReviewResumeSnapshot(checkpoint state.ResumeCheckpoint)
 	return false, nil
 }
 
-// acceptReviewResumeParentDeltaはreview-resume時の3軸不一致が停止期間中の親管理2file更新だけに
-// 帰着するかを判定する。head・indexが一致し親2file除外worktree digestが保存値と等しければ、変化は
-// 親2fileだけに限られる。その上で停止保存時の親2file状態と現在値の差分だけが、変化がmodel呼出の
-// 存在しない停止期間中に起きた(=親Codexによる)機械識別可能な証拠になる。reviewer呼出中の変更は
-// 停止保存時に固定済みのため現在値と一致し、pathだけの全面allowlistと違いfile単位で拒否される。
-// 削除はplan正喪失のfail closed契約を維持し、旧binaryのcheckpoint/snapshot(基準なし)も拒否する。
+// acceptReviewResumeParentDeltaはreview-resume時の3軸不一致が停止期間中の親管理metadata集合更新だけに
+// 帰着するかを判定する。head・indexが一致し集合除外worktree digestが保存値と等しければ、変化は
+// 親管理metadataだけに限られる。その上で停止保存時の集合状態と現在値の差分だけが、変化がmodel呼出の
+// 存在しない停止期間中に起きた(=親Codexによる)機械識別可能な証拠になる。判定はfile単位の共通規則を
+// 停止時・現在・review開始時の3状態の和集合path全件へ適用し、plan/historyのような特定path名の分岐を
+// 持たない。reviewer呼出中の変化(reviewStart≠stop)は停止期間中に同じfileが再変更されていても
+// current値に関係なく直ちに拒否し、停止期間中の更新として承認しない。削除は要求正本喪失のfail closed
+// 契約を維持し、旧binaryのcheckpoint/snapshot(基準なし)も拒否する。
 func (w *Workflow) acceptReviewResumeParentDelta(saved, current state.GitSnapshot, checkpoint state.ResumeCheckpoint) bool {
 	if saved.Head != current.Head || saved.IndexDigest != current.IndexDigest {
 		return false
@@ -1834,15 +1876,41 @@ func (w *Workflow) acceptReviewResumeParentDelta(saved, current state.GitSnapsho
 	if err != nil {
 		return false
 	}
-	stop := checkpoint.StopParentFiles
-	if (stop.Plan.Exists && !now.Plan.Exists) || (stop.History.Exists && !now.History.Exists) {
-		return false
+	changedDuringStop := false
+	for _, path := range parentStatePaths(*saved.ParentFiles, *checkpoint.StopParentFiles, now) {
+		reviewStart := state.FindParentFileState(*saved.ParentFiles, path)
+		stop := state.FindParentFileState(*checkpoint.StopParentFiles, path)
+		currentState := state.FindParentFileState(now, path)
+		// reviewStart→stop間の差分はreviewer呼出中の変化である。停止期間中に同じfileがさらに
+		// 変化していてもmodel呼出中の不変契約違反は免除されないため、current値に関係なく拒否する。
+		if stop != reviewStart {
+			return false
+		}
+		if stop.Exists && !currentState.Exists {
+			return false
+		}
+		if currentState != stop {
+			changedDuringStop = true
+		}
 	}
-	if (now.Plan == stop.Plan && stop.Plan != saved.ParentFiles.Plan) ||
-		(now.History == stop.History && stop.History != saved.ParentFiles.History) {
-		return false
+	return changedDuringStop
+}
+
+// parentStatePathsは複数の集合snapshotへ現れたpathの和集合を昇順で返す。承認判定を新規作成・
+// 削除されたfileも含む全pathへ同一規則で適用するために使う。
+func parentStatePaths(groups ...state.ParentFileStates) []string {
+	seen := make(map[string]struct{})
+	for _, group := range groups {
+		for _, s := range group {
+			seen[s.Path] = struct{}{}
+		}
 	}
-	return now.Plan != stop.Plan || now.History != stop.History
+	paths := make([]string, 0, len(seen))
+	for p := range seen {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 // recordSnapshotParentUpdateEventはreview基準の再固定をtelemetryへ記録する。comparison fileは

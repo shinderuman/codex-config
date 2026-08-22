@@ -70,7 +70,12 @@
         "report-only-reemission-mutation-fails-closed-before-review",
         "implementation-plan-critical-surface-escalates-self-protection-high",
         "implementation-plan-worker-mutation-fails-closed-before-review",
-        "structured-schema-mismatch-fails-closed"
+        "structured-schema-mismatch-fails-closed",
+        "active-task-plan-without-active-fails-closed-before-call",
+        "active-task-file-missing-fails-closed-before-call",
+        "active-task-file-worker-mutation-fails-closed-before-review",
+        "active-task-contract-reaches-worker-and-reviewer-prompts",
+        "active-task-block-survives-provider-resume"
       ]
     },
     {
@@ -99,18 +104,25 @@
         "cmd-entrypoint-escalates-self-protection-high",
         "workflow-clock-telemetry-follows-injected-clock",
         "report-only-reemission-mutation-fails-closed-before-review",
-        "implementation-plan-critical-surface-escalates-self-protection-high"
+        "implementation-plan-critical-surface-escalates-self-protection-high",
+        "active-task-contract-reaches-worker-and-reviewer-prompts",
+        "active-task-block-survives-provider-resume"
       ]
     },
     {
       "path": "AGENTS.md",
-      "sha256": "e0baebcd8072cbe6952c3b6d4af26e4fb07e0ff32b8c8c1a0e549903c842d426",
+      "sha256": "9bad339e3353c854a67b368e5cd96127d94dd1b3c1ce095b91ca489227d6d0f7",
       "scenarios": [
         "implementation-plan-present-ignored-returns-fix-required",
         "implementation-plan-absent-fabrication-fails-closed-before-review",
         "implementation-plan-tracked-missing-fails-closed-before-call",
         "implementation-plan-worker-mutation-fails-closed-before-review",
-        "repo-agents-root-change-escalates-self-protection-high"
+        "repo-agents-root-change-escalates-self-protection-high",
+        "active-task-plan-without-active-fails-closed-before-call",
+        "active-task-file-missing-fails-closed-before-call",
+        "active-task-file-worker-mutation-fails-closed-before-review",
+        "active-task-contract-reaches-worker-and-reviewer-prompts",
+        "active-task-block-survives-provider-resume"
       ]
     },
     {
@@ -144,7 +156,7 @@
     },
     {
       "path": "codex/instructions/glm-execution.md",
-      "sha256": "c0a5f5d2a0786fbb996d2ed178636f86edc7be717fd7460f3766a15a6221b5ee",
+      "sha256": "c4b045dc32ef7d7b40c35ad90eb5405569657603bd0491f2df259fc148ff58a4",
       "scenarios": [
         "feasibility-gate-production-beyond-unverified-viability-returns-to-sol",
         "feasibility-gate-premise-collapse-stops-further-implementation",

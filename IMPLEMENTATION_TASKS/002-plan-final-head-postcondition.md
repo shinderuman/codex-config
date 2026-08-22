@@ -70,7 +70,7 @@ canonical Planが次sessionの誤った制御情報になる再発を親orchestr
 
 ## Dependencies
 
-- `IMPLEMENTATION_TASKS/001-requirement-task-lifecycle.md`
+none
 
 ## Review findings
 
@@ -78,4 +78,4 @@ canonical Planが次sessionの誤った制御情報になる再発を親orchestr
 
 ## Current boundary
 
-Task 001後に新構造で再設計する。旧構造向け未review差分はpatch退避済みでworking treeから除去。
+Task 001の4層構造・parent-managed metadata集合・ACTIVE task wiringはcurrent HEADへ収録・本配置済み。installed binary/source、managed instruction/source、status smokeは一致確認済み。旧構造向け未review差分はpatch退避済みでworking treeから除去。新構造向けpostcondition設計から開始する。

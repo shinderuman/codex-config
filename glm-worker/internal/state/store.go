@@ -149,6 +149,10 @@ func taskStateFileNames() []string {
 		"reviewer.ready",
 		"task.status",
 		"isolation.policy",
+		// active-taskはworkflow層がtask開始時に固定するACTIVE task file path。
+		// resetで現在task扱いのstateと一緒に消えないと、次task開始前に旧taskの要求正本参照が
+		// 残る。task開始時の除去はworkflow.ExecuteNewTaskも重ねて行う。
+		"active-task",
 		"last-request",
 		"last-decision",
 		"pending-decision",

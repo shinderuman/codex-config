@@ -232,6 +232,11 @@ func TestExecuteResetClearsTask(t *testing.T) {
 	if _, err := st.StartNewTask(); err != nil {
 		t.Fatal(err)
 	}
+	// task開始時に固定されたACTIVE task pathも現在task stateの一部。resetに残ると次task前に
+	// 旧taskの要求正本参照が生きたままになる。
+	if err := st.Write("active-task", "IMPLEMENTATION_TASKS/999-stale.md"); err != nil {
+		t.Fatal(err)
+	}
 
 	var out bytes.Buffer
 	if err := Execute(Command{Mode: ModeReset}, cfg, nil, &out, io.Discard); err != nil {
@@ -242,6 +247,9 @@ func TestExecuteResetClearsTask(t *testing.T) {
 	}
 	if st.Exists("task.id") {
 		t.Fatal("reset後もtask.idが残っています")
+	}
+	if st.Exists("active-task") {
+		t.Fatal("reset後もactive-taskが残っています")
 	}
 }
 

@@ -21,26 +21,52 @@ const (
 	snapshotComparisonFile      = "snapshot-comparison.json"
 )
 
-// ParentPlanFile・ParentHistoryFileは親Codexだけが編集するrepository root直下の親管理2file。
-// model呼出前後の不変guardとreview resumeのsnapshot例外が同じ対象を指すためここへ一元化する。
+// 親管理implementation metadata集合。RULES・PLAN・HISTORYのrepository root 3fileと
+// IMPLEMENTATION_TASKS/配下の全fileからなり、編集できるのは親Codexだけである。model呼出前後の
+// 不変guardとreview resumeのsnapshot例外が同じ対象を指すためここへ一元化する。
 const (
+	ParentRulesFile   = "IMPLEMENTATION_RULES.md"
 	ParentPlanFile    = "IMPLEMENTATION_PLAN.local.md"
+	ParentTasksDir    = "IMPLEMENTATION_TASKS"
 	ParentHistoryFile = "IMPLEMENTATION_HISTORY.md"
 )
 
-var parentManagedFiles = []string{ParentPlanFile, ParentHistoryFile}
+var parentManagedFiles = []string{ParentRulesFile, ParentPlanFile, ParentHistoryFile}
 
-// ParentFileStateは親管理file 1件の存在と内容hash。欠損はExists=falseで表現する。
+// ParentFileStateは親管理metadata 1件の存在と内容hash。欠損はExists=falseで表現する。
 type ParentFileState struct {
+	Path   string `json:"path"`
 	Exists bool   `json:"exists"`
 	SHA256 string `json:"sha256"`
 }
 
-// ParentFileStatesは親管理2fileの状態snapshot。review開始時基準とrate-limit/provider-unavailable
-// 停止保存時点で同じ形式を使い、review resumeが停止期間中の親更新だけを承認deltaとして識別する。
-type ParentFileStates struct {
-	Plan    ParentFileState `json:"plan"`
-	History ParentFileState `json:"history"`
+// ParentFileStatesは親管理metadata集合の状態snapshot。review開始時基準とrate-limit/
+// provider-unavailable停止保存時点で同じ形式を使い、review resumeが停止期間中の親更新だけを
+// 承認deltaとして識別する。path昇順で整列し、集合比較を要素順比較で扱えるようにする。
+type ParentFileStates []ParentFileState
+
+// SameParentFileStatesは2つの集合snapshotが同一かを判定する。
+func SameParentFileStates(a, b ParentFileStates) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// FindParentFileStateは指定pathの状態を返す。集合に無いpathはExists=falseの零値で表現し、
+// 停止期間中の新規作成・削除を同じ比較式で扱えるようにする。
+func FindParentFileState(states ParentFileStates, path string) ParentFileState {
+	for _, s := range states {
+		if s.Path == path {
+			return s
+		}
+	}
+	return ParentFileState{Path: path}
 }
 
 // GitSnapshotはworker終了時・review開始時のrepo状態を3軸のdigestで識別する。
@@ -49,12 +75,12 @@ type GitSnapshot struct {
 	IndexDigest string `json:"index_digest"`
 	// WorktreeDigestはunstaged tracked変更とuntracked(ignored除外)の内容/pathを反映する。
 	WorktreeDigest string `json:"worktree_digest"`
-	// WorktreeDigestExcludingParentは親管理2fileをdiff/untracked列挙から除外したworktree
-	// digest。review resumeが親2fileだけのdeltaを識別する基準に使い、旧binaryのsnapshot
-	// fileでは空文字のため例外判定できずfail closedになる。
+	// WorktreeDigestExcludingParentは親管理metadata集合をdiff/untracked列挙から除外した
+	// worktree digest。review resumeが親metadataだけのdeltaを識別する基準に使い、旧binaryの
+	// snapshot fileでは空文字のため例外判定できずfail closedになる。
 	WorktreeDigestExcludingParent string `json:"worktree_digest_excluding_parent,omitempty"`
-	// ParentFilesはsnapshot保存時点の親管理2file状態。review-start snapshotだけが設定し、
-	// resume例外が呼出中変更と停止期間中変更をfile単位で区別する基準にする。
+	// ParentFilesはsnapshot保存時点の親管理metadata集合状態。review-start snapshotだけが
+	// 設定し、resume例外が呼出中変更と停止期間中変更をfile単位で区別する基準にする。
 	ParentFiles *ParentFileStates `json:"parent_files,omitempty"`
 }
 
@@ -77,7 +103,7 @@ type SnapshotComparison struct {
 	HeadMatch     bool          `json:"head_match"`
 	IndexMatch    bool          `json:"index_match"`
 	WorktreeMatch bool          `json:"worktree_match"`
-	// ParentUpdateAcceptedは3軸不一致が停止期間中の親管理2file更新だけだったためreview基準を
+	// ParentUpdateAcceptedは3軸不一致が停止期間中の親管理metadata更新だけだったためreview基準を
 	// 現状へ再固定して再開したことを表す。Matchedは元の3軸判定のまま残す。
 	ParentUpdateAccepted bool   `json:"parent_update_accepted,omitempty"`
 	Reason               string `json:"reason,omitempty"`
@@ -131,8 +157,8 @@ func captureSnapshotIndexDigest(repoRoot string) (string, error) {
 }
 
 // git I/Oとdigest計算を分離し、列挙結果を直接与える特殊file・消失・境界越えのtestを決定論的に扱う。
-// captureSnapshotWorktreeDigestは親管理2fileを含む全体と除外した値の両方のworktree digestを返す。
-// 除外値はreview resumeが親2fileだけのdeltaを識別する基準になる。
+// captureSnapshotWorktreeDigestは親管理metadata集合を含む全体と除外した値の両方のworktree digestを
+// 返す。除外値はreview resumeが親metadataだけのdeltaを識別する基準になる。
 func captureSnapshotWorktreeDigest(repoRoot string) (string, string, error) {
 	full, err := captureWorktreeDigestVariant(repoRoot, nil)
 	if err != nil {
@@ -145,13 +171,15 @@ func captureSnapshotWorktreeDigest(repoRoot string) (string, string, error) {
 	return full, excluding, nil
 }
 
-// parentFileExcludePathspecsは親管理2fileだけをgit列挙から外すanchored exclude pathspec。
-// :(top)でrepository root直下の同名列だけを除外し、subdirectory配下の同名列は検出対象に残す。
+// parentFileExcludePathspecsは親管理metadata集合だけをgit列挙から外すanchored exclude pathspec。
+// :(top)でrepository root直下の同名列とIMPLEMENTATION_TASKS/配下だけを除外し、subdirectory配下の
+// 同名列は検出対象に残す。IMPLEMENTATION_TASKSは directory pathspec として配下全fileへ一致する。
 func parentFileExcludePathspecs() []string {
-	specs := make([]string, 0, len(parentManagedFiles))
+	specs := make([]string, 0, len(parentManagedFiles)+1)
 	for _, name := range parentManagedFiles {
 		specs = append(specs, ":(top,exclude)"+name)
 	}
+	specs = append(specs, ":(top,exclude)"+ParentTasksDir)
 	return specs
 }
 
@@ -346,7 +374,7 @@ func (s *StateStore) LoadSnapshotComparison() (SnapshotComparison, error) {
 }
 
 // SnapshotDigestはGitSnapshotのdigest群をtelemetry記録用へ切り出したもの。
-// 生diffやfile内容は持たず、HEAD・index・worktree(全体と親管理2file除外)のdigestだけを残す。
+// 生diffやfile内容は持たず、HEAD・index・worktree(全体と親管理metadata集合除外)のdigestだけを残す。
 type SnapshotDigest struct {
 	Head           string `json:"head,omitempty"`
 	IndexDigest    string `json:"index_digest,omitempty"`

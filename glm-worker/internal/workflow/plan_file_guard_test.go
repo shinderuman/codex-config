@@ -11,10 +11,27 @@ import (
 	"github.com/shinderuman/codex-worker-orchestrator/glm-worker/internal/state"
 )
 
-const planGuardSeed = "parent owned plan\n"
+// planGuardSeedはPlan配置契約(## ACTIVE節へ`IMPLEMENTATION_TASKS/`相対path 1件)を満たす
+// seed。activeTaskGuardSeedはそこへ解決されるACTIVE task file本文の代役。
+const (
+	planGuardSeed       = "# plan\n\n## ACTIVE\n\n- `IMPLEMENTATION_TASKS/001-active.md`\n"
+	activeTaskGuardSeed = "# ACTIVE task\n\n## Contract\n\n- guard検証用seed\n"
+	activeTaskGuardPath = "IMPLEMENTATION_TASKS/001-active.md"
+)
+
+func writeActiveTaskFileContent(t *testing.T, repoRoot string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(repoRoot, implementationTasksDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, activeTaskGuardPath), []byte(activeTaskGuardSeed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func writePlanFileContent(t *testing.T, repoRoot string, content string) {
 	t.Helper()
+	writeActiveTaskFileContent(t, repoRoot)
 	if err := os.WriteFile(filepath.Join(repoRoot, implementationPlanFile), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -92,10 +109,10 @@ func TestPlanFileWorkerMutationFailsClosedBeforeReview(t *testing.T) {
 	}
 	taskViolations, mismatchEvents := 0, 0
 	for _, l := range taskLogs(t, st) {
-		if l.CallType == state.CallTypeTask && l.Outcome == "plan_file_violation" {
+		if l.CallType == state.CallTypeTask && l.Outcome == "parent_metadata_violation" {
 			taskViolations++
 		}
-		if l.CallType == state.CallTypeEvent && l.Outcome == "plan_file_mismatch" {
+		if l.CallType == state.CallTypeEvent && l.Outcome == "parent_metadata_mismatch" {
 			mismatchEvents++
 		}
 	}
@@ -227,12 +244,12 @@ func TestPlanFileTrackedMissingFailsClosedBeforeCall(t *testing.T) {
 			}
 			events := 0
 			for _, l := range taskLogs(t, st) {
-				if l.Outcome == "plan_file_missing" && strings.HasSuffix(l.Phase, "plan-file-check") {
+				if l.Outcome == "parent_metadata_missing" && strings.HasSuffix(l.Phase, parentMetadataGuardSurface.eventSuffix) {
 					events++
 				}
 			}
 			if events != 1 {
-				t.Fatalf("plan_file_missing event = %d want 1", events)
+				t.Fatalf("parent_metadata_missing event = %d want 1", events)
 			}
 		})
 	}
@@ -276,12 +293,12 @@ func TestPlanFileTrackingIndeterminateFailsClosedBeforeCall(t *testing.T) {
 	}
 	events := 0
 	for _, l := range taskLogs(t, st) {
-		if l.Outcome == "plan_file_unavailable" && strings.HasSuffix(l.Phase, "plan-file-check") {
+		if l.Outcome == "parent_metadata_unavailable" && strings.HasSuffix(l.Phase, parentMetadataGuardSurface.eventSuffix) {
 			events++
 		}
 	}
 	if events != 1 {
-		t.Fatalf("plan_file_unavailable event = %d want 1", events)
+		t.Fatalf("parent_metadata_unavailable event = %d want 1", events)
 	}
 }
 
@@ -410,7 +427,10 @@ func TestPlanFileResumeAdoptsParentUpdateAsBaseline(t *testing.T) {
 	writePlanFileContent(t, repoRoot, planGuardSeed)
 	st := newStateStoreT(t)
 	seedRateLimitedWorkerCheckpoint(t, st, "request")
-	writePlanFileContent(t, repoRoot, "parent updated plan\n")
+	// 停止中の親更新後もPlanはACTIVE配置契約を満たす。reviewer再開時のACTIVE確定が
+	// 更新後Planから解決できるため、worker resume→reviewerまで通常どおり進む。
+	parentUpdatedPlan := "# plan v2\n\n## ACTIVE\n\n- `" + activeTaskGuardPath + "`\n"
+	writePlanFileContent(t, repoRoot, parentUpdatedPlan)
 	w, r, _ := planFileDecisionWorkflow(t, st, repoRoot, "", nil)
 	r.steps = []runnerStep{{output: implementedPacket("resumed")}, {output: passPacket()}}
 
@@ -420,7 +440,7 @@ func TestPlanFileResumeAdoptsParentUpdateAsBaseline(t *testing.T) {
 	if len(r.prompts) != 2 {
 		t.Fatalf("親更新後のresumeは通常どおりworker/reviewerへ進むべき: %d", len(r.prompts))
 	}
-	if content, err := os.ReadFile(filepath.Join(repoRoot, implementationPlanFile)); err != nil || string(content) != "parent updated plan\n" {
+	if content, err := os.ReadFile(filepath.Join(repoRoot, implementationPlanFile)); err != nil || string(content) != parentUpdatedPlan {
 		t.Fatalf("親Codex更新内容が保持されていません: %q %v", content, err)
 	}
 }
@@ -492,8 +512,8 @@ func TestPlanFileReadErrorFailsClosedBeforeCall(t *testing.T) {
 	if pkt.Status != "NEEDS_SOL_REVIEW" || pkt.Risk != "HIGH" {
 		t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status, pkt.Risk, out.String())
 	}
-	if !strings.Contains(out.String(), "baseline取得失敗") {
-		t.Fatalf("baseline取得失敗理由が出力されていません:\n%s", out.String())
+	if !strings.Contains(out.String(), "解決できません") {
+		t.Fatalf("ACTIVE task解決失敗理由が出力されていません:\n%s", out.String())
 	}
 }
 
@@ -570,7 +590,7 @@ func TestPlanFileAfterReadFailureRecordsExecutedCallOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	requirePlanFileFailClosed(t, st, r, out, "終了状態取得失敗", 1)
-	requireGuardTelemetryExactOnce(t, st, 1, "plan_file_unavailable", "plan_file_unavailable")
+	requireGuardTelemetryExactOnce(t, st, 1, "parent_metadata_unavailable", "parent_metadata_unavailable")
 }
 
 // TestHistoryFileAfterReadFailureRecordsExecutedCallOnceはhistory面でも同じafter-read失敗終端の
@@ -588,7 +608,7 @@ func TestHistoryFileAfterReadFailureRecordsExecutedCallOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	requirePlanFileFailClosed(t, st, r, out, "終了状態取得失敗", 1)
-	requireGuardTelemetryExactOnce(t, st, 1, "history_file_unavailable", "history_file_unavailable")
+	requireGuardTelemetryExactOnce(t, st, 1, "parent_metadata_unavailable", "parent_metadata_unavailable")
 }
 
 // TestPlanFileAfterReadFailureOnResumedTaskRecordsCallOnceはtransient復帰の再開task呼出が
@@ -618,7 +638,7 @@ func TestPlanFileAfterReadFailureOnResumedTaskRecordsCallOnce(t *testing.T) {
 	if transient != 1 {
 		t.Fatalf("初回transient呼出の記録 = %d want 1", transient)
 	}
-	requireGuardTelemetryExactOnce(t, st, 2, "plan_file_unavailable", "plan_file_unavailable")
+	requireGuardTelemetryExactOnce(t, st, 2, "parent_metadata_unavailable", "parent_metadata_unavailable")
 	stats := currentStats(t, st)
 	if stats.TransientRetries != 1 {
 		t.Fatalf("TransientRetries = %d want 1", stats.TransientRetries)
@@ -644,7 +664,7 @@ func TestHistoryFileAfterReadFailureOnResumedTaskRecordsCallOnce(t *testing.T) {
 	if len(r.probes) != 1 {
 		t.Fatalf("probe 1回の成功後にresumed taskで停止すべき: %d", len(r.probes))
 	}
-	requireGuardTelemetryExactOnce(t, st, 2, "history_file_unavailable", "history_file_unavailable")
+	requireGuardTelemetryExactOnce(t, st, 2, "parent_metadata_unavailable", "parent_metadata_unavailable")
 }
 
 // TestPlanFileReviewerMutationUsesExistingSnapshotInvariantはreviewer呼出をplan guardの
@@ -670,7 +690,7 @@ func TestPlanFileReviewerMutationUsesExistingSnapshotInvariant(t *testing.T) {
 		t.Fatalf("reviewer変更はreview-end snapshot検出によるべきです:\n%s", out.String())
 	}
 	for _, l := range taskLogs(t, st) {
-		if l.Outcome == "plan_file_mismatch" || l.Outcome == "plan_file_violation" {
+		if l.Outcome == "parent_metadata_mismatch" || l.Outcome == "parent_metadata_violation" {
 			t.Fatalf("reviewer経路へplan guardが適用されています: %+v", l)
 		}
 	}
@@ -699,10 +719,10 @@ func TestHistoryFileWorkerMutationFailsClosedBeforeReview(t *testing.T) {
 	}
 	taskViolations, mismatchEvents := 0, 0
 	for _, l := range taskLogs(t, st) {
-		if l.CallType == state.CallTypeTask && l.Outcome == "history_file_violation" {
+		if l.CallType == state.CallTypeTask && l.Outcome == "parent_metadata_violation" {
 			taskViolations++
 		}
-		if l.CallType == state.CallTypeEvent && l.Outcome == "history_file_mismatch" && strings.HasSuffix(l.Phase, historyGuardSurface.eventSuffix) {
+		if l.CallType == state.CallTypeEvent && l.Outcome == "parent_metadata_mismatch" && strings.HasSuffix(l.Phase, parentMetadataGuardSurface.eventSuffix) {
 			mismatchEvents++
 		}
 	}
@@ -862,12 +882,12 @@ func TestHistoryFileTrackedMissingFailsClosedBeforeCall(t *testing.T) {
 				if l.CallType == state.CallTypeTask {
 					t.Fatalf("呼出前停止なのにtask記録が残っています: %+v", l)
 				}
-				if l.Outcome == "history_file_missing" && strings.HasSuffix(l.Phase, historyGuardSurface.eventSuffix) {
+				if l.Outcome == "parent_metadata_missing" && strings.HasSuffix(l.Phase, parentMetadataGuardSurface.eventSuffix) {
 					events++
 				}
 			}
 			if events != 1 {
-				t.Fatalf("history_file_missing event = %d want 1", events)
+				t.Fatalf("parent_metadata_missing event = %d want 1", events)
 			}
 		})
 	}
@@ -898,8 +918,8 @@ func TestHistoryFileReadErrorFailsClosedBeforeCall(t *testing.T) {
 	if pkt.Status != "NEEDS_SOL_REVIEW" || pkt.Risk != "HIGH" {
 		t.Fatalf("packet = %s/%s want NEEDS_SOL_REVIEW/HIGH:\n%s", pkt.Status, pkt.Risk, out.String())
 	}
-	if !strings.Contains(out.String(), "history file baseline取得失敗") {
-		t.Fatalf("history baseline取得失敗理由が出力されていません:\n%s", out.String())
+	if !strings.Contains(out.String(), "親管理metadata baseline取得失敗") {
+		t.Fatalf("親管理metadata baseline取得失敗理由が出力されていません:\n%s", out.String())
 	}
 	for _, l := range taskLogs(t, st) {
 		if l.CallType == state.CallTypeTask {
@@ -951,7 +971,7 @@ func TestHistoryFileReviewerMutationUsesExistingSnapshotInvariant(t *testing.T) 
 		t.Fatalf("reviewer変更はreview-end snapshot検出によるべきです:\n%s", out.String())
 	}
 	for _, l := range taskLogs(t, st) {
-		if l.Outcome == "history_file_mismatch" || l.Outcome == "history_file_violation" {
+		if l.Outcome == "parent_metadata_mismatch" || l.Outcome == "parent_metadata_violation" {
 			t.Fatalf("reviewer経路へhistory guardが適用されています: %+v", l)
 		}
 	}

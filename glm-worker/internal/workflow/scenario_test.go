@@ -44,10 +44,15 @@ type scenarioArtifact struct {
 const scenarioArtifactDirToken = "{{ARTIFACT_DIR}}"
 
 // scenarioPlanSeed/ scenarioPlanMutatedはplan file不変性破壊scenarioのseed(親Codexがcall前に
-// 置いた内容の代役)とworker呼出中の書換内容。検証は内容の変化検出のみへ用いる。
+// 置いた内容の代役)とworker呼出中の書換内容。seed planは## ACTIVE節からtask fileを一意に
+// 解決できる配置契約を満たし、scenarioActiveTaskSeedがその解決先本文の代役になる。
+// 検証は内容の変化検出のみへ用いる。
 const (
-	scenarioPlanSeed    = "parent owned plan\n"
-	scenarioPlanMutated = "glm edited plan\n"
+	scenarioPlanSeed          = "# plan\n\n## ACTIVE\n\n- `IMPLEMENTATION_TASKS/001-scenario.md`\n"
+	scenarioPlanMutated       = "glm edited plan\n"
+	scenarioActiveTaskPath    = "IMPLEMENTATION_TASKS/001-scenario.md"
+	scenarioActiveTaskSeed    = "# ACTIVE task\n\n## Contract\n\n- scenario seed\n"
+	scenarioActiveTaskMutated = "glm edited active task\n"
 )
 
 // telemetryClockInjectedStartはscenario終端後の全telemetry record時刻が注入fake clockの
@@ -140,6 +145,22 @@ type scenarioDoc struct {
 	// scenarioで有効化する。scripted packetの成功宣言と無関係にplan file不変性のproduction
 	// 検証がreviewer開始前へfail closedする escaped review固定のhook。
 	WorkerMutatesPlanFile bool `json:"worker_mutates_plan_file,omitempty"`
+	// WorkerMutatesActiveTaskFileはworkerがtask呼出中にACTIVE task fileへ書き込むscenarioで
+	// 有効化する。親管理metadata集合(IMPLEMENTATION_TASKS/配下含む)の不変検出を固定する。
+	WorkerMutatesActiveTaskFile bool `json:"worker_mutates_active_task_file,omitempty"`
+	// PlanMissingActiveSectionはplanが存在するのにACTIVE欄からtask fileを解決できない状態を
+	// seedする。要求正本を特定できないままのmodel呼出前fail closedを固定する。
+	PlanMissingActiveSection bool `json:"plan_missing_active_section,omitempty"`
+	// ActiveTaskFileMissingはplanのACTIVE欄が指すtask fileがworking treeへ存在しない状態を
+	// seedする。参照欠損のmodel呼出前fail closedを固定する。
+	ActiveTaskFileMissing bool `json:"active_task_file_missing,omitempty"`
+	// SeedActiveTaskMetadataはplan+ACTIVE task fileをseedするだけでmutationを伴わない
+	// scenarioで有効化する。ACTIVE解決とprompt配線のproduction因果を通常完結終端で固定する。
+	SeedActiveTaskMetadata bool `json:"seed_active_task_metadata,omitempty"`
+	// ResumeCarriesActiveTaskBlockはresume entryで保存済み前回指示をACTIVE_TASK_FILE block
+	// 入りの本物のnew task promptへ差し替える。中断再開(compaction後のresumeを含む)でも
+	// worker再送promptとreviewer promptが要求定義を失わない因果を固定する。
+	ResumeCarriesActiveTaskBlock bool `json:"resume_carries_active_task_block,omitempty"`
 	// PlanFileInitiallyAbsentはWorkerMutatesPlanFile対象repoのplan fileを初期欠損にする。
 	// workerによる新規作成(plan生成禁止契約)を再現する。
 	PlanFileInitiallyAbsent bool `json:"plan_file_initially_absent,omitempty"`
@@ -285,10 +306,23 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 		if s.MustNotPass && s.ExpectedPacketStatus == "PASS" {
 			return fmt.Errorf("scenario %s must_not_pass with expected PASS", s.ID)
 		}
-		if s.ReviewerMutatesWorktree && s.ReportOnlyMutatesWorktree ||
-			s.ReviewerMutatesWorktree && s.WorkerMutatesPlanFile ||
-			s.ReportOnlyMutatesWorktree && s.WorkerMutatesPlanFile {
+		mutationHooks := 0
+		for _, on := range []bool{s.ReviewerMutatesWorktree, s.ReportOnlyMutatesWorktree, s.WorkerMutatesPlanFile, s.WorkerMutatesActiveTaskFile} {
+			if on {
+				mutationHooks++
+			}
+		}
+		if mutationHooks > 1 {
 			return fmt.Errorf("scenario %s declares multiple mutation hooks", s.ID)
+		}
+		preCallStopHooks := 0
+		for _, on := range []bool{s.PlanMissingActiveSection, s.ActiveTaskFileMissing} {
+			if on {
+				preCallStopHooks++
+			}
+		}
+		if preCallStopHooks > 1 || preCallStopHooks > 0 && mutationHooks > 0 {
+			return fmt.Errorf("scenario %s declares incompatible pre-call hooks", s.ID)
 		}
 		// 追跡中plan欠損scenarioはmutation無しでmodel呼出前に停止する。呼出中の変化を
 		// 扱うhookや0呼出以外の終端と併存した場合、期待内容の再確認を強制する。
@@ -312,8 +346,36 @@ func validateCorpus(sc scenarioFile, mf manifestFile) error {
 		if s.WorkerMutatesPlanFile && s.ExpectedPacketStatus != "NEEDS_SOL_REVIEW" {
 			return fmt.Errorf("scenario %s plan file mutation must expect fail-closed NEEDS_SOL_REVIEW", s.ID)
 		}
+		// ACTIVE task file不変性破壊scenarioも集合guardにより同じfail closed終端が期待値。
+		if s.WorkerMutatesActiveTaskFile {
+			if s.ExpectedPacketStatus != "NEEDS_SOL_REVIEW" {
+				return fmt.Errorf("scenario %s active task file mutation must expect fail-closed NEEDS_SOL_REVIEW", s.ID)
+			}
+		}
+		// ACTIVE解決失敗scenarioはmodel呼出前停止であるため0呼出とfail closed終端が期待値。
+		for _, unresolvable := range []bool{s.PlanMissingActiveSection, s.ActiveTaskFileMissing} {
+			if !unresolvable {
+				continue
+			}
+			if s.ExpectedPacketStatus != "NEEDS_SOL_REVIEW" {
+				return fmt.Errorf("scenario %s active task unresolvable must expect fail-closed NEEDS_SOL_REVIEW", s.ID)
+			}
+			if s.ExpectedRunCount == nil || *s.ExpectedRunCount != 0 {
+				return fmt.Errorf("scenario %s active task unresolvable must expect zero model runs", s.ID)
+			}
+		}
 		if s.PlanFileInitiallyAbsent && !s.WorkerMutatesPlanFile {
 			return fmt.Errorf("scenario %s plan_file_initially_absent without worker_mutates_plan_file", s.ID)
+		}
+		// resume因果scenarioはresume entryとplan+ACTIVE task seedの併用が前提のため、
+		// metadata再現hookの併存を拒否し前置きを固定する。
+		if s.ResumeCarriesActiveTaskBlock {
+			if s.Entry != "resume" {
+				return fmt.Errorf("scenario %s resume_carries_active_task_block without resume entry", s.ID)
+			}
+			if s.PlanMissingActiveSection || s.ActiveTaskFileMissing || s.PlanFileTrackedAbsent || s.PlanFileInitiallyAbsent {
+				return fmt.Errorf("scenario %s resume_carries_active_task_block with metadata-degrading hook", s.ID)
+			}
 		}
 		for i, want := range s.ExpectedOutputContains {
 			if want == "" {
@@ -830,21 +892,56 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 	buf := &bytes.Buffer{}
 	w.output = buf
 	var mutationRepoRoot string
-	if doc.ReviewerMutatesWorktree || doc.ReportOnlyMutatesWorktree || doc.WorkerMutatesPlanFile || doc.PlanFileTrackedAbsent {
+	if doc.ReviewerMutatesWorktree || doc.ReportOnlyMutatesWorktree || doc.WorkerMutatesPlanFile || doc.PlanFileTrackedAbsent || doc.WorkerMutatesActiveTaskFile || doc.PlanMissingActiveSection || doc.ActiveTaskFileMissing || doc.SeedActiveTaskMetadata || doc.ResumeCarriesActiveTaskBlock {
 		mutationRepoRoot = initMutationRepo(t)
 		mutate := func(root string) error {
 			return os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("mutated\n"), 0o644)
 		}
+		seedActiveTaskMetadata := func() {
+			t.Helper()
+			if err := os.MkdirAll(filepath.Join(mutationRepoRoot, implementationTasksDir), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(mutationRepoRoot, scenarioActiveTaskPath), []byte(scenarioActiveTaskSeed), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(mutationRepoRoot, implementationPlanFile), []byte(scenarioPlanSeed), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if doc.WorkerMutatesPlanFile {
 			// seedは親Codexがcall前に置いたworking tree内容の代役。初期欠損指定だけ省く。
 			if !doc.PlanFileInitiallyAbsent {
-				if err := os.WriteFile(filepath.Join(mutationRepoRoot, implementationPlanFile), []byte(scenarioPlanSeed), 0o644); err != nil {
-					t.Fatal(err)
-				}
+				seedActiveTaskMetadata()
 			}
 			mutate = func(root string) error {
 				return os.WriteFile(filepath.Join(root, implementationPlanFile), []byte(scenarioPlanMutated), 0o644)
 			}
+		}
+		if doc.WorkerMutatesActiveTaskFile {
+			seedActiveTaskMetadata()
+			mutate = func(root string) error {
+				return os.WriteFile(filepath.Join(root, scenarioActiveTaskPath), []byte(scenarioActiveTaskMutated), 0o644)
+			}
+		}
+		if doc.SeedActiveTaskMetadata || doc.ResumeCarriesActiveTaskBlock {
+			// seedだけのscenario。mutatePhaseを設定しないため呼出中の変化は起こらない。
+			seedActiveTaskMetadata()
+			mutate = nil
+		}
+		if doc.PlanMissingActiveSection {
+			// planは存在するがACTIVE欄からtask fileを解決できない状態をseedする。
+			if err := os.WriteFile(filepath.Join(mutationRepoRoot, implementationPlanFile), []byte("parent owned plan\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			mutate = nil
+		}
+		if doc.ActiveTaskFileMissing {
+			// planのACTIVE欄が指すtask fileがworking treeへ無い状態をseedする。
+			if err := os.WriteFile(filepath.Join(mutationRepoRoot, implementationPlanFile), []byte(scenarioPlanSeed), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			mutate = nil
 		}
 		if doc.PlanFileTrackedAbsent {
 			// Git indexへ追加済み(追跡中)なのにworking treeへ無い状態をseedする。
@@ -866,7 +963,7 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 		switch {
 		case doc.ReportOnlyMutatesWorktree:
 			mr.mutatePhase = "worker-report-only-1"
-		case doc.WorkerMutatesPlanFile:
+		case doc.WorkerMutatesPlanFile || doc.WorkerMutatesActiveTaskFile:
 			mr.mutatePhase = "worker-new"
 		}
 		w.runner = mr
@@ -888,14 +985,24 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 		}
 		// resume entryは常にprovider-unavailable停止状態から開始する。
 		{
+			// resume因果scenarioだけ保存済み前回指示を本物のnew task promptへ固定する。
+			// productionではExecuteNewTaskがこの本文をmodel呼出時に保存しており、compaction
+			// や5時間上限後のresumeはこの保存文の再送で要求定義を失わない。
+			savedPrompt := "p"
+			if doc.ResumeCarriesActiveTaskBlock {
+				savedPrompt = newTaskPrompt(doc.Request, scenarioActiveTaskPath)
+				if err := st.Write(activeTaskStateKey, scenarioActiveTaskPath); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if err := st.SaveResumeCheckpoint(state.ResumeCheckpoint{
 				Stage:                             state.ResumeStageWorker,
 				Phase:                             "worker-new",
 				Role:                              state.WorkerRole,
 				Model:                             "opus",
 				Effort:                            "high",
-				Prompt:                            "p",
-				OriginalPrompt:                    "p",
+				Prompt:                            savedPrompt,
+				OriginalPrompt:                    savedPrompt,
 				Request:                           doc.Request,
 				ProviderUnavailable:               true,
 				ProviderUnavailableClassification: "http-503",
@@ -912,7 +1019,7 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 		t.Fatalf("unsupported entry %q for scenario %s", doc.Entry, doc.ID)
 	}
 
-	if doc.ReviewerMutatesWorktree || doc.ReportOnlyMutatesWorktree || doc.WorkerMutatesPlanFile || doc.PlanFileTrackedAbsent {
+	if doc.ReviewerMutatesWorktree || doc.ReportOnlyMutatesWorktree || doc.WorkerMutatesPlanFile || doc.PlanFileTrackedAbsent || doc.WorkerMutatesActiveTaskFile || doc.PlanMissingActiveSection || doc.ActiveTaskFileMissing || doc.SeedActiveTaskMetadata || doc.ResumeCarriesActiveTaskBlock {
 		mr := w.runner.(*mutatingRunner)
 		r.prompts = mr.prompts
 		r.models = mr.models
@@ -920,6 +1027,11 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 			// orchestratorがGLMのplan変更をbaselineへ自動復元していないことを検証する。
 			if content, err := os.ReadFile(filepath.Join(mutationRepoRoot, implementationPlanFile)); err != nil || string(content) != scenarioPlanMutated {
 				t.Fatalf("workerによるplan file変更が自動復元・編集されています: %q %v", content, err)
+			}
+		} else if doc.WorkerMutatesActiveTaskFile {
+			// orchestratorがGLMのACTIVE task file変更をbaselineへ自動復元していないことを検証する。
+			if content, err := os.ReadFile(filepath.Join(mutationRepoRoot, scenarioActiveTaskPath)); err != nil || string(content) != scenarioActiveTaskMutated {
+				t.Fatalf("workerによるACTIVE task file変更が自動復元・編集されています: %q %v", content, err)
 			}
 		} else if doc.PlanFileTrackedAbsent {
 			// orchestratorが追跡中plan欠損を検出してもfileを再生成・復元しないことを検証する。
@@ -929,8 +1041,10 @@ func runScenario(t *testing.T, doc scenarioDoc) {
 			if out := gitIn(t, mutationRepoRoot, "ls-files", "--", implementationPlanFile); out == "" {
 				t.Fatal("seed失敗: plan fileがindexへ追跡されていません")
 			}
-		} else if content, err := os.ReadFile(filepath.Join(mutationRepoRoot, "tracked.txt")); err != nil || string(content) != "mutated\n" {
-			t.Fatalf("mutation hook対象呼出でrepositoryが変更されていません: %q %v", content, err)
+		} else if doc.ReviewerMutatesWorktree || doc.ReportOnlyMutatesWorktree {
+			if content, err := os.ReadFile(filepath.Join(mutationRepoRoot, "tracked.txt")); err != nil || string(content) != "mutated\n" {
+				t.Fatalf("mutation hook対象呼出でrepositoryが変更されていません: %q %v", content, err)
+			}
 		}
 	}
 	// expected_run_count=0はmodel呼出前に停止する終端を明示する期待値であるため、

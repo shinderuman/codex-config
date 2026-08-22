@@ -63,9 +63,10 @@ type ResumeCheckpoint struct {
 	ProviderUnavailableClassification string    `json:"provider_unavailable_classification,omitempty"`
 	ProviderUnavailableProbes         int       `json:"provider_unavailable_probes,omitempty"`
 	ProviderUnavailableStartedAt      time.Time `json:"provider_unavailable_started_at,omitempty"`
-	// StopParentFilesは停止保存時点の親管理2file状態。review resumeのsnapshot例外が保存値と
-	// 現在値の差分だけをwrapper停止期間中の親Codex更新として承認する。旧binaryのcheckpointは
-	// このfieldを持たず、nilのときは停止期間の変化を機械識別できないためfail closedする。
+	// StopParentFilesは停止保存時点の親管理implementation metadata集合状態。review resumeの
+	// snapshot例外が保存値と現在値の差分だけをwrapper停止期間中の親Codex更新として承認する。
+	// 旧binaryのcheckpointは2file形式の本文を持つため読込時に型不一致でfail closedし、旧形式の
+	// 停止期間変化を機械識別できないまま承認しない。
 	StopParentFiles *ParentFileStates `json:"stop_parent_files,omitempty"`
 }
 

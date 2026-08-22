@@ -2111,6 +2111,303 @@
    }
   },
   {
+   "id": "active-task-plan-without-active-fails-closed-before-call",
+   "behavior": "planが存在するのにACTIVE欄からtask fileを解決できない場合、wrapperが要求正本を特定できないままのmodel呼出を止め、model呼出前にfail closedしてSol確認へ昇格する。解決できない理由はtask名の曖昧な呼出で代替しない",
+   "request": "READMEの記載を更新する",
+   "entry": "new_task",
+   "instruction_files": [
+    "AGENTS.md",
+    "codex/glm-worker/prompts/WORKER.md"
+   ],
+   "changed_paths": [],
+   "runner_steps": [
+    {
+     "lines": [
+      "STATUS: IMPLEMENTED",
+      "RISK: LOW",
+      "SUMMARY: updated readme",
+      "REQUIREMENT_COVERAGE: covered",
+      "TESTS: pass",
+      "UNVERIFIED: none",
+      "ARTIFACTS: none"
+     ]
+    }
+   ],
+   "expected_models": [
+    "opus"
+   ],
+   "plan_missing_active_section": true,
+   "expected_packet_status": "NEEDS_SOL_REVIEW",
+   "expected_packet_risk": "HIGH",
+   "expected_task_status": "waiting-sol-review",
+   "must_not_pass": true,
+   "expected_run_count": 0,
+   "expected_output_contains": [
+    "ACTIVE task fileを一意に解決できません"
+   ],
+   "expected_checkpoint": "none",
+   "expected_stats": {
+    "model_calls": 0,
+    "worker_calls": 0,
+    "reviewer_calls": 0,
+    "transient_retries": 0,
+    "resume_commands": 0,
+    "probe_success": 0,
+    "probe_failure": 0,
+    "total_ai_calls": 0
+   },
+   "expected_telemetry": {
+    "task_calls": 0,
+    "probe_calls": 0,
+    "event_calls": 1
+   }
+  },
+  {
+   "id": "active-task-file-missing-fails-closed-before-call",
+   "behavior": "planのACTIVE欄が指すtask fileがworking treeへ存在しない場合、参照欠損をmodel呼出前にfail closed検出しSol確認へ昇格する。workerが要求正本なしで作業を開始しない",
+   "request": "READMEの記載を更新する",
+   "entry": "new_task",
+   "instruction_files": [
+    "AGENTS.md",
+    "codex/glm-worker/prompts/WORKER.md"
+   ],
+   "changed_paths": [],
+   "runner_steps": [
+    {
+     "lines": [
+      "STATUS: IMPLEMENTED",
+      "RISK: LOW",
+      "SUMMARY: updated readme",
+      "REQUIREMENT_COVERAGE: covered",
+      "TESTS: pass",
+      "UNVERIFIED: none",
+      "ARTIFACTS: none"
+     ]
+    }
+   ],
+   "expected_models": [
+    "opus"
+   ],
+   "active_task_file_missing": true,
+   "expected_packet_status": "NEEDS_SOL_REVIEW",
+   "expected_packet_risk": "HIGH",
+   "expected_task_status": "waiting-sol-review",
+   "must_not_pass": true,
+   "expected_run_count": 0,
+   "expected_output_contains": [
+    "ACTIVE task file",
+    "確認できません"
+   ],
+   "expected_checkpoint": "none",
+   "expected_stats": {
+    "model_calls": 0,
+    "worker_calls": 0,
+    "reviewer_calls": 0,
+    "transient_retries": 0,
+    "resume_commands": 0,
+    "probe_success": 0,
+    "probe_failure": 0,
+    "total_ai_calls": 0
+   },
+   "expected_telemetry": {
+    "task_calls": 0,
+    "probe_calls": 0,
+    "event_calls": 1
+   }
+  },
+  {
+   "id": "active-task-file-worker-mutation-fails-closed-before-review",
+   "behavior": "IMPLEMENTATION_TASKS配下のACTIVE task fileが存在するtaskでworkerが呼出中に同fileを編集した場合、wrapperが親管理metadata集合の呼出前後不変確認でreviewer開始前にfail closed検出しSol確認へ昇格する。変更内容はbaselineへ復元しない",
+   "request": "READMEの記載を更新する",
+   "entry": "new_task",
+   "instruction_files": [
+    "AGENTS.md",
+    "codex/glm-worker/prompts/WORKER.md"
+   ],
+   "changed_paths": [],
+   "runner_steps": [
+    {
+     "lines": [
+      "STATUS: IMPLEMENTED",
+      "RISK: LOW",
+      "SUMMARY: updated readme and active task",
+      "REQUIREMENT_COVERAGE: covered",
+      "TESTS: pass",
+      "UNVERIFIED: none",
+      "ARTIFACTS: none"
+     ]
+    }
+   ],
+   "expected_models": [
+    "opus"
+   ],
+   "worker_mutates_active_task_file": true,
+   "expected_packet_status": "NEEDS_SOL_REVIEW",
+   "expected_packet_risk": "HIGH",
+   "expected_task_status": "waiting-sol-review",
+   "must_not_pass": true,
+   "expected_output_contains": [
+    "IMPLEMENTATION_TASKS/001-scenario.md",
+    "内容が変化"
+   ],
+   "expected_checkpoint": "none",
+   "expected_stats": {
+    "model_calls": 1,
+    "worker_calls": 1,
+    "reviewer_calls": 0,
+    "transient_retries": 0,
+    "resume_commands": 0,
+    "probe_success": 0,
+    "probe_failure": 0,
+    "total_ai_calls": 1
+   },
+   "expected_telemetry": {
+    "task_calls": 1,
+    "probe_calls": 0,
+    "event_calls": 1
+   }
+  },
+  {
+   "id": "active-task-contract-reaches-worker-and-reviewer-prompts",
+   "behavior": "planのACTIVE欄から解決したACTIVE task file pathと本文読み込み指示が、worker呼出とreviewer呼出の双方のproduction promptへ毎回載る。task名や実装者要約だけで要求定義を渡さない配線の因果をprompt期待値で固定する",
+   "request": "READMEの記載を更新する",
+   "entry": "new_task",
+   "instruction_files": [
+    "AGENTS.md",
+    "codex/glm-worker/prompts/WORKER.md",
+    "codex/glm-worker/prompts/REVIEWER.md"
+   ],
+   "changed_paths": [],
+   "seed_active_task_metadata": true,
+   "runner_steps": [
+    {
+     "lines": [
+      "STATUS: IMPLEMENTED",
+      "RISK: LOW",
+      "SUMMARY: updated readme",
+      "REQUIREMENT_COVERAGE: covered",
+      "TESTS: pass",
+      "UNVERIFIED: none",
+      "ARTIFACTS: none"
+     ]
+    },
+    {
+     "lines": [
+      "STATUS: PASS",
+      "RISK: LOW",
+      "SUMMARY: pass",
+      "REQUIREMENT_COVERAGE: covered",
+      "INVARIANTS: preserved",
+      "TEST_EVIDENCE: ev",
+      "ISSUES: none",
+      "RESIDUAL_RISK: none",
+      "TARGETS: final diff",
+      "ARTIFACTS: none"
+     ]
+    }
+   ],
+   "expected_models": [
+    "opus",
+    "haiku"
+   ],
+   "expected_prompts": [
+    {
+     "index": 0,
+     "contains": [
+      "ACTIVE_TASK_FILE: IMPLEMENTATION_TASKS/001-scenario.md",
+      "Original instruction",
+      "Acceptance criteria"
+     ]
+    },
+    {
+     "index": 1,
+     "contains": [
+      "ACTIVE_TASK_FILE: IMPLEMENTATION_TASKS/001-scenario.md",
+      "Acceptance criteria"
+     ]
+    }
+   ],
+   "expected_packet_status": "PASS",
+   "expected_packet_risk": "LOW",
+   "expected_task_status": "complete",
+   "expected_stats": {
+    "model_calls": 2,
+    "worker_calls": 1,
+    "reviewer_calls": 1,
+    "transient_retries": 0,
+    "resume_commands": 0,
+    "probe_success": 0,
+    "probe_failure": 0,
+    "total_ai_calls": 2
+   }
+  },
+  {
+   "id": "active-task-block-survives-provider-resume",
+   "behavior": "provider障害resumeで保存済み前回指示を再送してもACTIVE task file pathと本文読み込み指示がworker再送promptから失われず、続くreviewer promptにも同じblockが載る。compactionや5時間上限後の再開で要求定義を会話要約へ置き換えない因果を固定する",
+   "request": "通常の実装タスク",
+   "entry": "resume",
+   "instruction_files": [
+    "AGENTS.md",
+    "codex/glm-worker/prompts/WORKER.md",
+    "codex/glm-worker/prompts/REVIEWER.md"
+   ],
+   "changed_paths": [
+    "README.md"
+   ],
+   "resume_carries_active_task_block": true,
+   "runner_steps": [
+    {
+     "lines": [
+      "STATUS: IMPLEMENTED",
+      "RISK: LOW",
+      "SUMMARY: done",
+      "REQUIREMENT_COVERAGE: covered",
+      "TESTS: pass",
+      "UNVERIFIED: none",
+      "ARTIFACTS: none"
+     ]
+    },
+    {
+     "lines": [
+      "STATUS: PASS",
+      "RISK: LOW",
+      "SUMMARY: pass",
+      "REQUIREMENT_COVERAGE: covered",
+      "INVARIANTS: preserved",
+      "TEST_EVIDENCE: ev",
+      "ISSUES: none",
+      "RESIDUAL_RISK: none",
+      "TARGETS: final diff",
+      "ARTIFACTS: none"
+     ]
+    }
+   ],
+   "expected_models": [
+    "opus",
+    "haiku"
+   ],
+   "expected_prompts": [
+    {
+     "index": 0,
+     "contains": [
+      "ACTIVE_TASK_FILE: IMPLEMENTATION_TASKS/001-scenario.md",
+      "Original instruction",
+      "Acceptance criteria"
+     ]
+    },
+    {
+     "index": 1,
+     "contains": [
+      "ACTIVE_TASK_FILE: IMPLEMENTATION_TASKS/001-scenario.md",
+      "Acceptance criteria"
+     ]
+    }
+   ],
+   "expected_packet_status": "PASS",
+   "expected_packet_risk": "LOW",
+   "expected_task_status": "complete"
+  },
+  {
    "id": "implementation-plan-worker-mutation-fails-closed-before-review",
    "behavior": "IMPLEMENTATION_PLAN.local.mdが存在するtaskでworkerが呼出中に同fileを編集した場合、wrapperが呼出前後のplan file不変確認でreviewer開始前にfail closed検出しSol確認へ昇格する。reviewerは呼ばれず、親Codexがcall前に置いた内容へ復元されない",
    "request": "READMEの記載を更新する",

@@ -143,7 +143,7 @@ func TestGuardTerminalPathsRecordExecutedCallsExactlyOnce(t *testing.T) {
 			entry:             newTask,
 			wantRunnerCalls:   0,
 			wantTaskOutcomes:  nil,
-			wantEventOutcomes: []string{"plan_file_missing"},
+			wantEventOutcomes: []string{"parent_metadata_missing"},
 		},
 		{
 			name: "history tracked missing stops before call without phantom telemetry",
@@ -158,7 +158,7 @@ func TestGuardTerminalPathsRecordExecutedCallsExactlyOnce(t *testing.T) {
 			entry:             newTask,
 			wantRunnerCalls:   0,
 			wantTaskOutcomes:  nil,
-			wantEventOutcomes: []string{"history_file_missing"},
+			wantEventOutcomes: []string{"parent_metadata_missing"},
 		},
 		{
 			name:              "plan mismatch on initial call records executed call once",
@@ -168,8 +168,8 @@ func TestGuardTerminalPathsRecordExecutedCallsExactlyOnce(t *testing.T) {
 			mutatePhase:       "worker-new",
 			mutate:            mutatePlanFile,
 			wantRunnerCalls:   1,
-			wantTaskOutcomes:  []string{"plan_file_violation"},
-			wantEventOutcomes: []string{"plan_file_mismatch"},
+			wantTaskOutcomes:  []string{"parent_metadata_violation"},
+			wantEventOutcomes: []string{"parent_metadata_mismatch"},
 		},
 		{
 			name:              "history mismatch on initial call records executed call once",
@@ -179,8 +179,8 @@ func TestGuardTerminalPathsRecordExecutedCallsExactlyOnce(t *testing.T) {
 			mutatePhase:       "worker-new",
 			mutate:            mutateHistoryFile,
 			wantRunnerCalls:   1,
-			wantTaskOutcomes:  []string{"history_file_violation"},
-			wantEventOutcomes: []string{"history_file_mismatch"},
+			wantTaskOutcomes:  []string{"parent_metadata_violation"},
+			wantEventOutcomes: []string{"parent_metadata_mismatch"},
 		},
 		{
 			name:              "plan after-read failure on initial call records executed call once",
@@ -190,8 +190,8 @@ func TestGuardTerminalPathsRecordExecutedCallsExactlyOnce(t *testing.T) {
 			mutatePhase:       "worker-new",
 			mutate:            removeAndDirGuardFile(implementationPlanFile),
 			wantRunnerCalls:   1,
-			wantTaskOutcomes:  []string{"plan_file_unavailable"},
-			wantEventOutcomes: []string{"plan_file_unavailable"},
+			wantTaskOutcomes:  []string{"parent_metadata_unavailable"},
+			wantEventOutcomes: []string{"parent_metadata_unavailable"},
 		},
 		{
 			name:              "history after-read failure on initial call records executed call once",
@@ -201,8 +201,8 @@ func TestGuardTerminalPathsRecordExecutedCallsExactlyOnce(t *testing.T) {
 			mutatePhase:       "worker-new",
 			mutate:            removeAndDirGuardFile(implementationHistoryFile),
 			wantRunnerCalls:   1,
-			wantTaskOutcomes:  []string{"history_file_unavailable"},
-			wantEventOutcomes: []string{"history_file_unavailable"},
+			wantTaskOutcomes:  []string{"parent_metadata_unavailable"},
+			wantEventOutcomes: []string{"parent_metadata_unavailable"},
 		},
 		{
 			name:             "ordinary success records worker and reviewer once each",
@@ -250,10 +250,10 @@ func TestGuardTerminalPathsRecordExecutedCallsExactlyOnce(t *testing.T) {
 			mutatePhase:       "worker-new",
 			mutate:            removeAndDirGuardFile(implementationPlanFile),
 			wantRunnerCalls:   2,
-			wantTaskOutcomes:  []string{"transient_error", "plan_file_unavailable"},
+			wantTaskOutcomes:  []string{"transient_error", "parent_metadata_unavailable"},
 			wantProbes:        1,
 			wantTransient:     1,
-			wantEventOutcomes: []string{"plan_file_unavailable"},
+			wantEventOutcomes: []string{"parent_metadata_unavailable"},
 		},
 		{
 			// 5h上限でMarkReadyに失敗しても実行済み呼出はstate_errorとして1回だけ残る。

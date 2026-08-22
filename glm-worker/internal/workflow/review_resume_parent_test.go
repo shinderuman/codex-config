@@ -21,6 +21,25 @@ func writeRepoParentPlan(t *testing.T, repoRoot string, content string) {
 	}
 }
 
+const activeTaskRepoPath = state.ParentTasksDir + "/001-active.md"
+
+func writeRepoActiveTask(t *testing.T, repoRoot string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(repoRoot, state.ParentTasksDir), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, activeTaskRepoPath), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func removeRepoActiveTask(t *testing.T, repoRoot string) {
+	t.Helper()
+	if err := os.Remove(filepath.Join(repoRoot, activeTaskRepoPath)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func removeRepoParentPlan(t *testing.T, repoRoot string) {
 	t.Helper()
 	if err := os.Remove(filepath.Join(repoRoot, state.ParentPlanFile)); err != nil {
@@ -37,12 +56,21 @@ func repoParentStates(t *testing.T, repoRoot string) state.ParentFileStates {
 	return states
 }
 
-func parentStateForContent(content string) state.ParentFileState {
+func parentStateForContent(path string, content string) state.ParentFileState {
 	if content == "" {
-		return state.ParentFileState{}
+		return state.ParentFileState{Path: path}
 	}
 	sum := sha256.Sum256([]byte(content))
-	return state.ParentFileState{Exists: true, SHA256: hex.EncodeToString(sum[:])}
+	return state.ParentFileState{Path: path, Exists: true, SHA256: hex.EncodeToString(sum[:])}
+}
+
+// makeStopStatesは承認判定の停止時基準としてplanとACTIVE task fileの状態listを組む。
+// 集合形式ではpathを明示するため、対象file毎に内容から状態を作る。
+func makeStopStates(planContent string, taskContent string) state.ParentFileStates {
+	return state.ParentFileStates{
+		parentStateForContent(state.ParentPlanFile, planContent),
+		parentStateForContent(activeTaskRepoPath, taskContent),
+	}
 }
 
 func reviewResumeSnapshot(worktree string, excluding string, parents *state.ParentFileStates) state.GitSnapshot {
@@ -145,7 +173,7 @@ func TestReviewResumeParentUpdateAcceptedReanchorsBaseline(t *testing.T) {
 		t.Fatalf("review基準が現状へ再固定されていません: %#v", reanchored)
 	}
 	wantParents := repoParentStates(t, repoRoot)
-	if reanchored.ParentFiles == nil || *reanchored.ParentFiles != wantParents {
+	if reanchored.ParentFiles == nil || !state.SameParentFileStates(*reanchored.ParentFiles, wantParents) {
 		t.Fatalf("再固定後の親管理file基準 = %#v want %#v", reanchored.ParentFiles, wantParents)
 	}
 	comparison, err := st.LoadSnapshotComparison()
@@ -175,13 +203,18 @@ func TestReviewResumeParentUpdateAcceptedReanchorsBaseline(t *testing.T) {
 }
 
 // 承認済みdeltaの識別条件を一覧化する。他path変更・head/index移動・呼出中変更・削除は拒否し、
-// 停止期間中の内容更新・新規作成だけを許可する。
+// 停止期間中の内容更新・新規作成だけを許可する。呼出中変更は同じfileが停止期間中にさらに変化していても
+// current値に関係なく拒否する。判定は集合全体へ同一規則で適用されるため、planとIMPLEMENTATION_TASKS
+// 配下ACTIVE task fileの両面で同じ行列を固定する。
 func TestReviewResumeParentDeltaMatrix(t *testing.T) {
 	tests := []struct {
 		name              string
 		planAtReviewStart string
 		planAtStop        string
 		planAtResume      string
+		taskAtReviewStart string
+		taskAtStop        string
+		taskAtResume      string
 		mutateCurrent     func(snap *state.GitSnapshot)
 		wantAccepted      bool
 	}{
@@ -227,10 +260,63 @@ func TestReviewResumeParentDeltaMatrix(t *testing.T) {
 			planAtResume:      "p1\n",
 		},
 		{
+			// reviewer呼出中にp0→p1へ変化し、停止期間中に同じfileがさらにp1→p2へ変化した場合。
+			// 呼出中変更は停止中の再変更で免除されないため、current値に関係なく拒否する。
+			name:              "reviewer change plus stop-period change on same file rejected",
+			planAtReviewStart: "p0\n",
+			planAtStop:        "p1\n",
+			planAtResume:      "p2\n",
+		},
+		{
+			// reviewer呼出中新規作成され、停止期間中に再変更された場合。作成自体が呼出中変更である
+			// ため、停止中の内容更新を承認理由にできない。
+			name:              "creation during reviewer call then stop-period change rejected",
+			planAtReviewStart: "",
+			planAtStop:        "p1\n",
+			planAtResume:      "p2\n",
+		},
+		{
 			name:              "parent deletion during stop rejected",
 			planAtReviewStart: "p0\n",
 			planAtStop:        "p0\n",
 			planAtResume:      "",
+		},
+		{
+			name:              "active task file content update during stop accepted",
+			planAtReviewStart: "p0\n",
+			planAtStop:        "p0\n",
+			planAtResume:      "p0\n",
+			taskAtReviewStart: "t0\n",
+			taskAtStop:        "t0\n",
+			taskAtResume:      "t1\n",
+			wantAccepted:      true,
+		},
+		{
+			name:              "active task file creation during stop accepted",
+			planAtReviewStart: "p0\n",
+			planAtStop:        "p0\n",
+			planAtResume:      "p0\n",
+			taskAtResume:      "t1\n",
+			wantAccepted:      true,
+		},
+		{
+			name:              "active task file deletion during stop rejected",
+			planAtReviewStart: "p0\n",
+			planAtStop:        "p0\n",
+			planAtResume:      "p0\n",
+			taskAtReviewStart: "t0\n",
+			taskAtStop:        "t0\n",
+		},
+		{
+			// ACTIVE task fileがreviewer呼出中にt0→t1へ変化し、停止期間中にさらにt1→t2へ変化した
+			// 場合も同じ規則で拒否する。
+			name:              "active task file reviewer change plus stop-period change rejected",
+			planAtReviewStart: "p0\n",
+			planAtStop:        "p0\n",
+			planAtResume:      "p0\n",
+			taskAtReviewStart: "t0\n",
+			taskAtStop:        "t1\n",
+			taskAtResume:      "t2\n",
 		},
 	}
 	for _, tt := range tests {
@@ -243,14 +329,27 @@ func TestReviewResumeParentDeltaMatrix(t *testing.T) {
 			if tt.planAtReviewStart != "" {
 				writeRepoParentPlan(t, repoRoot, tt.planAtReviewStart)
 			}
+			if tt.taskAtReviewStart != "" {
+				writeRepoActiveTask(t, repoRoot, tt.taskAtReviewStart)
+			}
 			reviewStartParents := repoParentStates(t, repoRoot)
-			stop := state.ParentFileStates{Plan: parentStateForContent(tt.planAtStop)}
+			stop := makeStopStates(tt.planAtStop, tt.taskAtStop)
 			seedReviewResumeStop(t, st, reviewResumeSnapshot("worktree-0", "excluding-1", &reviewStartParents), reviewResumeCheckpoint(&stop))
 
 			if tt.planAtResume == "" {
 				removeRepoParentPlan(t, repoRoot)
 			} else {
 				writeRepoParentPlan(t, repoRoot, tt.planAtResume)
+			}
+			switch {
+			case tt.taskAtResume == "":
+				if tt.taskAtReviewStart != "" {
+					removeRepoActiveTask(t, repoRoot)
+				}
+			case tt.taskAtReviewStart == "":
+				writeRepoActiveTask(t, repoRoot, tt.taskAtResume)
+			default:
+				writeRepoActiveTask(t, repoRoot, tt.taskAtResume)
 			}
 			current := reviewResumeSnapshot("worktree-1", "excluding-1", nil)
 			if tt.mutateCurrent != nil {
@@ -379,8 +478,8 @@ func TestFailedResumeCallRecapturesStopParentStates(t *testing.T) {
 	if err != nil || !restored.RateLimited {
 		t.Fatalf("失敗resume後もrate-limited checkpointが復元されるべき: %v", err)
 	}
-	wantStop := state.ParentFileStates{Plan: parentStateForContent("reviewer-edit\n")}
-	if restored.StopParentFiles == nil || *restored.StopParentFiles != wantStop {
+	wantStop := repoParentStates(t, repoRoot)
+	if restored.StopParentFiles == nil || !state.SameParentFileStates(*restored.StopParentFiles, wantStop) {
 		t.Fatalf("復元checkpointの停止時親stateが呼出後時点へ固定されていません: %#v", restored.StopParentFiles)
 	}
 
@@ -471,8 +570,9 @@ func TestReviewResumeCrashWindowTamperFailsClosed(t *testing.T) {
 	assertReviewResumeStopped(t, st, r3, &out3)
 }
 
-// worker工程resumeは親管理2fileのguardをresume時点で再固定するため、停止期間中の親更新で
-// review-resumeのような全体同一性fail closedにならない。
+// worker工程resumeは親管理metadata集合のguardをresume時点で再固定するため、停止期間中の親更新で
+// review-resumeのような全体同一性fail closedにならない。停止中の親更新後もPlanはACTIVE配置契約を
+// 満たすため、reviewer再開時のACTIVE確定も更新後Planから解決できる。
 func TestWorkerResumeParentUpdateDuringStopProceeds(t *testing.T) {
 	st := newStateStoreT(t)
 	r := &scriptedRunner{steps: []runnerStep{
@@ -481,7 +581,8 @@ func TestWorkerResumeParentUpdateDuringStopProceeds(t *testing.T) {
 	}}
 	w := newWorkflowT(t, st, r)
 	repoRoot := w.config.RepoRoot
-	writeRepoParentPlan(t, repoRoot, "p0\n")
+	writeRepoActiveTask(t, repoRoot, "task-at-stop\n")
+	writeRepoParentPlan(t, repoRoot, "# plan\n\n## ACTIVE\n\n- `"+activeTaskRepoPath+"`\n")
 	if err := st.Write("last-request", "req"); err != nil {
 		t.Fatal(err)
 	}
@@ -502,7 +603,7 @@ func TestWorkerResumeParentUpdateDuringStopProceeds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeRepoParentPlan(t, repoRoot, "parent-updated-during-stop\n")
+	writeRepoParentPlan(t, repoRoot, "# plan v2\n\n## ACTIVE\n\n- `"+activeTaskRepoPath+"`\n")
 
 	if err := w.ExecuteResume(); err != nil {
 		t.Fatal(err)
@@ -535,7 +636,7 @@ func TestRateLimitStopRecordsStopParentFiles(t *testing.T) {
 		t.Fatalf("resume checkpointがrate-limitedで保存されていません: %v", err)
 	}
 	want := repoParentStates(t, w.config.RepoRoot)
-	if cp.StopParentFiles == nil || *cp.StopParentFiles != want {
+	if cp.StopParentFiles == nil || !state.SameParentFileStates(*cp.StopParentFiles, want) {
 		t.Fatalf("停止時親管理file状態がcheckpointへ記録されていません: %#v want %#v", cp.StopParentFiles, want)
 	}
 }

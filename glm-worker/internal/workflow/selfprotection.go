@@ -37,6 +37,7 @@ var classifiedFiles = map[string]pathClass{
 	"tools/merge-json/go.mod":                {true, "dependency-manifest"},
 	"codex/AGENTS.md":                        {true, "managed-agents"},
 	"AGENTS.md":                              {true, "repo-agents"},
+	"IMPLEMENTATION_RULES.md":                {true, "implementation-rules"},
 	"IMPLEMENTATION_PLAN.local.md":           {true, "implementation-plan"},
 	"IMPLEMENTATION_HISTORY.md":              {true, "implementation-history"},
 	"glm-worker/internal/state/stats.go":     {false, "observation"},
@@ -91,6 +92,9 @@ func IsCriticalPath(path string) (bool, string) {
 		return true, "managed-instructions"
 	case strings.HasPrefix(path, "codex/rules/"):
 		return true, "managed-rules"
+	case strings.HasPrefix(path, "IMPLEMENTATION_TASKS/"):
+		// task要件契約file群。worker/reviewerへ渡る要求正本そのもののため自己変更はHIGH。
+		return true, "implementation-tasks"
 	case strings.HasSuffix(path, "_test.go"):
 		return false, "test"
 	case strings.HasPrefix(path, "tests/"), strings.HasPrefix(path, "glm-worker/scripts/"):

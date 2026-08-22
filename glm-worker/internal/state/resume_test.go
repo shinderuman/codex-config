@@ -131,8 +131,10 @@ func TestLoadResumeCheckpointConvertsLegacyV2(t *testing.T) {
 func TestResumeCheckpointStopParentFilesRoundTrip(t *testing.T) {
 	st := &StateStore{dir: t.TempDir()}
 	stop := &ParentFileStates{
-		Plan:    ParentFileState{Exists: true, SHA256: "plan-sha"},
-		History: ParentFileState{Exists: true, SHA256: "history-sha"},
+		{Path: ParentRulesFile, Exists: true, SHA256: "rules-sha"},
+		{Path: ParentPlanFile, Exists: true, SHA256: "plan-sha"},
+		{Path: ParentTasksDir + "/001-active.md", Exists: true, SHA256: "task-sha"},
+		{Path: ParentHistoryFile},
 	}
 	if err := st.SaveResumeCheckpoint(ResumeCheckpoint{
 		Stage:           ResumeStageReview,
@@ -147,7 +149,7 @@ func TestResumeCheckpointStopParentFilesRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.StopParentFiles == nil || *got.StopParentFiles != *stop {
+	if got.StopParentFiles == nil || !SameParentFileStates(*got.StopParentFiles, *stop) {
 		t.Fatalf("stop parent files round-trip = %#v", got.StopParentFiles)
 	}
 }
@@ -164,5 +166,18 @@ func TestResumeCheckpointLegacyWithoutStopParentFiles(t *testing.T) {
 	}
 	if got.StopParentFiles != nil {
 		t.Fatalf("旧binary checkpointのstop_parent_filesはnil: %#v", got.StopParentFiles)
+	}
+}
+
+// 旧binaryの2file形式stop_parent_files(object)は現形式(list)へunmarshalできないため、
+// 停止期間中の親更新を機械識別できないcheckpointをresume前提へ使わせない(fail closed)。
+func TestResumeCheckpointLegacyTwoFileStopParentFilesFailsClosed(t *testing.T) {
+	st := &StateStore{dir: t.TempDir()}
+	legacy := `{"version":3,"stage":"reviewer","phase":"reviewer-1","role":"reviewer","model":"sonnet","prompt":"p","request":"r","rate_limited":true,"stop_parent_files":{"plan":{"sha256":"a"},"history":{"sha256":"b"}}}`
+	if err := os.WriteFile(st.Path(resumeStateFile), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.LoadResumeCheckpoint(); err == nil || !strings.Contains(err.Error(), "resume stateを読めません") {
+		t.Fatalf("旧2file形式stop_parent_filesは読込失敗が必要: %v", err)
 	}
 }

@@ -339,11 +339,22 @@ func writeParentHistoryFile(t *testing.T, dir string, content string) {
 	}
 }
 
+func writeParentTaskFile(t *testing.T, dir string, name string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, ParentTasksDir), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ParentTasksDir, name), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func seedCommittedParentFiles(t *testing.T, dir string) {
 	t.Helper()
 	writeParentPlanFile(t, dir, "plan-v1\n")
 	writeParentHistoryFile(t, dir, "history-v1\n")
-	gitRun(t, dir, "add", ParentPlanFile, ParentHistoryFile)
+	writeParentTaskFile(t, dir, "001-active.md", "task-v1\n")
+	gitRun(t, dir, "add", ParentPlanFile, ParentHistoryFile, ParentTasksDir)
 	gitRun(t, dir, "commit", "--quiet", "-m", "parents")
 }
 
@@ -365,8 +376,9 @@ func seedSubdirSameNameParentFile(t *testing.T, dir string) {
 	gitRun(t, dir, "commit", "--quiet", "-m", "subdir")
 }
 
-// review resumeの承認例外は親2file除外worktree digestが非親fileの変化を全域で捉えることに
-// 依存する。tracked/untracked・削除・subdirectory同名列の各形状で除外digestの感度を固定する。
+// review resumeの承認例外は親管理metadata集合除外worktree digestが非親fileの変化を全域で捉えることに
+// 依存する。tracked/untracked・削除・subdirectory同名列・IMPLEMENTATION_TASKS配下の各形状で
+// 除外digestの感度を固定する。
 func TestCaptureGitSnapshotExcludingParentDigest(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -400,6 +412,27 @@ func TestCaptureGitSnapshotExcludingParentDigest(t *testing.T) {
 			name:          "untracked parent plan content edit",
 			seed:          seedUntrackedParentPlan,
 			mutate:        func(t *testing.T, dir string) { writeParentPlanFile(t, dir, "plan-untracked-2\n") },
+			wantFull:      true,
+			wantExcluding: false,
+		},
+		{
+			name:          "tracked parent task file edit",
+			seed:          seedCommittedParentFiles,
+			mutate:        func(t *testing.T, dir string) { writeParentTaskFile(t, dir, "001-active.md", "task-v2\n") },
+			wantFull:      true,
+			wantExcluding: false,
+		},
+		{
+			name:          "tracked parent task file deletion",
+			seed:          seedCommittedParentFiles,
+			mutate:        func(t *testing.T, dir string) { os.Remove(filepath.Join(dir, ParentTasksDir, "001-active.md")) },
+			wantFull:      true,
+			wantExcluding: false,
+		},
+		{
+			name:          "untracked parent task file creation",
+			seed:          seedUntrackedParentPlan,
+			mutate:        func(t *testing.T, dir string) { writeParentTaskFile(t, dir, "002-next.md", "task-new\n") },
 			wantFull:      true,
 			wantExcluding: false,
 		},
@@ -462,15 +495,17 @@ func TestCaptureGitSnapshotExcludingEqualsFullWithoutParentFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	if snap.WorktreeDigest != snap.WorktreeDigestExcludingParent {
-		t.Fatalf("親管理2fileが存在しないrepoでは両digestは一致する必要があります: %#v", snap)
+		t.Fatalf("親管理metadata集合が存在しないrepoでは両digestは一致する必要があります: %#v", snap)
 	}
 }
 
 func TestSnapshotParentFieldsRoundTrip(t *testing.T) {
 	st := &StateStore{dir: t.TempDir()}
 	parents := &ParentFileStates{
-		Plan:    ParentFileState{Exists: true, SHA256: "plan-sha"},
-		History: ParentFileState{Exists: false},
+		{Path: ParentRulesFile},
+		{Path: ParentPlanFile, Exists: true, SHA256: "plan-sha"},
+		{Path: ParentTasksDir + "/001-active.md", Exists: true, SHA256: "task-sha"},
+		{Path: ParentHistoryFile, Exists: false},
 	}
 	snap := GitSnapshot{
 		Head:                          "h",
@@ -486,7 +521,7 @@ func TestSnapshotParentFieldsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.WorktreeDigestExcludingParent != "x" || loaded.ParentFiles == nil || *loaded.ParentFiles != *parents {
+	if loaded.WorktreeDigestExcludingParent != "x" || loaded.ParentFiles == nil || !SameParentFileStates(*loaded.ParentFiles, *parents) {
 		t.Fatalf("parent補助fieldのround-trip = %#v", loaded)
 	}
 
